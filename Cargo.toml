@@ -1,0 +1,35 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/tvmaster-core",
+    "crates/tvmaster-db",
+    "crates/tvmaster-media",
+    "crates/tvmaster-playout",
+    "crates/tvmaster-render",
+    "crates/tvmaster-server",
+    "crates/tvmaster-cli",
+]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+license = "UNLICENSED"
+publish = false
+
+[workspace.dependencies]
+anyhow = "1"
+axum = "0.7"
+clap = { version = "4", features = ["derive"] }
+http-body-util = "0.1"
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal"] }
+tower = { version = "0.5", features = ["util"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+tvmaster-core = { path = "crates/tvmaster-core" }
+tvmaster-db = { path = "crates/tvmaster-db" }
+tvmaster-media = { path = "crates/tvmaster-media" }
+tvmaster-server = { path = "crates/tvmaster-server" }
