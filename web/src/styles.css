@@ -177,3 +177,34 @@ html.native-glass body { background: transparent; }
 html.native-glass .side { background: rgba(255, 255, 255, 0.05); }
 html.native-glass.mac .side { padding-top: 40px; }
 html.native-glass.mac .main { padding-top: 34px; }
+
+/* weekly grid editor */
+.wg { border: 1px solid var(--edge); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--bg0) 30%, transparent); overflow: hidden; }
+.wg-scroll { max-height: min(72vh, 760px); overflow: auto; position: relative; }
+.wg-head, .wg-body { display: grid; grid-template-columns: 48px repeat(7, minmax(72px, 1fr)); min-width: 590px; }
+.wg-head { position: sticky; top: 0; z-index: 30; background: var(--glass-strong); -webkit-backdrop-filter: blur(var(--blur)); backdrop-filter: blur(var(--blur)); border-bottom: 1px solid var(--edge); }
+.wg-head > div { padding: 8px 6px; text-align: center; font-size: 12px; font-weight: 700; color: var(--dim); letter-spacing: .06em; text-transform: uppercase; }
+.wg-body { position: relative; }
+.wg-times { position: relative; }
+.wg-times > div { position: absolute; right: 6px; transform: translateY(-50%); font-size: 10.5px; color: var(--dim); white-space: nowrap; }
+.wg-cols { grid-column: 2 / span 7; display: grid; grid-template-columns: repeat(7, 1fr); }
+.wg-col { position: relative; border-left: 1px solid var(--edge-soft); touch-action: pan-x pan-y; cursor: crosshair;
+  background-image: repeating-linear-gradient(to bottom, var(--edge-soft) 0, var(--edge-soft) 1px, transparent 1px, transparent 44px); }
+.wg-seg { position: absolute; left: 3px; right: 3px; border-radius: 8px; padding: 3px 7px; overflow: hidden; cursor: grab; touch-action: none; user-select: none;
+  background: hsl(var(--h) 70% 55% / .30); border: 1px solid hsl(var(--h) 70% 60% / .65); color: var(--text); font-size: 12px; line-height: 1.25; outline: none; }
+.wg-seg:hover { background: hsl(var(--h) 70% 55% / .42); }
+.wg-seg:active { cursor: grabbing; }
+.wg-seg.sel { border-color: hsl(var(--h) 80% 70%); box-shadow: 0 0 0 2px hsl(var(--h) 80% 65% / .35); }
+.wg-seg.main { box-shadow: 0 0 0 2px hsl(var(--h) 85% 68% / .8); }
+.wg-seg:focus-visible { box-shadow: 0 0 0 3px var(--accent); }
+.wg-seg.cont-to { border-bottom-left-radius: 0; border-bottom-right-radius: 0; border-bottom-style: dashed; }
+.wg-seg.cont-from { border-top-left-radius: 0; border-top-right-radius: 0; border-top-style: dashed; }
+.wg-seg.ghost { background: color-mix(in srgb, var(--accent) 28%, transparent); border: 1px dashed var(--accent); pointer-events: none; z-index: 20; }
+.wg-t { font-weight: 700; } .wg-s { color: var(--dim); font-size: 11px; }
+.wg-h { position: absolute; left: 0; right: 0; height: 8px; cursor: ns-resize; touch-action: none; z-index: 2; }
+.wg-h.top { top: 0; } .wg-h.bottom { bottom: 0; }
+.wg-h::after { content: ""; position: absolute; left: 50%; width: 22px; height: 3px; margin-left: -11px; border-radius: 2px; background: currentColor; opacity: 0; transition: opacity .12s; }
+.wg-h.top::after { top: 2px; } .wg-h.bottom::after { bottom: 2px; }
+.wg-seg:hover .wg-h::after, .wg-seg.sel .wg-h::after { opacity: .55; }
+.wg-shadow { position: absolute; left: 0; right: 0; pointer-events: none; z-index: 1;
+  background: repeating-linear-gradient(135deg, rgba(0,0,0,.45) 0 5px, transparent 5px 10px); border-top: 1px dashed var(--warn); border-bottom: 1px dashed var(--warn); }

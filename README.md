@@ -11,7 +11,7 @@ Self-hosted retro TV station and IPTV engine. Add your TV collections, and TVMas
 - Autopilot: schedules are kept 72 hours ahead forever, episodes continue in order and wrap (or switch to chaos), cursors never skip or repeat across edits, downtime is handled (resume or advance), and bad files are covered and replaced automatically.
 - Commercials and bumpers: shows are split at natural breaks (chapters or detected black frames), and each break is filled exactly with retro commercials plus "we'll be right back", "back to", "up next", "later today" and station-ID bumpers drawn by TVMaster itself. Filter commercials by year. See [docs/ADS.md](docs/ADS.md).
 - Normalized HLS output (1280x720, H.264/AAC) from mismatched sources, gapless across items, about 0.7 s tune-in.
-- A modern admin UI at `/admin/` (compiled into the binary, works headless from any browser): add libraries with a folder picker, build channels and lineups visually, set up ads and bumpers, design the guide channel, view schedules, manage TVs. Installable as a phone remote app. Glass styling that follows the platform.
+- A modern admin UI at `/admin/` (compiled into the binary, works headless from any browser): add libraries with a folder picker, build channels and lineups visually (lay out the week by dragging blocks on a Monday-to-Sunday grid), set up ads and bumpers, design the guide channel, view schedules, manage TVs. Installable as a phone remote app. Glass styling that follows the platform.
 - Optional access token for the whole server.
 - Channel 3, the guide channel: a live Prevue-style scrolling grid of every channel with a clock, a "now on" ticker and background music. Always accurate because it reads the same schedule as everything else.
 - Many TVs can watch different channels at once; one encode per channel is shared by all viewers. Register each TV, and control it from a phone: the remote updates live over a WebSocket (channel, volume, mute, power, and whether the TV's player is connected).
@@ -21,7 +21,7 @@ Self-hosted retro TV station and IPTV engine. Add your TV collections, and TVMas
 - Watchdog restarts a crashed channel; config and TV state persist in SQLite. Unplugged drives, deleted or corrupt files and killed FFmpeg processes are survived without taking a channel off the air (see [docs/RELEASE.md](docs/RELEASE.md)).
 - Service templates for launchd, systemd and Windows Task Scheduler.
 
-Not yet: signed and notarized installers, a drag-and-drop weekly grid editor, HTTPS (see the roadmap).
+Not yet: signed and notarized installers, HTTPS (see the roadmap).
 
 ## Quick start
 

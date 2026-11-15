@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { blockMinutes, DAY_NAMES, daysLabel, defaultBlock, formatDuration, sourceLabel, timeZones, toggleDay } from '../lib';
 import type { Block, EventDef, Lineup, Season, ShowSummary, Source } from '../types';
 import { Btn, Card, Chips, Field, Segmented, Toggle } from '../ui';
+import { WeekGrid } from './WeekGrid';
 
 // ---------- show picker ----------
 
@@ -153,6 +154,42 @@ function BlockList({ blocks, onChange, shows }: { blocks: Block[]; onChange: (b:
   );
 }
 
+const VIEW_KEY = 'tvmaster.blocks.view';
+
+/** Blocks as a weekly grid (drag to edit) or a plain list. The choice is remembered. */
+function BlocksPanel({ blocks, onChange, shows, step }: { blocks: Block[]; onChange: (b: Block[]) => void; shows: ShowSummary[]; step: number }) {
+  const [view, setView] = useState<'grid' | 'list'>(() => {
+    try {
+      return localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'grid';
+    } catch {
+      return 'grid';
+    }
+  });
+  const pick = (v: 'grid' | 'list') => {
+    setView(v);
+    try {
+      localStorage.setItem(VIEW_KEY, v);
+    } catch {
+      /* remembering the choice is optional */
+    }
+  };
+  return (
+    <div className="stack">
+      <div><Segmented value={view} options={[{ value: 'grid', label: 'Weekly grid' }, { value: 'list', label: 'List' }]} onChange={pick} /></div>
+      {view === 'grid' ? (
+        <WeekGrid
+          blocks={blocks}
+          onChange={onChange}
+          step={step}
+          renderEditor={(b, _i, set, remove) => <BlockEditor block={b} shows={shows} onChange={set} onRemove={remove} />}
+        />
+      ) : (
+        <BlockList blocks={blocks} shows={shows} onChange={onChange} />
+      )}
+    </div>
+  );
+}
+
 // ---------- the editor ----------
 
 export function LineupEditor({ lineup, onChange, shows }: { lineup: Lineup; onChange: (l: Lineup) => void; shows: ShowSummary[] }) {
@@ -192,9 +229,9 @@ export function LineupEditor({ lineup, onChange, shows }: { lineup: Lineup; onCh
       <Card className="flat stack">
         <div>
           <h2>Weekly blocks</h2>
-          <p className="small dim">Dayparts and time slots: "Weeknights 8pm: a rotation of sitcoms", "Saturday morning cartoons".</p>
+          <p className="small dim">Dayparts and time slots: "Weeknights 8pm: a rotation of sitcoms", "Saturday morning cartoons". Drag on the grid to lay out your week.</p>
         </div>
-        <BlockList blocks={lineup.blocks} shows={shows} onChange={(blocks) => patch({ blocks })} />
+        <BlocksPanel blocks={lineup.blocks} shows={shows} step={lineup.grid_minutes ?? 30} onChange={(blocks) => patch({ blocks })} />
       </Card>
 
       <Card className="flat stack">
@@ -203,7 +240,7 @@ export function LineupEditor({ lineup, onChange, shows }: { lineup: Lineup; onCh
           <p className="small dim">Date ranges whose blocks replace the weekly ones: a fall lineup, summer reruns, a midseason premiere.</p>
         </div>
         {lineup.seasons.map((s, i) => (
-          <SeasonEditor key={i} season={s} shows={shows} onChange={(ns) => patch({ seasons: lineup.seasons.map((x, j) => (j === i ? ns : x)) })} onRemove={() => patch({ seasons: lineup.seasons.filter((_, j) => j !== i) })} />
+          <SeasonEditor key={i} season={s} shows={shows} step={lineup.grid_minutes ?? 30} onChange={(ns) => patch({ seasons: lineup.seasons.map((x, j) => (j === i ? ns : x)) })} onRemove={() => patch({ seasons: lineup.seasons.filter((_, j) => j !== i) })} />
         ))}
         <div><Btn icon="plus" onClick={() => patch({ seasons: [...lineup.seasons, { name: 'Fall lineup', from: '09-01', to: '05-31', blocks: [] }] })}>Add season</Btn></div>
       </Card>
@@ -244,7 +281,7 @@ function nextHour(plus = 1): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:00`;
 }
 
-function SeasonEditor({ season, onChange, onRemove, shows }: { season: Season; onChange: (s: Season) => void; onRemove: () => void; shows: ShowSummary[] }) {
+function SeasonEditor({ season, onChange, onRemove, shows, step }: { season: Season; onChange: (s: Season) => void; onRemove: () => void; shows: ShowSummary[]; step: number }) {
   return (
     <div className="block-card stack">
       <div className="row wrap">
@@ -254,7 +291,7 @@ function SeasonEditor({ season, onChange, onRemove, shows }: { season: Season; o
         <Btn kind="ghost" icon="trash" onClick={onRemove} aria-label="Remove season" />
       </div>
       <p className="small dim">Repeats every year. A range that ends before it starts wraps the new year (09-01 to 05-31).</p>
-      <div className="nest"><BlockList blocks={season.blocks} shows={shows} onChange={(blocks) => onChange({ ...season, blocks })} /></div>
+      <div className="nest"><BlocksPanel blocks={season.blocks} shows={shows} step={step} onChange={(blocks) => onChange({ ...season, blocks })} /></div>
     </div>
   );
 }

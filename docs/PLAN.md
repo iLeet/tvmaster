@@ -120,7 +120,7 @@ docs/                 plan, API, design
 
 ## 12. Milestones
 
-Status: **M1-M8 done** (see notes below). Still to come: signing and notarization, native Windows and Linux shells, a drag-and-drop grid editor, HTTPS.
+Status: **M1-M9 done** (see notes below). Still to come: signing and notarization, native Windows and Linux shells, HTTPS.
 
 1. **Foundation:** repo, workspace, CI matrix, FFmpeg manager, library scanner, SQLite schema, API skeleton.
 2. **One channel on air:** playout runner, HLS/M3U/XMLTV, shuffle + sequential, web player, watchdog, service installers, state recovery.
@@ -186,7 +186,7 @@ Golden-file schedule tests (same seed → same schedule), fake-FFmpeg harness fo
 - **Desktop shell:** `apps/desktop` is a Tauri 2 app (outside the main workspace) with a connect screen, an optional bundled daemon, and native glass (vibrancy on macOS, Mica on Windows 11) behind a transparent web UI. It compiles and starts on macOS; Windows and Linux builds, installers and signing are not done.
 - **Authentication:** optional token (`--token`, `tvmaster token`); header, `?token=` for IPTV apps (playlists and HLS segments carry it), or an HTTP-only cookie for browsers. Constant-time comparison, short delay on a wrong login. This is not a user-account system and offers no TLS: put it behind HTTPS before exposing it beyond your LAN.
 - **Bugs the testing found:** deleting a library failed when a schedule still referenced its files (now cleared first, and channels rebuild); a database lock held across an `if let` body deadlocked a handler (found by a hanging test); oversized SVG icons outside buttons.
-- **Known limits:** the folder picker lists any folder the server user can read, so use a token on shared networks; the schedule view is a list and timeline, not a drag-and-drop grid (a drag-and-drop weekly grid editor is still to come); no mobile-specific editing polish beyond the responsive layout; the UI has unit tests for its pure helpers but no browser automation suite.
+- **Known limits:** the folder picker lists any folder the server user can read, so use a token on shared networks; the schedule view is a list and timeline (the lineup itself is edited on the M9 weekly grid); no mobile-specific editing polish beyond the responsive layout; the UI has unit tests for its pure helpers but no browser automation suite.
 
 ## 20. M7 notes (native macOS app)
 
@@ -205,3 +205,11 @@ Golden-file schedule tests (same seed → same schedule), fake-FFmpeg harness fo
 - **Encoders:** QSV, VAAPI and AMF added next to VideoToolbox and NVENC. `tvmaster doctor` and a start-up probe really encode a clip with each, and a failing hardware encoder falls back to software. Only software and VideoToolbox have been run on real hardware.
 - **Release:** `scripts/package.sh`, `install.sh`, `install.ps1`, `Dockerfile`, `docker-compose.yml`, `.github/workflows/release.yml`. `serve --token-file` keeps the token out of command lines and service definitions. See [RELEASE.md](RELEASE.md).
 - **Known limits:** no real week-long run or memory-growth measurement; the release workflow, Windows installer and Docker image have never been run; no signing or notarization; the GitHub Actions account lock meant CI never ran, so Windows, Linux and Intel results are unknown.
+
+## 22. M9 notes (weekly grid editor)
+
+- **Where:** `web/src/pages/WeekGrid.tsx` (the component), `web/src/weekgrid.ts` (pure geometry, 23 unit tests in `weekgrid.test.ts`). It replaces nothing: the block list stays as a "List" view, and the choice is remembered in the browser. It edits `lineup.blocks` and each season's blocks, so the daemon and the API are unchanged.
+- **How it maps to the model:** a block with several days is drawn once per day; an overnight block (end before start) continues into the next day's column, and its days still mean the day it starts. Dragging a block moves its time for every day; dragging it sideways moves just that occurrence to another day; "Only Tue" splits one day off into its own block. Drag on empty space to add a block (a plain click adds an hour), drag the top or bottom edge to resize, Undo (50 steps), and keyboard: arrows move, Shift+up/down resizes, Delete removes. Everything snaps to the channel's time grid (30 minutes when automatic).
+- **Overlaps:** the scheduler takes the first matching block in list order, so where two blocks overlap the earlier one wins. The grid hatches the part of the later block that can never air and says why.
+- **Verified:** unit tests for the geometry, and in a real browser against a real daemon: drag-create, drag-move across days and hours, drag-resize (including the tail of an overnight block), click-create, "Only day", undo, delete (Duplicate and the List/Grid toggle are covered by unit tests or by reading the code only), overlap hatching, save and reload round trip, and the phone layout (the grid scrolls sideways inside its card). Pointer drags in the browser were driven with synthetic pointer events computed from the DOM, because the pane's own drag tool was imprecise when the window was resized mid-test.
+- **Known limits:** touch drags on a phone were not tried on a real touch screen (empty-space taps create a block, blocks are `touch-action: none`, columns pan); no time-zone-aware "now" marker; two overlapping blocks are stacked rather than shown side by side; no multi-select or copy-paste of blocks; the native macOS app still opens the web admin for lineups.

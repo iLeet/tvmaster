@@ -55,7 +55,9 @@ A lineup has these parts. Everything is optional.
   "source": { "type": "pool", "shows": ["Looney Tunes", "Tom and Jerry"], "order": "shuffle" } }
 ```
 
-`days` is 0 = Monday to 6 = Sunday (empty = every day). `end` may be `"24:00"`. An end before the start runs overnight (the days refer to the day it starts).
+In the admin UI you normally never write this by hand: the channel's Programming tab has a weekly grid where you drag blocks around (see below). `days` is 0 = Monday to 6 = Sunday (empty = every day). `end` may be `"24:00"`. An end before the start runs overnight (the days refer to the day it starts).
+
+If two blocks overlap, the one earlier in the `blocks` list wins for the overlapping time (the grid editor hatches the part that can never air).
 
 A block decides what *starts* inside it. A show that starts near the end of a block finishes even if it runs past the end; the next block's first show starts on the next grid time.
 
