@@ -1,4 +1,5 @@
 mod service;
+mod tools;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -41,7 +42,7 @@ enum Command {
         #[arg(long, env = "TVMASTER_ENCODER")]
         encoder: Option<String>,
         /// Stop an on-demand channel after this many seconds without viewers.
-        #[arg(long, default_value_t = 60)]
+        #[arg(long, default_value_t = 60, env = "TVMASTER_IDLE_SECONDS")]
         idle_seconds: u64,
         /// Require this token on every request (8-128 letters, digits, - _ . ~).
         /// Without one the server is open to the whole network.
@@ -169,6 +170,10 @@ async fn serve(
     std::fs::create_dir_all(&data_dir)
         .with_context(|| format!("creating {}", data_dir.display()))?;
     let conn = tvmaster_db::open(data_dir.join("tvmaster.db"))?;
+    let (ffmpeg, ffprobe) = (
+        tools::resolve(ffmpeg, "ffmpeg"),
+        tools::resolve(ffprobe, "ffprobe"),
+    );
 
     let requested = match &encoder {
         Some(name) => Some(Encoder::parse(name).with_context(|| {
@@ -237,7 +242,11 @@ async fn serve(
 
 /// `tvmaster doctor`: what FFmpeg can do here, tested for real.
 fn doctor(ffmpeg: &std::path::Path, ffprobe: &std::path::Path) -> Result<()> {
-    let info = FfmpegInfo::detect(ffmpeg, ffprobe)
+    let (ffmpeg, ffprobe) = (
+        tools::resolve(ffmpeg.to_path_buf(), "ffmpeg"),
+        tools::resolve(ffprobe.to_path_buf(), "ffprobe"),
+    );
+    let info = FfmpegInfo::detect(&ffmpeg, &ffprobe)
         .with_context(|| format!("FFmpeg not usable ({})", ffmpeg.display()))?;
     println!("FFmpeg {} ({})", info.version, info.ffmpeg.display());
     let yes = |b: bool| if b { "yes" } else { "no" };

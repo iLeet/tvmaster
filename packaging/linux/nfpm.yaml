@@ -1,0 +1,53 @@
+# Builds the deb, rpm and Arch packages from one description:
+#   VERSION=0.0.1 ARCH=amd64 nfpm package --packager deb -f nfpm.yaml
+# (packaging/linux/build.sh runs it in a container.)
+name: tvmaster
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+section: video
+priority: optional
+maintainer: iLeet <noreply@users.noreply.github.com>
+description: |
+  Self-hosted retro TV station and IPTV server.
+  Turns folders of shows into scheduled channels with retro commercials and
+  bumpers, a guide channel, and a phone remote. Runs as a service.
+homepage: https://github.com/iLeet/tvmaster
+license: Proprietary
+contents:
+  - src: ./tvmaster
+    dst: /usr/bin/tvmaster
+    file_info: { mode: 0755 }
+  - src: ./packaging/linux/tvmaster.service
+    dst: /usr/lib/systemd/system/tvmaster.service
+    file_info: { mode: 0644 }
+  - src: ./packaging/linux/tvmaster.env
+    dst: /etc/tvmaster/tvmaster.env
+    type: config|noreplace
+    file_info: { mode: 0644 }
+  - src: ./README.md
+    dst: /usr/share/doc/tvmaster/README.md
+  - src: ./docs/
+    dst: /usr/share/doc/tvmaster/docs/
+    type: tree
+scripts:
+  postinstall: ./packaging/linux/postinstall.sh
+  preremove: ./packaging/linux/preremove.sh
+  postremove: ./packaging/linux/postremove.sh
+overrides:
+  deb:
+    depends:
+      - ffmpeg
+      - adduser
+    recommends:
+      - fonts-dejavu-core
+  rpm:
+    depends:
+      - shadow-utils
+    # Fedora's own ffmpeg-free has no libx264; RPM Fusion's ffmpeg does. Either
+    # gives streaming (VideoToolbox-style hardware encoders aside), so ask for any.
+    recommends:
+      - ffmpeg
+  archlinux:
+    depends:
+      - ffmpeg

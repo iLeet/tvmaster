@@ -1,0 +1,30 @@
+[Unit]
+Description=TVMaster retro TV station and IPTV server
+Documentation=https://github.com/iLeet/tvmaster
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tvmaster
+Group=tvmaster
+# Defaults; override in /etc/tvmaster/tvmaster.env (see the comments there).
+Environment=TVMASTER_BIND=0.0.0.0:8787
+EnvironmentFile=-/etc/tvmaster/tvmaster.env
+ExecStart=/usr/bin/tvmaster serve --bind ${TVMASTER_BIND} --data-dir /var/lib/tvmaster --token-file /etc/tvmaster/token
+Restart=always
+RestartSec=3
+# The database and the HLS segments live here.
+StateDirectory=tvmaster
+# Hardening. Media folders are read, never written; nothing else is touched.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

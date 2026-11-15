@@ -1,44 +1,38 @@
-# Installs the TVMaster daemon on Windows, from an unpacked release.
-#   .\install.ps1                       install to %LOCALAPPDATA%\TVMaster
-#   .\install.ps1 -Service              also start it at boot (needs an elevated PowerShell)
-#   .\install.ps1 -Service -Bind 0.0.0.0:8787 -DataDir D:\TVMaster
+# Installs the TVMaster daemon on Windows from the unpacked zip (the setup .exe does
+# the same with a wizard). Run from an elevated PowerShell:
+#   .\install.ps1                 install to Program Files, start at boot, open the firewall, get FFmpeg
+#   .\install.ps1 -NoFfmpeg -NoFirewall -Bind 127.0.0.1:8787 -DataDir D:\TVMaster
 param(
-  [string]$Prefix = "$env:LOCALAPPDATA\TVMaster",
-  [string]$DataDir = "$env:ProgramData\TVMaster",
-  [string]$Bind = "0.0.0.0:8787",
-  [switch]$Service,
-  [switch]$DryRun
+  [string]$Prefix = (Join-Path $env:ProgramFiles 'TVMaster'),
+  [string]$DataDir = (Join-Path $env:ProgramData 'TVMaster'),
+  [string]$Bind = '0.0.0.0:8787',
+  [switch]$NoService,
+  [switch]$NoFirewall,
+  [switch]$NoFfmpeg
 )
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = 'Stop'
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
-$src = Join-Path $here "tvmaster.exe"
-if (-not (Test-Path $src)) { throw "tvmaster.exe not found next to this script ($here)" }
-
-function Run($what, [scriptblock]$do) { if ($DryRun) { Write-Host "+ $what" } else { & $do } }
-
-if (-not ((Get-Command ffmpeg -ErrorAction SilentlyContinue) -and (Get-Command ffprobe -ErrorAction SilentlyContinue))) {
-  Write-Warning "ffmpeg and ffprobe were not found on your PATH. TVMaster needs them to stream. Install with: winget install Gyan.FFmpeg"
+if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole('Administrator')) {
+  throw 'Run this from an elevated PowerShell (Run as administrator).'
+}
+foreach ($f in 'tvmaster.exe', 'tvmaster-setup.ps1') {
+  if (-not (Test-Path (Join-Path $here $f))) { throw "$f not found next to this script ($here)" }
 }
 
-$bin = Join-Path $Prefix "tvmaster.exe"
-Run "create $Prefix and $DataDir" { New-Item -ItemType Directory -Force $Prefix, $DataDir | Out-Null }
-Run "copy tvmaster.exe to $bin" { Copy-Item $src $bin -Force }
-Write-Host "Installed $bin"
+# Stop an older copy so its files can be replaced.
+Stop-ScheduledTask -TaskName TVMaster -ErrorAction SilentlyContinue
+Get-Process -Name tvmaster -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 
-if ($Service) {
-  $tokenFile = Join-Path $DataDir "token"
-  if (-not (Test-Path $tokenFile)) {
-    Run "write a new token to $tokenFile (readable by Administrators and SYSTEM only)" {
-      & $bin token | Set-Content -Path $tokenFile -Encoding ascii
-      icacls $tokenFile /inheritance:r /grant:r "Administrators:F" "SYSTEM:F" | Out-Null
-    }
-  }
-  # The daemon prints the schtasks command that registers the startup task.
-  $cmd = & $bin service windows --bin $bin --data-dir $DataDir --bind $Bind --token-file $tokenFile
-  Run "register the startup task" { cmd /c ($cmd -join " ") }
-  Run "start the task now" { schtasks /Run /TN "TVMaster" | Out-Null }
-  Write-Host "Started. Open http://localhost:$($Bind.Split(':')[-1])/admin/"
-  Write-Host "The access token is in $tokenFile"
+New-Item -ItemType Directory -Force $Prefix, $DataDir | Out-Null
+Copy-Item (Join-Path $here 'tvmaster.exe'), (Join-Path $here 'tvmaster-setup.ps1') $Prefix -Force
+Write-Host "Installed to $Prefix"
+
+$setup = Join-Path $Prefix 'tvmaster-setup.ps1'
+if (-not $NoFfmpeg)   { & $setup -Action Ffmpeg   -InstallDir $Prefix -DataDir $DataDir -Bind $Bind }
+if (-not $NoFirewall) { & $setup -Action Firewall -InstallDir $Prefix -DataDir $DataDir -Bind $Bind }
+if (-not $NoService)  {
+  & $setup -Action Service -InstallDir $Prefix -DataDir $DataDir -Bind $Bind
+  Write-Host "Open http://localhost:$($Bind.Split(':')[-1])/admin/  (the access token is in $DataDir\token)"
 } else {
-  Write-Host "Run it with:  & '$bin' serve --data-dir '$DataDir'"
+  Write-Host "Run it with:  & '$Prefix\tvmaster.exe' serve --data-dir '$DataDir'"
 }

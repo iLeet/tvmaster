@@ -71,6 +71,19 @@ cat > "$OUT/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# Ad-hoc signature so the app launches on this Mac. Sign with a Developer ID for distribution.
-codesign --force --deep --sign - "$OUT" >/dev/null 2>&1 && echo "Signed ad hoc" || echo "(codesign skipped)"
+# Signing. The default is an ad-hoc signature, enough to launch on this Mac.
+#   SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)"   a real, notarizable signature
+#   SIGN_IDENTITY="TVMaster Self-Signed" (see Scripts/make-selfsigned-cert.sh)   stable identity, your own Macs only
+#   KEYCHAIN=/path/to.keychain-db   look for the identity there instead of your login keychain
+IDENTITY="${SIGN_IDENTITY:--}"
+KC=()
+[[ -n "${KEYCHAIN:-}" ]] && KC=(--keychain "$KEYCHAIN")
+SIGN=(codesign --force --sign "$IDENTITY" "${KC[@]}")
+# Hardened runtime and a secure timestamp are what notarization requires; they
+# need a real identity (an ad-hoc signature cannot be timestamped).
+[[ "$IDENTITY" != "-" ]] && SIGN+=(--options runtime --timestamp)
+# Sign inside-out: the bundled daemon first, then the app that contains it.
+[[ -f "$OUT/Contents/Resources/tvmaster" ]] && "${SIGN[@]}" "$OUT/Contents/Resources/tvmaster"
+"${SIGN[@]}" "$OUT"
+codesign --verify --strict "$OUT" && echo "Signed with: ${IDENTITY/#-/ad hoc}"
 echo "Built $OUT"

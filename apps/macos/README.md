@@ -13,6 +13,7 @@ cargo build --release          # from the repo root, builds target/release/tvmas
 cd apps/macos
 swift test                     # TVMasterKit tests
 Scripts/build-app.sh           # builds build/TVMaster.app with the daemon inside
+Scripts/build-dmg.sh           # wraps it in build/TVMaster-<version>.dmg (drag to Applications)
 open build/TVMaster.app
 ```
 
@@ -25,6 +26,12 @@ For development, `swift run TVMaster` works too. Set `TVMASTER_BIN` to use a spe
 - **Starts the daemon for you** when the server address is local and nothing is listening, restarts it if it exits, and stops it on quit.
 - **Menu bar remote** and an option to make this Mac a TV the phone remote can control.
 - Server address and token are in Settings; the token lives in the Keychain.
+
+## Signing
+
+`build-app.sh` signs ad hoc by default, which is enough to run on the Mac that built it. `SIGN_IDENTITY=...` uses a real identity; `Scripts/make-selfsigned-cert.sh` makes a local one (stable permissions on your own Macs; other Macs still show the Gatekeeper warning). `NOTARIZE=1 NOTARY_PROFILE=... Scripts/build-dmg.sh` notarizes with a paid Developer ID. See [docs/RELEASE.md](../../docs/RELEASE.md#signing-what-is-and-is-not-possible).
+
+If FFmpeg is missing the Home screen offers an **Install FFmpeg** button (Homebrew).
 
 ## Layout
 

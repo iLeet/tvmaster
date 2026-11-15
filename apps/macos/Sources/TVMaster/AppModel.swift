@@ -56,6 +56,7 @@ final class AppModel {
     var daemonState: DaemonSupervisor.State = .stopped
     var watchingID: String?
     var showNewChannel = false
+    var installingFFmpeg = false
 
     private(set) var client: TVMasterClient?
     private var events: EventStream?
@@ -151,6 +152,27 @@ final class AppModel {
     }
 
     func shutdown() async { await daemon.stop() }
+
+    /// Install FFmpeg with Homebrew, then restart the local server so it finds it.
+    func installFFmpeg() async {
+        guard let brew = FFmpegSetup.brew(), !installingFFmpeg else { return }
+        installingFFmpeg = true
+        defer { installingFFmpeg = false }
+        do {
+            try await FFmpegSetup.install(brew: brew)
+        } catch {
+            lastError = error.localizedDescription
+            return
+        }
+        // A server this app started has to restart to see the new binary; one
+        // running elsewhere is not ours to restart.
+        if client?.isLocal == true {
+            eventTask?.cancel()
+            await daemon.stop()
+            try? await Task.sleep(nanoseconds: 800_000_000)
+            await connect()
+        }
+    }
 
     // MARK: data
 

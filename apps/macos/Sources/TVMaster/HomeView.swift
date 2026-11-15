@@ -10,8 +10,7 @@ struct HomeView: View {
                 PageHeader(title: "Home", subtitle: "What is on across the house right now")
 
                 if let system = model.system, system.ffmpeg == nil {
-                    Label("FFmpeg wasn't found, so channels can't stream. Install it (Homebrew: brew install ffmpeg) and restart the server.", systemImage: "exclamationmark.triangle.fill")
-                        .padding().glassCard(tint: .orange)
+                    FFmpegBanner()
                 }
 
                 GlassGroup {
@@ -126,5 +125,43 @@ struct ChannelCard: View {
         if channel.isGuide { return "Live listing of every channel" }
         guard let now = channel.now else { return "Nothing scheduled" }
         return now.subtitle.map { "\(now.headline) — \($0)" } ?? now.headline
+    }
+}
+
+/// Shown while the server has no FFmpeg: offers to install it.
+struct FFmpegBanner: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("FFmpeg isn't installed, so channels can't stream yet.", systemImage: "exclamationmark.triangle.fill")
+                .font(.headline)
+            if FFmpegSetup.brew() != nil {
+                Text("TVMaster can install it for you with Homebrew. It takes a minute or two.")
+                    .foregroundStyle(.secondary)
+                HStack {
+                    Button {
+                        Task { await model.installFFmpeg() }
+                    } label: {
+                        if model.installingFFmpeg {
+                            HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Installing FFmpeg…") }
+                        } else {
+                            Text("Install FFmpeg")
+                        }
+                    }
+                    .glassButton(prominent: true)
+                    .disabled(model.installingFFmpeg)
+                }
+            } else {
+                Text("Install Homebrew (brew.sh) and run `brew install ffmpeg`, or download FFmpeg yourself, then restart the server.")
+                    .foregroundStyle(.secondary)
+                HStack {
+                    Button("Get Homebrew") { openURL(URL(string: "https://brew.sh")!) }.glassButton(prominent: true)
+                    Button("Other ways to get FFmpeg") { openURL(FFmpegSetup.downloadPage) }.glassButton()
+                }
+            }
+        }
+        .padding().frame(maxWidth: .infinity, alignment: .leading).glassCard(tint: .orange)
     }
 }

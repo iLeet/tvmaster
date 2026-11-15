@@ -5,3 +5,7 @@ target/
 node_modules/
 dist/
 .env
+
+# self-signed Windows signing certificate (private key)
+packaging/windows/selfsigned/
+*.pfx

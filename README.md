@@ -2,7 +2,7 @@
 
 Self-hosted retro TV station and IPTV engine. Add your TV collections, and TVMaster runs real-feeling channels: complete chaos or scheduled time slots, retro commercials placed at natural breaks, "Up Next / Later Today" bumpers, a guide channel, and a phone/web remote. Runs headless or with a GUI on Windows, macOS and Linux (x64 and arm64).
 
-**Status:** milestone 8 complete: hardening and release engineering on top of the web admin UI, remote, desktop shell, token auth and native macOS app. See [docs/PLAN.md](docs/PLAN.md) for the full design and roadmap, and [docs/API.md](docs/API.md) for the API.
+**Status:** milestone 10 complete: installers for every platform, on top of hardening and the weekly grid editor engineering on top of the web admin UI, remote, desktop shell, token auth and native macOS app. See [docs/PLAN.md](docs/PLAN.md) for the full design and roadmap, and [docs/API.md](docs/API.md) for the API.
 
 ## What works today
 
@@ -21,7 +21,7 @@ Self-hosted retro TV station and IPTV engine. Add your TV collections, and TVMas
 - Watchdog restarts a crashed channel; config and TV state persist in SQLite. Unplugged drives, deleted or corrupt files and killed FFmpeg processes are survived without taking a channel off the air (see [docs/RELEASE.md](docs/RELEASE.md)).
 - Service templates for launchd, systemd and Windows Task Scheduler.
 
-Not yet: signed and notarized installers, HTTPS (see the roadmap).
+Not yet: Apple-notarized and Windows-trusted signing (you need the certificates), HTTPS (see the roadmap).
 
 ## Quick start
 
@@ -57,7 +57,7 @@ Run unattended: `tvmaster service launchd|systemd|windows` prints a definition t
 
 Hardware encoding: VideoToolbox is used automatically on macOS; use `--encoder nvenc|qsv|vaapi|amf` to opt in to the others, `--encoder software` for libx264. `tvmaster doctor` encodes a test clip with every encoder in your FFmpeg and tells you which work and how fast. A hardware encoder that fails its start-up test falls back to software.
 
-Install without Rust: download an archive from the releases page and run `./install.sh` (macOS, Linux) or `.\install.ps1` (Windows); add `--service` to run it at login or boot with an access token. There is also a `Dockerfile` and `docker-compose.yml`. See [docs/RELEASE.md](docs/RELEASE.md).
+Install without Rust: a `.dmg` for macOS, a setup `.exe` for Windows, and `.deb`, `.rpm` and Arch packages for Linux, each of which sets up the server at boot with an access token and FFmpeg (details and what is tested in [docs/RELEASE.md](docs/RELEASE.md)). There is also a `tar.gz` with `install.sh`, and a `Dockerfile`.
 
 ## Develop
 

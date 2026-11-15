@@ -23,6 +23,7 @@ mkdir -p "$STAGE" "$OUT"
 cp "target/${TARGET}/release/${EXE}" "$STAGE/"
 cp README.md "$STAGE/"
 cp scripts/install.sh scripts/install.ps1 "$STAGE/"
+case "$TARGET" in *windows*) cp packaging/windows/tvmaster-setup.ps1 "$STAGE/" ;; esac
 cp -R docs "$STAGE/docs"
 
 ABS_OUT="$(cd "$OUT" && pwd)"

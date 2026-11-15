@@ -120,7 +120,7 @@ docs/                 plan, API, design
 
 ## 12. Milestones
 
-Status: **M1-M9 done** (see notes below). Still to come: signing and notarization, native Windows and Linux shells, HTTPS.
+Status: **M1-M10 done** (see notes below). Still to come: Apple notarization and a trusted Windows certificate (need your accounts), native Windows and Linux shells, HTTPS.
 
 1. **Foundation:** repo, workspace, CI matrix, FFmpeg manager, library scanner, SQLite schema, API skeleton.
 2. **One channel on air:** playout runner, HLS/M3U/XMLTV, shuffle + sequential, web player, watchdog, service installers, state recovery.
@@ -213,3 +213,11 @@ Golden-file schedule tests (same seed → same schedule), fake-FFmpeg harness fo
 - **Overlaps:** the scheduler takes the first matching block in list order, so where two blocks overlap the earlier one wins. The grid hatches the part of the later block that can never air and says why.
 - **Verified:** unit tests for the geometry, and in a real browser against a real daemon: drag-create, drag-move across days and hours, drag-resize (including the tail of an overnight block), click-create, "Only day", undo, delete (Duplicate and the List/Grid toggle are covered by unit tests or by reading the code only), overlap hatching, save and reload round trip, and the phone layout (the grid scrolls sideways inside its card). Pointer drags in the browser were driven with synthetic pointer events computed from the DOM, because the pane's own drag tool was imprecise when the window was resized mid-test.
 - **Known limits:** touch drags on a phone were not tried on a real touch screen (empty-space taps create a block, blocks are `touch-action: none`, columns pan); no time-zone-aware "now" marker; two overlapping blocks are stacked rather than shown side by side; no multi-select or copy-paste of blocks; the native macOS app still opens the web admin for lineups.
+
+## 23. M10 notes (installers)
+
+- **Formats:** macOS `.dmg`; Windows NSIS setup `.exe` (x64, arm64); Linux `.deb`, `.rpm` and Arch `.pkg.tar.zst` from one `nfpm.yaml`; the `tar.gz`/`zip` with `install.sh`/`install.ps1` from M8 remain for no-root installs. See [RELEASE.md](RELEASE.md) for what each one sets up and for the signing options.
+- **Design choices:** every installer ends with a running, auto-restarting server behind an access token that is never on a command line (`--token-file`). Linux packages run a hardened system service as a `tvmaster` user; the Windows installer registers a SYSTEM startup task (a plain `.exe` cannot be a Windows service without a wrapper) and opens the firewall for private networks only; the Mac app supervises its own server. FFmpeg: a dependency on Linux packages, downloaded by the Windows installer, and an **Install FFmpeg** button (Homebrew) in the Mac app. The server also prefers an FFmpeg found beside `tvmaster` (`ffmpeg/bin`) over `PATH`.
+- **Real-machine testing (a Linux box with an RTX 3080 Ti, reached over SSH):** the full suite passes on Linux for the first time; NVENC works at 5.3x real time; `tvmaster doctor` now reports the cause of a failure (`Cannot load libcuda.so.1`) rather than FFmpeg's last line; `install.sh --service` ran under real systemd and survived `kill -9`. Packages were installed in Debian, Fedora and Arch containers.
+- **Self-signing:** answered in RELEASE.md with evidence: a self-signed Mac app is rejected by Gatekeeper exactly like an ad-hoc one; self-signed Windows installers work for PCs that import your certificate.
+- **Known limits:** the Windows installer and its PowerShell have never run on Windows; the release workflow and Docker image have never run; the packaged system unit was verified for syntax only; no apt/dnf repository, MSI or Docker registry image; the Mac FFmpeg button needs Homebrew.

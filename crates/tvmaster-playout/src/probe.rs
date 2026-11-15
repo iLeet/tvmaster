@@ -23,6 +23,35 @@ pub struct EncoderProbe {
     pub error: Option<String>,
 }
 
+/// The line of FFmpeg's output that says why it failed. The last line is often
+/// a consequence ("Nothing was written into output file"); the cause comes
+/// earlier and says something like "Cannot load libcuda" or "No VA display".
+fn reason(stderr: &str) -> String {
+    const CAUSES: [&str; 8] = [
+        "cannot",
+        "failed",
+        "error",
+        "unable",
+        "no such",
+        "not found",
+        "no device",
+        "not supported",
+    ];
+    let lines: Vec<&str> = stderr
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    lines
+        .iter()
+        .find(|l| {
+            let l = l.to_ascii_lowercase();
+            !l.contains("nothing was written") && CAUSES.iter().any(|c| l.contains(c))
+        })
+        .or(lines.last())
+        .map_or("encoder produced no output".to_string(), |l| l.to_string())
+}
+
 /// Encode a short clip with `enc` at the playout profile and report the result.
 pub fn probe_encoder(ffmpeg: &Path, enc: Encoder) -> EncoderProbe {
     let profile = OutputProfile::default();
@@ -79,12 +108,7 @@ pub fn probe_encoder(ffmpeg: &Path, enc: Encoder) -> EncoderProbe {
     let bytes = drain.join().unwrap_or(0);
     let stderr = err_reader.join().unwrap_or_default();
     if !status.success() || bytes == 0 {
-        let line = stderr
-            .lines()
-            .rev()
-            .find(|l| !l.trim().is_empty())
-            .unwrap_or("encoder produced no output");
-        return failed(line.trim().to_string());
+        return failed(reason(&stderr));
     }
     EncoderProbe {
         encoder: enc,
@@ -97,6 +121,14 @@ pub fn probe_encoder(ffmpeg: &Path, enc: Encoder) -> EncoderProbe {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_cause_beats_the_consequence() {
+        let out = "[vaapi @ 0x1] Failed to initialise VAAPI connection: -1 (unknown libva error).\n[out#0/mpegts @ 0x2] Nothing was written into output file, because at least one of its streams received no packets.\n";
+        assert!(reason(out).contains("Failed to initialise VAAPI"));
+        assert_eq!(reason("one\ntwo\n"), "two");
+        assert_eq!(reason(""), "encoder produced no output");
+    }
 
     #[test]
     fn a_missing_ffmpeg_fails_the_probe_with_a_reason() {

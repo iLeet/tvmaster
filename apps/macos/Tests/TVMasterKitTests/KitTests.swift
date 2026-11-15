@@ -284,3 +284,31 @@ struct DaemonTests {
         try? FileManager.default.removeItem(at: dir)
     }
 }
+
+@Suite("FFmpeg setup")
+struct FFmpegSetupTests {
+    @Test func findsBinariesOnThePath() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ffsetup-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let env = ["PATH": dir.path]
+        #expect(!FFmpegSetup.isInstalled(environment: env))
+        for name in ["ffmpeg", "ffprobe"] {
+            let f = dir.appendingPathComponent(name)
+            FileManager.default.createFile(atPath: f.path, contents: Data("#!/bin/sh\n".utf8), attributes: [.posixPermissions: 0o755])
+        }
+        #expect(FFmpegSetup.isInstalled(environment: env))
+    }
+
+    @Test func brewIsOnlyReportedWhenItExists() {
+        #expect(FFmpegSetup.brew(candidates: ["/nonexistent/brew"]) == nil)
+        #expect(FFmpegSetup.brew(candidates: ["/bin/sh"]) != nil)
+    }
+
+    @Test func aFailingInstallerReportsItsLastLines() async throws {
+        // `false` exits 1 with no output.
+        await #expect(throws: FFmpegSetup.Failure.self) {
+            try await FFmpegSetup.install(brew: URL(fileURLWithPath: "/usr/bin/false"))
+        }
+    }
+}
