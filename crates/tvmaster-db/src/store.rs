@@ -576,6 +576,25 @@ pub fn recent_commercials(
     Ok(ids)
 }
 
+/// Files currently flagged missing, as (id, path), for the enabled libraries.
+pub fn list_missing_media(conn: &Connection) -> Result<Vec<(i64, String)>> {
+    let mut st = conn.prepare(
+        "SELECT m.id, m.path FROM media_items m JOIN libraries l ON l.id = m.library_id
+         WHERE m.missing = 1 AND l.enabled = 1 ORDER BY m.id",
+    )?;
+    let rows = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    rows.collect()
+}
+
+/// The file is back: clear its missing flag.
+pub fn mark_media_present(conn: &Connection, media_id: i64) -> Result<()> {
+    conn.execute(
+        "UPDATE media_items SET missing = 0 WHERE id = ?1",
+        [media_id],
+    )?;
+    Ok(())
+}
+
 pub fn mark_media_missing(conn: &Connection, media_id: i64) -> Result<()> {
     conn.execute(
         "UPDATE media_items SET missing = 1 WHERE id = ?1",

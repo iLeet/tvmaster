@@ -1,0 +1,115 @@
+name: Release
+
+# Push a tag like v0.1.0 to build and publish the release. You can also run it
+# by hand (Actions > Release > Run workflow) to get the archives as workflow
+# artifacts without publishing anything.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  daemon:
+    name: daemon (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,    target: x86_64-unknown-linux-gnu }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu }
+          - { os: macos-15-intel,   target: x86_64-apple-darwin }
+          - { os: macos-latest,     target: aarch64-apple-darwin }
+          - { os: windows-latest,   target: x86_64-pc-windows-msvc }
+          - { os: windows-11-arm,   target: aarch64-pc-windows-msvc }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Package
+        shell: bash
+        run: scripts/package.sh ${{ matrix.target }} dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tvmaster-${{ matrix.target }}
+          path: dist/*
+
+  macos-app:
+    name: macOS app
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin,aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - name: Universal daemon
+        run: |
+          cargo build --release --locked -p tvmaster-cli --target aarch64-apple-darwin
+          cargo build --release --locked -p tvmaster-cli --target x86_64-apple-darwin
+          mkdir -p target/release
+          lipo -create -output target/release/tvmaster \
+            target/aarch64-apple-darwin/release/tvmaster \
+            target/x86_64-apple-darwin/release/tvmaster
+      - name: Test the Swift package
+        working-directory: apps/macos
+        run: swift test
+      - name: Build TVMaster.app (universal, ad-hoc signed)
+        working-directory: apps/macos
+        run: UNIVERSAL=1 Scripts/build-app.sh
+      - name: Zip
+        working-directory: apps/macos/build
+        run: |
+          ditto -c -k --keepParent TVMaster.app "TVMaster-$(cat ../VERSION)-macos.zip"
+          shasum -a 256 TVMaster-*.zip > "TVMaster-$(cat ../VERSION)-macos.zip.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tvmaster-macos-app
+          path: apps/macos/build/TVMaster-*
+
+  docker:
+    name: docker image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build (not pushed)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: tvmaster:ci
+      - name: The container starts and reports healthy
+        run: |
+          docker run -d --name t -p 8787:8787 tvmaster:ci
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8787/api/v1/health && exit 0; sleep 1; done
+          docker logs t; exit 1
+
+  publish:
+    name: publish
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [daemon, macos-app, docker]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Checksums and release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd assets
+          cat *.sha256 > SHA256SUMS
+          # 0.x releases are marked as pre-releases.
+          gh release create "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" \
+            --title "TVMaster ${GITHUB_REF_NAME}" --generate-notes --prerelease *

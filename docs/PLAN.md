@@ -120,7 +120,7 @@ docs/                 plan, API, design
 
 ## 12. Milestones
 
-Status: **M1-M7 done** (see notes below). M8 onward (Windows and Linux native shells, packaging, signing) is still to come.
+Status: **M1-M8 done** (see notes below). Still to come: signing and notarization, native Windows and Linux shells, a drag-and-drop grid editor, HTTPS.
 
 1. **Foundation:** repo, workspace, CI matrix, FFmpeg manager, library scanner, SQLite schema, API skeleton.
 2. **One channel on air:** playout runner, HLS/M3U/XMLTV, shuffle + sequential, web player, watchdog, service installers, state recovery.
@@ -196,3 +196,12 @@ Golden-file schedule tests (same seed → same schedule), fake-FFmpeg harness fo
 - **Screens:** Home, Watch (native `AVPlayerView` on the channel's HLS stream, Picture in Picture, channel list and overlay), Channels (list and general editor, re-roll, delete), Schedule (guide and breaks), Libraries (folder picker when local, scan, ad-break analysis), TVs (power, channel, volume, mute, step). Menu bar remote, and the Mac can register itself as a TV so the phone remote can change what it plays.
 - **Liquid Glass:** `glassEffect` and `GlassEffectContainer` plus the `.glass` button styles on macOS 26+, wrapped in `#available` helpers that fall back to system materials on macOS 15.
 - **Known limits:** the lineup, ads and guide designers still open the web admin; no notarization or Developer ID signing; checked visually only on macOS 27 (the macOS 15 fallback and Intel builds are untested); no CI job for the Swift package yet.
+
+## 21. M8 notes (hardening and release)
+
+- **Findings from fault injection, all fixed:** (1) an FFmpeg that was *killed* flagged a perfectly good file as unplayable (now only a real failure does); (2) five unplayable items in a row restarted the channel, so an unplugged drive took the stream off the air (missing files no longer count, the slate covers each one); (3) a slate encodes so cheaply that playout raced minutes ahead through a dead drive and kept airing slate after the files returned (encode lead is capped at 45 s); (4) files flagged missing stayed missing until someone rescanned (the server now re-checks them every two minutes and re-rolls the channels when they return).
+- **Soak:** `crates/tvmaster-server/src/soak.rs`, 21 fake-clock days over four channels plus a second run for determinism, about 45 s in a debug build. It found one wrong assumption in its own checks (the show already on air legitimately keeps its later acts after its file vanishes) and nothing in the scheduler.
+- **Faults against real FFmpeg:** `crates/tvmaster-playout/tests/faults_e2e.rs`: segmenter killed, item encoder killed, file deleted, corrupt file, drive unplugged and back (checks the playlist never disappears), empty schedule. About 80 s.
+- **Encoders:** QSV, VAAPI and AMF added next to VideoToolbox and NVENC. `tvmaster doctor` and a start-up probe really encode a clip with each, and a failing hardware encoder falls back to software. Only software and VideoToolbox have been run on real hardware.
+- **Release:** `scripts/package.sh`, `install.sh`, `install.ps1`, `Dockerfile`, `docker-compose.yml`, `.github/workflows/release.yml`. `serve --token-file` keeps the token out of command lines and service definitions. See [RELEASE.md](RELEASE.md).
+- **Known limits:** no real week-long run or memory-growth measurement; the release workflow, Windows installer and Docker image have never been run; no signing or notarization; the GitHub Actions account lock meant CI never ran, so Windows, Linux and Intel results are unknown.

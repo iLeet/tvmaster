@@ -10,17 +10,60 @@ pub enum Encoder {
     Software,
     /// Apple VideoToolbox (macOS).
     VideoToolbox,
-    /// NVIDIA NVENC (opt-in until the hardware test matrix in M8).
+    /// NVIDIA NVENC.
     Nvenc,
+    /// Intel Quick Sync (Windows and Linux).
+    Qsv,
+    /// VA-API (Linux: Intel and AMD GPUs).
+    Vaapi,
+    /// AMD AMF (Windows).
+    Amf,
 }
 
 impl Encoder {
+    /// Every encoder TVMaster can drive, in the order `doctor` reports them.
+    pub const ALL: [Encoder; 6] = [
+        Encoder::Software,
+        Encoder::VideoToolbox,
+        Encoder::Nvenc,
+        Encoder::Qsv,
+        Encoder::Vaapi,
+        Encoder::Amf,
+    ];
+
     pub fn parse(s: &str) -> Option<Self> {
         match s.to_ascii_lowercase().as_str() {
             "software" | "x264" | "libx264" => Some(Encoder::Software),
             "videotoolbox" => Some(Encoder::VideoToolbox),
             "nvenc" => Some(Encoder::Nvenc),
+            "qsv" | "quicksync" => Some(Encoder::Qsv),
+            "vaapi" => Some(Encoder::Vaapi),
+            "amf" => Some(Encoder::Amf),
             _ => None,
+        }
+    }
+
+    /// The name used on the command line and in the API.
+    pub fn name(self) -> &'static str {
+        match self {
+            Encoder::Software => "software",
+            Encoder::VideoToolbox => "videotoolbox",
+            Encoder::Nvenc => "nvenc",
+            Encoder::Qsv => "qsv",
+            Encoder::Vaapi => "vaapi",
+            Encoder::Amf => "amf",
+        }
+    }
+
+    /// FFmpeg's name for the H.264 encoder.
+    pub fn codec(self) -> &'static str {
+        match self {
+            Encoder::Software => "libx264",
+            Encoder::VideoToolbox => "h264_videotoolbox",
+            Encoder::Nvenc => "h264_nvenc",
+            Encoder::Qsv => "h264_qsv",
+            Encoder::Vaapi => "h264_vaapi",
+            Encoder::Amf => "h264_amf",
         }
     }
 }
@@ -33,6 +76,9 @@ pub struct FfmpegInfo {
     pub has_libx264: bool,
     pub has_videotoolbox: bool,
     pub has_nvenc: bool,
+    /// Every H.264 encoder this build of FFmpeg contains. Being compiled in
+    /// does not mean the hardware is there: `tvmaster doctor` tries each one.
+    pub compiled: Vec<Encoder>,
     /// Supports `-readrate_initial_burst` (faster stream start-up).
     pub has_readrate_burst: bool,
     /// The `drawtext` filter is built in (needed for text on the station slate).
@@ -48,6 +94,14 @@ fn run(bin: &Path, args: &[&str]) -> Result<String> {
     let mut s = String::from_utf8_lossy(&out.stdout).to_string();
     s.push_str(&String::from_utf8_lossy(&out.stderr));
     Ok(s)
+}
+
+/// Does `bin args...` run and exit successfully?
+pub fn run_ok(bin: &Path, args: &[&str]) -> bool {
+    Command::new(bin)
+        .args(args)
+        .output()
+        .is_ok_and(|o| o.status.success())
 }
 
 fn parse_version(out: &str) -> String {
@@ -70,7 +124,12 @@ impl FfmpegInfo {
         let encoders = run(&ffmpeg, &["-hide_banner", "-encoders"])?;
         let help = run(&ffmpeg, &["-hide_banner", "-h", "long"])?;
         let filters = run(&ffmpeg, &["-hide_banner", "-filters"])?;
+        let compiled = Encoder::ALL
+            .into_iter()
+            .filter(|e| encoders.contains(&format!(" {} ", e.codec())))
+            .collect();
         Ok(Self {
+            compiled,
             version: parse_version(&version_out),
             has_libx264: encoders.contains(" libx264 "),
             has_videotoolbox: encoders.contains("h264_videotoolbox"),
@@ -87,9 +146,7 @@ impl FfmpegInfo {
     /// hardware encoders are opt-in until they are tested.
     pub fn choose_encoder(&self, requested: Option<Encoder>) -> Encoder {
         match requested {
-            Some(Encoder::VideoToolbox) if self.has_videotoolbox => Encoder::VideoToolbox,
-            Some(Encoder::Nvenc) if self.has_nvenc => Encoder::Nvenc,
-            Some(Encoder::Software) => Encoder::Software,
+            Some(e) if self.compiled.contains(&e) => e,
             Some(_) => Encoder::Software,
             None if cfg!(target_os = "macos") && self.has_videotoolbox => Encoder::VideoToolbox,
             None => Encoder::Software,
@@ -127,6 +184,10 @@ mod tests {
 
     #[test]
     fn encoder_names() {
+        for e in Encoder::ALL {
+            assert_eq!(Encoder::parse(e.name()), Some(e));
+        }
+        assert_eq!(Encoder::parse("QuickSync"), Some(Encoder::Qsv));
         assert_eq!(Encoder::parse("VideoToolbox"), Some(Encoder::VideoToolbox));
         assert_eq!(Encoder::parse("x264"), Some(Encoder::Software));
         assert_eq!(Encoder::parse("nope"), None);

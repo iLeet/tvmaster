@@ -2,7 +2,7 @@
 
 Self-hosted retro TV station and IPTV engine. Add your TV collections, and TVMaster runs real-feeling channels: complete chaos or scheduled time slots, retro commercials placed at natural breaks, "Up Next / Later Today" bumpers, a guide channel, and a phone/web remote. Runs headless or with a GUI on Windows, macOS and Linux (x64 and arm64).
 
-**Status:** milestone 7 complete: web admin UI, installable remote, desktop shell, optional token, native macOS app with Liquid Glass. See [docs/PLAN.md](docs/PLAN.md) for the full design and roadmap, and [docs/API.md](docs/API.md) for the API.
+**Status:** milestone 8 complete: hardening and release engineering on top of the web admin UI, remote, desktop shell, token auth and native macOS app. See [docs/PLAN.md](docs/PLAN.md) for the full design and roadmap, and [docs/API.md](docs/API.md) for the API.
 
 ## What works today
 
@@ -18,10 +18,10 @@ Self-hosted retro TV station and IPTV engine. Add your TV collections, and TVMas
 - Tuner mode: Plex, Jellyfin and Emby can add TVMaster as an HDHomeRun-style network tuner. Channels can be grouped (Kids, Movies, ...).
 - M3U playlist and XMLTV guide for VLC, Kodi, TiviMate and similar clients.
 - Web player with channel list, now/next, and a phone remote that controls any registered TV.
-- Watchdog restarts a crashed channel; config and TV state persist in SQLite.
+- Watchdog restarts a crashed channel; config and TV state persist in SQLite. Unplugged drives, deleted or corrupt files and killed FFmpeg processes are survived without taking a channel off the air (see [docs/RELEASE.md](docs/RELEASE.md)).
 - Service templates for launchd, systemd and Windows Task Scheduler.
 
-Not yet: the native macOS app (Liquid Glass), installers, a drag-and-drop weekly grid editor, HTTPS (see the roadmap).
+Not yet: signed and notarized installers, a drag-and-drop weekly grid editor, HTTPS (see the roadmap).
 
 ## Quick start
 
@@ -55,14 +55,16 @@ Protect it: `tvmaster serve --token $(tvmaster token)` (browsers sign in once; I
 
 Run unattended: `tvmaster service launchd|systemd|windows` prints a definition that starts on boot and restarts on failure.
 
-Hardware encoding: VideoToolbox is used automatically on macOS; use `--encoder nvenc` to opt in to NVENC, `--encoder software` for libx264.
+Hardware encoding: VideoToolbox is used automatically on macOS; use `--encoder nvenc|qsv|vaapi|amf` to opt in to the others, `--encoder software` for libx264. `tvmaster doctor` encodes a test clip with every encoder in your FFmpeg and tells you which work and how fast. A hardware encoder that fails its start-up test falls back to software.
+
+Install without Rust: download an archive from the releases page and run `./install.sh` (macOS, Linux) or `.\install.ps1` (Windows); add `--service` to run it at login or boot with an access token. There is also a `Dockerfile` and `docker-compose.yml`. See [docs/RELEASE.md](docs/RELEASE.md).
 
 ## Develop
 
 The admin UI is in `web/` (`npm run dev` proxies to a running daemon; `npm run build && npm run sync` updates the copy embedded in the server, which is committed). The cross-platform desktop shell is in `apps/desktop`; the native macOS app is in `apps/macos` (see its README).
 
 ```bash
-cargo test --workspace      # unit tests; the HLS end-to-end test runs when FFmpeg is installed
+cargo test --workspace      # unit tests, the 3-week fake-clock soak, and the real-FFmpeg end-to-end and fault tests (those skip without FFmpeg)
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 

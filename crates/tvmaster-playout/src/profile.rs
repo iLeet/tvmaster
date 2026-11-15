@@ -77,8 +77,60 @@ fn video_args(enc: Encoder, p: &OutputProfile) -> Vec<String> {
             push(&["-b:v", &rate, "-maxrate", &maxrate, "-bufsize", &bufsize]);
             push(&["-g", &gop]);
         }
+        Encoder::Qsv => {
+            push(&[
+                "-c:v",
+                "h264_qsv",
+                "-preset",
+                "faster",
+                "-profile:v",
+                "high",
+            ]);
+            push(&["-b:v", &rate, "-maxrate", &maxrate, "-bufsize", &bufsize]);
+            push(&["-g", &gop]);
+        }
+        Encoder::Vaapi => {
+            push(&["-c:v", "h264_vaapi", "-profile:v", "high"]);
+            push(&["-b:v", &rate, "-maxrate", &maxrate, "-bufsize", &bufsize]);
+            push(&["-g", &gop]);
+        }
+        Encoder::Amf => {
+            push(&[
+                "-c:v",
+                "h264_amf",
+                "-quality",
+                "speed",
+                "-profile:v",
+                "high",
+            ]);
+            push(&["-b:v", &rate, "-maxrate", &maxrate, "-bufsize", &bufsize]);
+            push(&["-g", &gop]);
+        }
     }
     a
+}
+
+/// Options a hardware encoder needs before the first input.
+fn hw_init_args(enc: Encoder) -> Vec<String> {
+    match enc {
+        Encoder::Vaapi => vec!["-vaapi_device".into(), vaapi_device()],
+        _ => Vec::new(),
+    }
+}
+
+/// The render node VA-API uses (`TVMASTER_VAAPI_DEVICE` overrides it).
+pub fn vaapi_device() -> String {
+    std::env::var("TVMASTER_VAAPI_DEVICE").unwrap_or_else(|_| "/dev/dri/renderD128".into())
+}
+
+/// The last filters of every chain: the pixel format the encoder takes, and
+/// for VA-API the upload to the GPU.
+fn pix_tail(enc: Encoder) -> &'static str {
+    match enc {
+        Encoder::Vaapi => "format=nv12,hwupload",
+        Encoder::Qsv => "format=nv12",
+        _ => "format=yuv420p",
+    }
 }
 
 /// Arguments to encode one item to MPEG-TS on stdout.
@@ -87,6 +139,7 @@ pub fn item_args(job: &ItemJob, p: &OutputProfile, enc: Encoder) -> Vec<String> 
         .iter()
         .map(|s| s.to_string())
         .collect();
+    a.extend(hw_init_args(enc));
     if job.offset_ms > 0 {
         a.extend(["-ss".into(), secs(job.offset_ms)]);
     }
@@ -111,10 +164,11 @@ pub fn item_args(job: &ItemJob, p: &OutputProfile, enc: Encoder) -> Vec<String> 
     a.extend([
         "-vf".into(),
         format!(
-            "scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={fps},format=yuv420p",
+            "scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={fps},{tail}",
             w = p.width,
             h = p.height,
-            fps = p.fps
+            fps = p.fps,
+            tail = pix_tail(enc)
         ),
     ]);
     a.extend(video_args(enc, p));
@@ -177,11 +231,12 @@ pub fn slate_args(
             p.height / 14
         ));
     }
-    vf.push_str("format=yuv420p");
+    vf.push_str(pix_tail(enc));
     let mut a: Vec<String> = ["-hide_banner", "-loglevel", "error", "-nostdin"]
         .iter()
         .map(|s| s.to_string())
         .collect();
+    a.extend(hw_init_args(enc));
     a.extend([
         "-f".into(),
         "lavfi".into(),
@@ -241,6 +296,7 @@ pub fn rendered_args(
         .iter()
         .map(|s| s.to_string())
         .collect();
+    a.extend(hw_init_args(enc));
     a.extend([
         "-f".into(),
         "rawvideo".into(),
@@ -264,8 +320,11 @@ pub fn rendered_args(
         "1:a:0".into(),
         "-vf".into(),
         format!(
-            "scale={}:{}:flags=neighbor,setsar=1,fps={},format=yuv420p",
-            p.width, p.height, p.fps
+            "scale={}:{}:flags=neighbor,setsar=1,fps={},{}",
+            p.width,
+            p.height,
+            p.fps,
+            pix_tail(enc)
         ),
         "-t".into(),
         dur,
@@ -310,6 +369,7 @@ pub fn guide_args(
         .iter()
         .map(|s| s.to_string())
         .collect();
+    a.extend(hw_init_args(enc));
     a.extend([
         "-f".into(),
         "rawvideo".into(),
@@ -347,8 +407,11 @@ pub fn guide_args(
         "1:a:0".into(),
         "-vf".into(),
         format!(
-            "scale={}:{}:flags=neighbor,setsar=1,fps={},format=yuv420p",
-            p.width, p.height, p.fps
+            "scale={}:{}:flags=neighbor,setsar=1,fps={},{}",
+            p.width,
+            p.height,
+            p.fps,
+            pix_tail(enc)
         ),
     ]);
     a.extend(video_args(enc, p));
@@ -562,5 +625,32 @@ mod tests {
         let b = segmenter_args(d, &OutputProfile::default(), false);
         assert!(b.contains(&"-re".to_string()));
         assert!(b.last().unwrap().ends_with("index.m3u8"));
+    }
+
+    #[test]
+    fn hardware_encoders_get_their_pixel_format_and_device() {
+        let p = OutputProfile::default();
+        let job = ItemJob {
+            file: Path::new("/x.mp4"),
+            offset_ms: 0,
+            duration_ms: 1000,
+            ts_offset_ms: 0,
+            has_audio: true,
+        };
+        let va = item_args(&job, &p, Encoder::Vaapi);
+        let dev = va.iter().position(|a| a == "-vaapi_device").unwrap();
+        let input = va.iter().position(|a| a == "-i").unwrap();
+        assert!(dev < input, "the device is set before the input");
+        assert!(va.iter().any(|a| a.ends_with("format=nv12,hwupload")));
+        assert!(va.contains(&"h264_vaapi".to_string()));
+
+        let qsv = item_args(&job, &p, Encoder::Qsv);
+        assert!(qsv.iter().any(|a| a.ends_with("format=nv12")));
+        assert!(qsv.contains(&"h264_qsv".to_string()));
+        assert!(!qsv.contains(&"-vaapi_device".to_string()));
+
+        let amf = slate_args("x", 1000, 0, &p, Encoder::Amf, None);
+        assert!(amf.contains(&"h264_amf".to_string()));
+        assert!(amf.contains(&"format=yuv420p".to_string()));
     }
 }

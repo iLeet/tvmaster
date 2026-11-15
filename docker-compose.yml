@@ -1,0 +1,14 @@
+services:
+  tvmaster:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    environment:
+      # Pick your own: `docker run --rm tvmaster token` prints a random one.
+      TVMASTER_TOKEN: "change-me-to-a-long-random-token"
+    volumes:
+      - tvmaster-data:/data
+      - /path/to/your/media:/media:ro
+volumes:
+  tvmaster-data:

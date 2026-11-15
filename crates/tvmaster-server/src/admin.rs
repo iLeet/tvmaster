@@ -153,7 +153,8 @@ pub async fn system(State(s): State<AppState>) -> Json<Value> {
     let ffmpeg = s.ffmpeg.as_ref().map(|f| {
         json!({
             "version": f.version,
-            "encoder": s.playout.as_ref().map(|p| format!("{:?}", p.config().encoder)),
+            "encoder": s.playout.as_ref().map(|p| p.config().encoder.name()),
+            "encoders": f.compiled.iter().map(|e| e.name()).collect::<Vec<_>>(),
             "has_libx264": f.has_libx264,
             "has_videotoolbox": f.has_videotoolbox,
             "has_nvenc": f.has_nvenc,

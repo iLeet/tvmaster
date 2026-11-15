@@ -15,10 +15,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Private-repo runners. Linux/Windows arm64 runners (ubuntu-24.04-arm,
-        # windows-11-arm) are public-repo only; arm64 is covered by macos-latest
-        # for now and cross-builds are added in the release workflow.
-        os: [ubuntu-latest, macos-latest, macos-15-intel, windows-latest]
+        # The repository is public, so the arm64 Linux and Windows runners are free too.
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-15-intel, windows-latest, windows-11-arm]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -27,7 +25,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install FFmpeg (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg fonts-dejavu-core
       - name: Install FFmpeg (macOS)
         if: runner.os == 'macOS'
         run: brew install ffmpeg
@@ -42,6 +40,18 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace
+
+  swift:
+    name: macOS app
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test the Swift package
+        working-directory: apps/macos
+        run: swift test
+      - name: Build the app
+        working-directory: apps/macos
+        run: Scripts/build-app.sh
 
   web:
     name: web UI

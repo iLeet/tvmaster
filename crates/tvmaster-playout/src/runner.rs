@@ -34,6 +34,11 @@ const RESYNC_BEHIND_MS: i64 = 5_000;
 /// to a normal buffer depth so the stream does not drift ahead of the guide.
 const RESYNC_AHEAD_MS: i64 = 120_000;
 const RESYNC_AHEAD_TARGET_MS: i64 = 30_000;
+/// Never encode further ahead than this. Real video is held back by the full
+/// buffer, but a slate is tiny and would race through minutes of schedule
+/// while a drive is unplugged, leaving a long stretch of slate queued behind
+/// it that airs even after the files are back.
+const MAX_LEAD_MS: i64 = 45_000;
 /// Slate length when the schedule has nothing at all.
 const EMPTY_SLATE_MS: u64 = 5_000;
 /// Longest single slate piece (keeps the schedule re-checked regularly).
@@ -146,6 +151,9 @@ async fn run_once(
 struct Outcome {
     bytes: u64,
     ok: bool,
+    /// FFmpeg was killed (out of memory, a user, a crash), as opposed to
+    /// exiting with an error about the file. The file is not at fault.
+    signaled: bool,
 }
 
 /// Follow the schedule from "now", encoding each item (or the slate) and
@@ -169,6 +177,11 @@ async fn produce(
         } else if vt > wall + RESYNC_AHEAD_MS {
             tracing::warn!(channel = %spec.id, ahead_ms = vt - wall, "ahead of schedule, stepping back");
             vt = wall + RESYNC_AHEAD_TARGET_MS;
+        }
+
+        if vt > wall + MAX_LEAD_MS {
+            tokio::time::sleep(Duration::from_millis((vt - wall - MAX_LEAD_MS) as u64)).await;
+            continue;
         }
 
         let (source, id) = (spec.source.clone(), spec.id.clone());
@@ -248,8 +261,12 @@ async fn produce(
                         if outcome.ok && outcome.bytes > 0 {
                             failures = 0;
                         } else {
-                            tracing::warn!(channel = %spec.id, file = %path.display(), "item failed to encode");
-                            report_unplayable(&spec, item.media_id).await;
+                            tracing::warn!(channel = %spec.id, file = %path.display(), signaled = outcome.signaled, "item failed to encode");
+                            // An encoder that was killed says nothing about the
+                            // file; only a file that really fails is taken off the air.
+                            if !outcome.signaled {
+                                report_unplayable(&spec, item.media_id).await;
+                            }
                             if outcome.bytes == 0 {
                                 slate(&cfg, &spec, remaining, ts_offset_ms, &tx, &mut fixer)
                                     .await?;
@@ -263,7 +280,10 @@ async fn produce(
                         report_unplayable(&spec, media).await;
                         slate(&cfg, &spec, remaining, ts_offset_ms, &tx, &mut fixer).await?;
                         ts_offset_ms += remaining;
-                        failures += 1;
+                        // Not counted as a failure: an unplugged drive can take
+                        // many items in a row, the slate covers each for its full
+                        // length (so this cannot spin), and restarting the channel
+                        // would only take the stream off the air.
                     }
                 }
             }
@@ -386,6 +406,7 @@ async fn run_rendered(
     Ok(Outcome {
         bytes,
         ok: status.success(),
+        signaled: status.code().is_none(),
     })
 }
 
@@ -610,5 +631,6 @@ async fn run_encoder(
     Ok(Outcome {
         bytes,
         ok: status.success(),
+        signaled: status.code().is_none(),
     })
 }

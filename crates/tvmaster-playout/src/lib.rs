@@ -6,11 +6,13 @@
 //! behind, so a channel never goes dark.
 
 mod manager;
+mod probe;
 mod profile;
 mod runner;
 mod ts;
 
 pub use manager::Manager;
+pub use probe::{probe_encoder, EncoderProbe};
 pub use profile::{
     guide_args, item_args, rendered_args, segmenter_args, slate_args, ItemJob, OutputProfile,
 };

@@ -130,6 +130,6 @@ The web player (`/?tv=…` and `/?remote=…`) uses this and falls back to polli
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/api/v1/health` | Status, version, FFmpeg version and encoder, channels currently on air (public even with a token). |
-| GET | `/api/v1/system` | Version, OS/arch, time zone, FFmpeg capabilities, whether a token is required. |
+| GET | `/api/v1/system` | Version, OS/arch, time zone, FFmpeg capabilities (`encoder` is the one in use: `software`, `videotoolbox`, `nvenc`, `qsv`, `vaapi` or `amf`; `encoders` lists every H.264 encoder the build has), whether a token is required. |
 
 The daemon also runs an autopilot loop (every minute) that tops up every channel's schedule to 72 hours, commits aired episodes and trims history. There is nothing to call.

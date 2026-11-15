@@ -9,6 +9,8 @@ mod hdhr;
 mod iptv;
 mod libraries;
 mod plan;
+#[cfg(test)]
+mod soak;
 mod stream;
 mod tvs;
 mod ws;
@@ -52,6 +54,9 @@ pub struct AppState {
 
 /// How often the autopilot loop tops up schedules and commits aired episodes.
 const AUTOPILOT_INTERVAL: Duration = Duration::from_secs(60);
+/// How often files flagged missing are looked for again (an unplugged drive
+/// or a rebooted NAS that has come back).
+const REVIVE_INTERVAL: Duration = Duration::from_secs(120);
 
 impl AppState {
     pub fn new(
@@ -231,16 +236,25 @@ impl AppState {
         let state = self.clone();
         autopilot::fill_blank_timezones(&state.db(), &channels::system_timezone());
         tokio::spawn(async move {
+            let mut last_revive = std::time::Instant::now();
             loop {
-                let dirty: Vec<String> = state
+                let mut dirty: Vec<String> = state
                     .dirty
                     .lock()
                     .unwrap_or_else(|p| p.into_inner())
                     .drain()
                     .collect();
+                let revive = last_revive.elapsed() >= REVIVE_INTERVAL;
+                if revive {
+                    last_revive = std::time::Instant::now();
+                }
                 let s = state.clone();
                 let _ = tokio::task::spawn_blocking(move || {
-                    autopilot::tick(&s.db(), &dirty, plan::now_ms());
+                    let db = s.db();
+                    if revive {
+                        dirty.extend(autopilot::revive(&db));
+                    }
+                    autopilot::tick(&db, &dirty, plan::now_ms());
                 })
                 .await;
                 tokio::select! {
@@ -358,7 +372,7 @@ async fn health(axum::extract::State(s): axum::extract::State<AppState>) -> Json
     let ffmpeg = s.ffmpeg.as_ref().map(|f| {
         json!({
             "version": f.version,
-            "encoder": s.playout.as_ref().map(|p| format!("{:?}", p.config().encoder)),
+            "encoder": s.playout.as_ref().map(|p| p.config().encoder.name()),
         })
     });
     let on_air = s.playout.as_ref().map(|p| p.running()).unwrap_or_default();

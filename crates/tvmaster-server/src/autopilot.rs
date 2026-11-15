@@ -118,6 +118,37 @@ pub fn fill_blank_timezones(conn: &Connection, timezone: &str) {
     }
 }
 
+/// Files get flagged missing when playout cannot open them, which is what an
+/// unplugged drive or a rebooting NAS looks like. Look again: any that are
+/// back are cleared, and every programming channel is returned for a re-roll
+/// so the shows return to the schedule without anyone rescanning.
+pub fn revive(conn: &Connection) -> Vec<String> {
+    let missing = match tvmaster_db::list_missing_media(conn) {
+        Ok(m) => m,
+        Err(e) => {
+            tracing::error!("autopilot: listing missing files: {e}");
+            return Vec::new();
+        }
+    };
+    let mut back = 0;
+    for (id, path) in missing {
+        if std::path::Path::new(&path).exists() && tvmaster_db::mark_media_present(conn, id).is_ok()
+        {
+            back += 1;
+        }
+    }
+    if back == 0 {
+        return Vec::new();
+    }
+    tracing::info!("{back} missing files are back; re-rolling channels");
+    tvmaster_db::list_channels(conn)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|c| c.kind == tvmaster_core::ChannelKind::Programming)
+        .map(|c| c.id)
+        .collect()
+}
+
 /// Mark what has aired. Idempotent.
 pub fn commit(conn: &Connection, channel: &Channel, now_ms: i64) -> rusqlite::Result<()> {
     // Everything that has started by now, however old: after downtime in
@@ -544,5 +575,48 @@ mod tests {
             !future.contains(&missing),
             "the unplayable file is no longer scheduled"
         );
+    }
+
+    #[test]
+    fn files_that_come_back_are_revived_and_channels_rerolled() {
+        let (conn, _ch) = setup(3, ALPHA_ALL_DAY);
+        // Point one episode at a real file, flag it missing like playout would.
+        let dir = std::env::temp_dir().join(format!("tvmaster-revive-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("ep.mp4");
+        std::fs::write(&file, b"x").unwrap();
+        let lib = tvmaster_db::list_libraries(&conn).unwrap()[0].id;
+        let id = upsert_media(
+            &conn,
+            &NewMedia {
+                library_id: lib,
+                path: file.to_string_lossy().into(),
+                show: Some("Alpha".into()),
+                season: Some(2),
+                episode: Some(1),
+                duration_ms: 22 * MIN,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        tvmaster_db::mark_media_missing(&conn, id).unwrap();
+        // The fake episodes at /tv/... are missing too (never existed) and stay missing.
+        tvmaster_db::mark_media_missing(&conn, 1).unwrap();
+
+        // File exists again: revived, channels come back for a re-roll.
+        assert_eq!(revive(&conn), vec!["c".to_string()]);
+        let missing: Vec<i64> = tvmaster_db::list_missing_media(&conn)
+            .unwrap()
+            .into_iter()
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(
+            missing,
+            vec![1],
+            "only the file that is really gone stays flagged"
+        );
+        // Nothing changed since: nothing to do.
+        assert!(revive(&conn).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

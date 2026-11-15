@@ -18,9 +18,16 @@ fn xml_escape(s: &str) -> String {
         .replace('>', "&gt;")
 }
 
-pub fn render(kind: Kind, bin: &Path, data_dir: &Path, bind: &str) -> String {
+pub fn render(
+    kind: Kind,
+    bin: &Path,
+    data_dir: &Path,
+    bind: &str,
+    token_file: Option<&Path>,
+) -> String {
     let bin = bin.display().to_string();
     let data = data_dir.display().to_string();
+    let token = token_file.map(|f| f.display().to_string());
     match kind {
         Kind::Launchd => format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -33,7 +40,7 @@ pub fn render(kind: Kind, bin: &Path, data_dir: &Path, bind: &str) -> String {
     <string>{bin}</string>
     <string>serve</string>
     <string>--bind</string><string>{bind}</string>
-    <string>--data-dir</string><string>{data}</string>
+    <string>--data-dir</string><string>{data}</string>{token_args}
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
@@ -45,15 +52,34 @@ pub fn render(kind: Kind, bin: &Path, data_dir: &Path, bind: &str) -> String {
             bin = xml_escape(&bin),
             bind = xml_escape(bind),
             data = xml_escape(&data),
+            token_args = token
+                .as_deref()
+                .map(|t| format!(
+                    "\n    <string>--token-file</string><string>{}</string>",
+                    xml_escape(t)
+                ))
+                .unwrap_or_default(),
         ),
-        Kind::Systemd => format!(
+        Kind::Systemd => {
+            let token_arg = token
+                .as_deref()
+                .map(|t| format!(" --token-file {t}"))
+                .unwrap_or_default();
+            format!(
             "[Unit]\nDescription=TVMaster IPTV station\nAfter=network-online.target\nWants=network-online.target\n\n\
-[Service]\nExecStart={bin} serve --bind {bind} --data-dir {data}\nRestart=always\nRestartSec=3\n\n\
+[Service]\nExecStart={bin} serve --bind {bind} --data-dir {data}{token_arg}\nRestart=always\nRestartSec=3\n\n\
 [Install]\nWantedBy=multi-user.target\n"
-        ),
-        Kind::Windows => format!(
-            "schtasks /Create /TN \"TVMaster\" /SC ONSTART /RU SYSTEM /RL HIGHEST /F ^\n  /TR \"\\\"{bin}\\\" serve --bind {bind} --data-dir \\\"{data}\\\"\"\n"
-        ),
+            )
+        }
+        Kind::Windows => {
+            let token_arg = token
+                .as_deref()
+                .map(|t| format!(" --token-file \\\"{t}\\\""))
+                .unwrap_or_default();
+            format!(
+            "schtasks /Create /TN \"TVMaster\" /SC ONSTART /RU SYSTEM /RL HIGHEST /F ^\n  /TR \"\\\"{bin}\\\" serve --bind {bind} --data-dir \\\"{data}\\\"{token_arg}\"\n"
+            )
+        }
     }
 }
 
@@ -68,6 +94,7 @@ mod tests {
             &PathBuf::from("/usr/local/bin/tvmaster"),
             &PathBuf::from("/var/lib/tvmaster"),
             "0.0.0.0:8787",
+            None,
         )
     }
 
@@ -98,7 +125,27 @@ mod tests {
             &PathBuf::from("/Apps/A&B/tvmaster"),
             &PathBuf::from("/d"),
             "x",
+            None,
         );
         assert!(s.contains("A&amp;B"));
+    }
+
+    #[test]
+    fn the_token_comes_from_a_file_not_the_command_line() {
+        let t = std::path::Path::new("/home/me/token");
+        let args = |k| {
+            render(
+                k,
+                &PathBuf::from("/b/tvmaster"),
+                &PathBuf::from("/d"),
+                "x",
+                Some(t),
+            )
+        };
+        assert!(args(Kind::Systemd).contains("--token-file /home/me/token"));
+        assert!(args(Kind::Launchd)
+            .contains("<string>--token-file</string><string>/home/me/token</string>"));
+        assert!(args(Kind::Windows).contains("--token-file"));
+        assert!(!args(Kind::Systemd).contains("--token "));
     }
 }
