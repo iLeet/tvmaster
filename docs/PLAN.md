@@ -120,7 +120,7 @@ docs/                 plan, API, design
 
 ## 12. Milestones
 
-Status: **M1-M5 done** (see notes below). M6 (web admin UI, PWA remote, Tauri desktop shell) next.
+Status: **M1-M6 done** (see notes below). M7 (native macOS SwiftUI app with Liquid Glass) next.
 
 1. **Foundation:** repo, workspace, CI matrix, FFmpeg manager, library scanner, SQLite schema, API skeleton.
 2. **One channel on air:** playout runner, HLS/M3U/XMLTV, shuffle + sequential, web player, watchdog, service installers, state recovery.
@@ -176,3 +176,14 @@ Golden-file schedule tests (same seed → same schedule), fake-FFmpeg harness fo
 - **A deadlock the live run found:** starting a guide channel built its spec (a database read) while the request already held the database lock, hanging the first request for the guide. Unit tests could not see it (no FFmpeg in the server tests). There is now a regression test; the fix is to build the spec after releasing the lock.
 - **Other fixes:** channel updates are now partial (omitting `library_ids` or `chaos` used to reset them); music libraries scan audio files; very narrow guide cells draw as blocks without unreadable text.
 - **Known limits:** no auth on the WebSocket or tuner endpoints; the guide is a fixed look (themes per channel colour only); `/tv/{id}.m3u8` does not follow later channel changes (players that need that should use the web player); channel groups are labels only (no per-group scheduling).
+
+## 19. M6 notes (web admin UI, PWA remote, desktop shell, auth)
+
+- **The UI** lives in `web/` (React 18 + TypeScript + Vite, no UI libraries; about 65 KB gzipped). `npm run build && npm run sync` compiles it into `crates/tvmaster-server/ui/`, which is **committed** and embedded in the binary (`rust-embed`), so `cargo build` never needs Node and a headless server serves the same admin UI at `/admin/`. Debug builds read the folder at run time, so a rebuilt UI shows up without recompiling Rust. CI builds the UI and fails if the committed copy is stale.
+- **Pages:** dashboard (live over the WebSocket), libraries (folder picker, scan, break-analysis progress), channels (general, a visual lineup editor with blocks/seasons/events/rotations plus a raw-JSON escape hatch, ads and bumpers, guide channel), schedule (guide and breaks/bumpers timeline, re-roll, per-show progress), TVs (power, channel, volume, online), phone remote, settings (URLs to copy, tuner address).
+- **Design:** one glass design system with platform flavour: macOS rounder and more translucent, Windows crisper and more opaque (Mica-like), Linux in between; light and dark follow the system.
+- **PWA:** web app manifest, icons (drawn by the Rust renderer), service worker that caches the shell (never the API or streams), and `#/remote` as the start URL. The service worker could not be exercised in the in-app browser used for testing (it refuses to register one); the file is served with the right headers and scope.
+- **Desktop shell:** `apps/desktop` is a Tauri 2 app (outside the main workspace) with a connect screen, an optional bundled daemon, and native glass (vibrancy on macOS, Mica on Windows 11) behind a transparent web UI. It compiles and starts on macOS; Windows and Linux builds, installers and signing are not done.
+- **Authentication:** optional token (`--token`, `tvmaster token`); header, `?token=` for IPTV apps (playlists and HLS segments carry it), or an HTTP-only cookie for browsers. Constant-time comparison, short delay on a wrong login. This is not a user-account system and offers no TLS: put it behind HTTPS before exposing it beyond your LAN.
+- **Bugs the testing found:** deleting a library failed when a schedule still referenced its files (now cleared first, and channels rebuild); a database lock held across an `if let` body deadlocked a handler (found by a hanging test); oversized SVG icons outside buttons.
+- **Known limits:** the folder picker lists any folder the server user can read, so use a token on shared networks; the schedule view is a list and timeline, not a drag-and-drop grid (a drag-and-drop weekly grid editor is still to come); no mobile-specific editing polish beyond the responsive layout; the UI has unit tests for its pure helpers but no browser automation suite.

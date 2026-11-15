@@ -34,6 +34,7 @@ fn device_id(s: &AppState) -> String {
 
 pub async fn discover(State(s): State<AppState>, headers: HeaderMap) -> ApiResult<Json<Value>> {
     let base = base_url(&headers);
+    let tok = crate::auth::url_suffix(&s);
     let tuners = tvmaster_db::list_channels(&s.db())?.len().clamp(1, 16);
     Ok(Json(json!({
         "FriendlyName": "TVMaster",
@@ -45,19 +46,20 @@ pub async fn discover(State(s): State<AppState>, headers: HeaderMap) -> ApiResul
         "DeviceAuth": "tvmaster",
         "TunerCount": tuners,
         "BaseURL": base,
-        "LineupURL": format!("{base}/lineup.json"),
+        "LineupURL": format!("{base}/lineup.json{tok}"),
     })))
 }
 
 pub async fn lineup(State(s): State<AppState>, headers: HeaderMap) -> ApiResult<Json<Value>> {
     let base = base_url(&headers);
+    let tok = crate::auth::url_suffix(&s);
     let entries: Vec<Value> = tvmaster_db::list_channels(&s.db())?
         .into_iter()
         .map(|c| {
             json!({
                 "GuideNumber": c.number.to_string(),
                 "GuideName": c.name,
-                "URL": format!("{base}/stream/{}.ts", c.id),
+                "URL": format!("{base}/stream/{}.ts{tok}", c.id),
                 "HD": 1,
             })
         })

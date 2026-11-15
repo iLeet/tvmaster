@@ -1,6 +1,8 @@
 //! HTTP API: libraries, channels, Virtual TVs/remote, HLS streams, M3U/XMLTV
 //! and the web player. See docs/API.md.
 
+mod admin;
+mod auth;
 mod autopilot;
 mod channels;
 mod hdhr;
@@ -40,6 +42,8 @@ pub struct AppState {
     wake: Arc<Notify>,
     /// Background break-detection progress per library.
     pub(crate) analysis: Arc<Mutex<HashMap<i64, libraries::Progress>>>,
+    /// When set, every request except the UI shell must present it.
+    pub(crate) token: Option<Arc<String>>,
     /// JSON events pushed to WebSocket clients.
     pub(crate) events: broadcast::Sender<String>,
     /// How many connected players each TV has (online while > 0).
@@ -62,9 +66,17 @@ impl AppState {
             dirty: Arc::new(Mutex::new(HashSet::new())),
             wake: Arc::new(Notify::new()),
             analysis: Arc::new(Mutex::new(HashMap::new())),
+            token: None,
             events: broadcast::channel(256).0,
             presence: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    /// Require this token on every request (see [`auth`]). Must be 8-128
+    /// characters of letters, digits, `-`, `_`, `.` or `~`.
+    pub fn with_token(mut self, token: Option<String>) -> Self {
+        self.token = token.map(Arc::new);
+        self
     }
 
     /// In-memory database, no FFmpeg. For tests.
@@ -275,13 +287,20 @@ impl IntoResponse for ApiError {
 
 pub(crate) type ApiResult<T> = Result<T, ApiError>;
 
+pub use auth::{generate_token, valid_token};
+
 pub fn router(state: AppState) -> Router {
+    let guard_state = state.clone();
     Router::new()
         .route("/", get(|| async { Html(PLAYER_HTML) }))
         .route("/api/v1/health", get(health))
         .route(
             "/api/v1/libraries",
             get(libraries::list).post(libraries::add),
+        )
+        .route(
+            "/api/v1/libraries/:id",
+            axum::routing::delete(libraries::remove).patch(libraries::patch),
         )
         .route("/api/v1/libraries/:id/scan", post(libraries::scan))
         .route("/api/v1/libraries/:id/analyze", post(libraries::analyze))
@@ -301,7 +320,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/channels/:id/reroll", post(channels::reroll))
         .route("/api/v1/channels/:id/cursors", get(channels::cursors))
         .route("/api/v1/tvs", get(tvs::list).post(tvs::register))
-        .route("/api/v1/tvs/:id", get(tvs::get))
+        .route("/api/v1/tvs/:id", get(tvs::get).delete(tvs::remove))
         .route("/api/v1/tvs/:id/channel", post(tvs::set_channel))
         .route("/api/v1/tvs/:id/power", post(tvs::set_power))
         .route("/api/v1/tvs/:id/volume", post(tvs::set_volume))
@@ -316,9 +335,22 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/device.xml", get(hdhr::device_xml))
         .route("/stream/:name", get(stream::ts))
+        .route("/admin", get(admin::redirect))
+        .route("/admin/", get(admin::index))
+        .route("/admin/*path", get(admin::asset))
+        .route("/api/v1/auth", get(auth::status))
+        .route("/api/v1/auth/login", post(auth::login))
+        .route("/api/v1/auth/logout", post(auth::logout))
+        .route("/api/v1/fs/list", get(admin::fs_list))
+        .route("/api/v1/shows", get(admin::shows))
+        .route("/api/v1/system", get(admin::system))
         .route("/stream/:channel/:file", get(stream::hls))
         .route("/iptv/playlist.m3u", get(iptv::playlist))
         .route("/iptv/guide.xml", get(iptv::guide))
+        .layer(axum::middleware::from_fn_with_state(
+            guard_state,
+            auth::guard,
+        ))
         .with_state(state)
 }
 

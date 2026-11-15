@@ -205,6 +205,90 @@ pub fn list_media_in_libraries(conn: &Connection, library_ids: &[i64]) -> Result
     list_media_of_kind(conn, library_ids, "shows")
 }
 
+/// A show in the libraries: how many episodes and how much airtime.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ShowSummary {
+    pub name: String,
+    pub episodes: i64,
+    pub total_ms: i64,
+}
+
+/// The distinct shows in `shows` libraries (all of them if `library_ids` is
+/// empty), by name, case-insensitively.
+pub fn list_shows(conn: &Connection, library_ids: &[i64]) -> Result<Vec<ShowSummary>> {
+    let mut st = conn.prepare(
+        "SELECT MIN(COALESCE(m.show, '')), COUNT(*), SUM(m.duration_ms)
+         FROM media_items m JOIN libraries l ON l.id = m.library_id
+         WHERE m.missing = 0 AND l.enabled = 1 AND l.kind = 'shows'
+         GROUP BY LOWER(COALESCE(m.show, ''))
+         ORDER BY LOWER(COALESCE(m.show, ''))",
+    )?;
+    // Filtering by library happens in a second pass so one statement serves both cases.
+    let all: Vec<(String, i64, i64)> = st
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+        .collect::<Result<_>>()?;
+    if library_ids.is_empty() {
+        return Ok(all
+            .into_iter()
+            .map(|(name, episodes, total_ms)| ShowSummary {
+                name,
+                episodes,
+                total_ms,
+            })
+            .collect());
+    }
+    let mut out = Vec::new();
+    let mut by_lib = conn.prepare(
+        "SELECT MIN(COALESCE(show, '')), COUNT(*), SUM(duration_ms)
+         FROM media_items
+         WHERE missing = 0 AND library_id = ?1
+         GROUP BY LOWER(COALESCE(show, ''))",
+    )?;
+    let mut merged: std::collections::BTreeMap<String, ShowSummary> = Default::default();
+    for lib in library_ids {
+        for row in by_lib.query_map([lib], |r| {
+            Ok(ShowSummary {
+                name: r.get(0)?,
+                episodes: r.get(1)?,
+                total_ms: r.get(2)?,
+            })
+        })? {
+            let row = row?;
+            merged
+                .entry(row.name.to_lowercase())
+                .and_modify(|e| {
+                    e.episodes += row.episodes;
+                    e.total_ms += row.total_ms;
+                })
+                .or_insert(row);
+        }
+    }
+    out.extend(merged.into_values());
+    Ok(out)
+}
+
+/// Delete a library and its files. Schedule items that reference those files
+/// go too (they are a plan, not history worth keeping), since the schedule
+/// would otherwise point at files that no longer exist.
+pub fn delete_library(conn: &Connection, id: i64) -> Result<bool> {
+    conn.execute(
+        "DELETE FROM schedule_items WHERE media_id IN (SELECT id FROM media_items WHERE library_id = ?1)",
+        [id],
+    )?;
+    Ok(conn.execute("DELETE FROM libraries WHERE id = ?1", [id])? > 0)
+}
+
+pub fn set_library_enabled(conn: &Connection, id: i64, enabled: bool) -> Result<bool> {
+    Ok(conn.execute(
+        "UPDATE libraries SET enabled = ?2 WHERE id = ?1",
+        params![id, enabled as i64],
+    )? > 0)
+}
+
+pub fn delete_tv(conn: &Connection, id: &str) -> Result<bool> {
+    Ok(conn.execute("DELETE FROM tvs WHERE id = ?1", [id])? > 0)
+}
+
 pub fn get_media(conn: &Connection, id: i64) -> Result<Option<MediaRow>> {
     conn.query_row(
         &format!("SELECT {MEDIA_COLS} FROM media_items WHERE id = ?1"),
@@ -875,6 +959,80 @@ mod tests {
         let row = play_row_at_or_after(&c, "ch1", 12).unwrap().unwrap();
         assert_eq!(row.item.bumper, Some(BumperKind::Brb));
         assert_eq!(row.show, None);
+    }
+
+    #[test]
+    fn shows_are_summarised_across_libraries() {
+        let c = open_in_memory().unwrap();
+        let a = add_library(&c, "/a", "shows").unwrap();
+        let b = add_library(&c, "/b", "shows").unwrap();
+        let ads = add_library(&c, "/ads", "commercials").unwrap();
+        let mk = |lib: i64, path: &str, show: &str, ms: i64| {
+            let mut m = new_media(lib, path, ms);
+            m.show = Some(show.into());
+            upsert_media(&c, &m).unwrap();
+        };
+        mk(a.id, "/a/1", "Cheers", 1000);
+        mk(a.id, "/a/2", "cheers", 1000);
+        mk(b.id, "/b/1", "Taxi", 500);
+        mk(b.id, "/b/2", "Cheers", 1000);
+        mk(ads.id, "/ads/1", "Spot", 30);
+        let all = list_shows(&c, &[]).unwrap();
+        assert_eq!(
+            all.iter()
+                .map(|s| (s.name.to_lowercase(), s.episodes))
+                .collect::<Vec<_>>(),
+            vec![("cheers".to_string(), 3), ("taxi".to_string(), 1)]
+        );
+        let only_b = list_shows(&c, &[b.id]).unwrap();
+        assert_eq!(only_b.len(), 2);
+        let both = list_shows(&c, &[a.id, b.id]).unwrap();
+        assert_eq!(
+            both.iter()
+                .find(|s| s.name.eq_ignore_ascii_case("cheers"))
+                .unwrap()
+                .episodes,
+            3
+        );
+        assert_eq!(
+            both.iter()
+                .find(|s| s.name.eq_ignore_ascii_case("cheers"))
+                .unwrap()
+                .total_ms,
+            3000
+        );
+        // missing files drop out
+        mark_library_missing(&c, b.id).unwrap();
+        assert!(list_shows(&c, &[])
+            .unwrap()
+            .iter()
+            .all(|s| !s.name.eq_ignore_ascii_case("taxi")));
+    }
+
+    #[test]
+    fn libraries_and_tvs_can_be_removed_and_disabled() {
+        let c = open_in_memory().unwrap();
+        let lib = add_library(&c, "/a", "shows").unwrap();
+        upsert_media(&c, &new_media(lib.id, "/a/1", 10)).unwrap();
+        upsert_channel(&c, &chan("ch", 1, vec![lib.id])).unwrap();
+        assert!(set_library_enabled(&c, lib.id, false).unwrap());
+        assert!(
+            list_media_in_libraries(&c, &[lib.id]).unwrap().is_empty(),
+            "disabled libraries do not feed channels"
+        );
+        assert!(delete_library(&c, lib.id).unwrap());
+        assert!(!delete_library(&c, lib.id).unwrap());
+        assert!(
+            get_channel(&c, "ch")
+                .unwrap()
+                .unwrap()
+                .library_ids
+                .is_empty(),
+            "channel keeps existing without the library"
+        );
+        upsert_tv(&c, &Tv::new("den", "Den")).unwrap();
+        assert!(delete_tv(&c, "den").unwrap());
+        assert!(!delete_tv(&c, "den").unwrap());
     }
 
     #[test]

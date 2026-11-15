@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TVMaster</title>
+<style>
+  :root { color-scheme: dark light; --text:#eef1f7; --dim:#9aa4b6; --accent:#6ea8ff; }
+  @media (prefers-color-scheme: light) { :root { --text:#121826; --dim:#566074; --accent:#2563d8; } }
+  html, body { height: 100%; margin: 0; background: transparent; color: var(--text);
+    font: 15px/1.45 -apple-system, "Segoe UI Variable", system-ui, sans-serif; }
+  body { display: grid; place-items: center; }
+  .card { width: min(420px, 90vw); padding: 24px; border-radius: 20px; background: rgba(255,255,255,.1);
+    border: 1px solid rgba(255,255,255,.18); -webkit-backdrop-filter: blur(24px); backdrop-filter: blur(24px); }
+  h1 { margin: 0 0 6px; font-size: 22px; } p { margin: 0 0 14px; color: var(--dim); }
+  input, button { font: inherit; border-radius: 10px; border: 1px solid rgba(255,255,255,.25); padding: 9px 12px; width: 100%; box-sizing: border-box; }
+  input { background: rgba(0,0,0,.2); color: var(--text); margin-bottom: 10px; }
+  button { background: var(--accent); color: #fff; border: 0; font-weight: 600; cursor: pointer; }
+  .err { color: #ff8a8a; margin-top: 8px; min-height: 1.4em; }
+</style>
+</head>
+<body>
+<form class="card" id="f">
+  <h1>TVMaster</h1>
+  <p>Connect to your TVMaster server.</p>
+  <input id="url" value="http://127.0.0.1:8787" aria-label="Server address" autofocus>
+  <button type="submit">Connect</button>
+  <div class="err" id="err"></div>
+</form>
+<script>
+  const KEY = 'tvmaster.server';
+  const url = document.getElementById('url'), err = document.getElementById('err');
+  const norm = (v) => v.trim().replace(/\/+$/, '').replace(/^(?!https?:\/\/)/, 'http://');
+
+  async function connect(base, auto) {
+    err.textContent = auto ? '' : 'Connecting…';
+    try {
+      const r = await fetch(base + '/api/v1/health', { mode: 'no-cors' });
+      localStorage.setItem(KEY, base);
+      location.href = base + '/admin/';
+    } catch (e) {
+      err.textContent = 'Cannot reach ' + base + ' - is the server running?';
+    }
+  }
+  document.getElementById('f').addEventListener('submit', (e) => { e.preventDefault(); connect(norm(url.value)); });
+  const saved = localStorage.getItem(KEY);
+  if (saved) { url.value = saved; connect(saved, true); }
+</script>
+</body>
+</html>

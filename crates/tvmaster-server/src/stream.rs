@@ -82,6 +82,25 @@ pub async fn hls(
         }
     };
 
+    // Clients that cannot send headers (VLC, Plex) resolve segment URLs without
+    // the playlist's query, so each segment line carries the token itself.
+    let bytes = if is_playlist && s.token.is_some() {
+        let suffix = crate::auth::url_suffix(&s);
+        String::from_utf8_lossy(&bytes)
+            .lines()
+            .map(|l| {
+                if is_segment_name(l.trim()) {
+                    format!("{l}{suffix}\n")
+                } else {
+                    format!("{l}\n")
+                }
+            })
+            .collect::<String>()
+            .into_bytes()
+    } else {
+        bytes
+    };
+
     let (content_type, cache) = if is_playlist {
         ("application/vnd.apple.mpegurl", "no-cache")
     } else {

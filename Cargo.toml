@@ -1,5 +1,7 @@
 [workspace]
 resolver = "2"
+# The desktop shell is built separately (it needs Tauri's system dependencies).
+exclude = ["apps/desktop/src-tauri"]
 members = [
     "crates/tvmaster-core",
     "crates/tvmaster-db",
@@ -33,6 +35,8 @@ serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "process", "io-util", "sync", "time", "fs"] }
 tower = { version = "0.5", features = ["util"] }
 futures-util = "0.3"
+getrandom = "0.2"
+rust-embed = "8"
 tokio-stream = "0.1"
 tokio-tungstenite = "0.24"
 tokio-util = "0.7"

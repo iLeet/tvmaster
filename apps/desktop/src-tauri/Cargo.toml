@@ -1,0 +1,16 @@
+[package]
+name = "tvmaster-desktop"
+version = "0.0.1"
+edition = "2021"
+publish = false
+description = "Desktop shell for TVMaster: a native window around the admin UI, with platform glass effects"
+
+# Not part of the main workspace (see the root Cargo.toml `exclude`).
+[workspace]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+window-vibrancy = "0.5"

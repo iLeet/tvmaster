@@ -213,6 +213,14 @@ fn reroll_locked(
     extend(conn, channel, now_ms)
 }
 
+/// Throw away the whole schedule and plan again from now. For when the files
+/// behind it are gone. Episode cursors keep what has aired.
+pub fn rebuild(conn: &Connection, channel: &Channel, now_ms: i64) -> rusqlite::Result<usize> {
+    commit(conn, channel, aired_until(conn, now_ms)?)?;
+    tvmaster_db::delete_schedule_from(conn, &channel.id, i64::MIN)?;
+    extend(conn, channel, now_ms)
+}
+
 /// One maintenance pass for a channel: commit, trim, top up.
 pub fn maintain(conn: &Connection, channel: &Channel, now_ms: i64) -> rusqlite::Result<usize> {
     let aired = aired_until(conn, now_ms)?;

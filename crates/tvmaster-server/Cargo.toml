@@ -19,6 +19,8 @@ tvmaster-playout.workspace = true
 tvmaster-render.workspace = true
 rusqlite.workspace = true
 iana-time-zone.workspace = true
+getrandom.workspace = true
+rust-embed.workspace = true
 chrono.workspace = true
 
 [dev-dependencies]

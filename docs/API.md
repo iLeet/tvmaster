@@ -1,6 +1,22 @@
 # TVMaster API (v0)
 
-Base URL: `http://<host>:8787`. JSON unless noted. Authentication is not implemented yet (LAN-open); a bearer token and remote-access guidance come with the web UI milestone.
+Base URL: `http://<host>:8787`. JSON unless noted.
+
+## Authentication
+
+By default the server is open on the network. Start it with `tvmaster serve --token <token>` (or `TVMASTER_TOKEN`; `tvmaster token` prints a random one) and every request must carry the token, except the admin UI's static files, the web player shell, `/api/v1/health` and the auth endpoints. Send it as:
+
+- `Authorization: Bearer <token>` (scripts),
+- `?token=<token>` (IPTV apps that cannot set headers: playlists, tuner lineups and HLS playlists include it in the URLs they hand out), or
+- the `tvmaster_token` cookie that `POST /api/v1/auth/login` sets (browsers; HTTP-only, same-site).
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/api/v1/auth` | `{required, authenticated}`. |
+| POST | `/api/v1/auth/login` | `{"token": "…"}`: sets the cookie. Wrong tokens get 401 after a short delay. |
+| POST | `/api/v1/auth/logout` | Clears the cookie. |
+
+Tokens are 8-128 characters of letters, digits, `-`, `_`, `.`, `~`. Use HTTPS (a reverse proxy, or Tailscale) before exposing the server beyond your home network.
 
 Errors are `{"error": "message"}` with a suitable status code.
 
@@ -24,6 +40,11 @@ Errors are `{"error": "message"}` with a suitable status code.
 | POST | `/api/v1/libraries` | `{"path": "/media/tv", "kind": "shows"}`. Kinds: `shows`, `commercials`, `bumpers`, `music`. The path must exist on the server. |
 | POST | `/api/v1/libraries/{id}/analyze` | Find ad-break points (black-frame scan) for a `shows` library's files that have none. Runs in the background; returns `202 {"queued": n}`. Starts automatically after a scan. Progress appears in the library list as `analysis: {total, done, running}`. |
 | POST | `/api/v1/libraries/{id}/scan` | Probes every video. Returns `{found, indexed, skipped}`. Files that vanished are flagged missing, not deleted (a restored file comes back on the next scan). Autopilot channels using the library re-roll. |
+
+| PATCH | `/api/v1/libraries/{id}` | `{"enabled": bool}`: turn a library off (its files stop being scheduled) or on. |
+| DELETE | `/api/v1/libraries/{id}` | Remove a library and its index (files on disk are untouched). Channels using it are rescheduled. |
+| GET | `/api/v1/shows?library_ids=1,2` | Distinct show names with episode counts and airtime (all shows libraries if no ids). |
+| GET | `/api/v1/fs/list?path=` | The folders (names only, no files) inside a folder on the server, for the folder picker. Defaults to the home folder. |
 
 Only `shows` libraries feed channels directly. `commercials` and `bumpers` libraries are named in a lineup's `ads` section: see [ADS.md](ADS.md).
 
@@ -68,6 +89,7 @@ A TV is a registered player with a stable id; the remote changes its channel. Di
 | GET | `/api/v1/tvs/{id}` | `{id, name, channel, power, volume, muted, online}`. `online` is true while a player is connected over the WebSocket. |
 | POST | `/api/v1/tvs/{id}/channel` | `{"number": 4}` or `{"step": "up"\|"down"}` (steps through real channels, wraps). Turns the TV on. 404 for unknown channel numbers. |
 | POST | `/api/v1/tvs/{id}/power` | `{"on": true}`. |
+| DELETE | `/api/v1/tvs/{id}` | Remove a TV (`tv.removed` is pushed). |
 | POST | `/api/v1/tvs/{id}/volume` | `{"level": 0-100}` and/or `{"muted": bool}`. Raising the volume un-mutes. |
 | WS | `/api/v1/ws` | Live updates and remote control: see below. |
 
@@ -99,10 +121,15 @@ The web player (`/?tv=…` and `/?remote=…`) uses this and falls back to polli
 | `/?tv=living-room` | Full-screen TV that registers itself and follows its remote. |
 | `/?remote=living-room` | Phone-friendly remote for that TV: channel up/down, volume, mute, power, and a list of channels grouped by group. Shows whether the TV's player is connected. |
 
+## The admin UI
+
+`/admin/` is the admin web app (React + TypeScript, compiled into the server binary): dashboard, libraries with a folder picker, channels with a visual lineup editor (blocks, seasons, events, rotations), ads and bumpers, the guide channel, a schedule view with breaks and bumpers, TVs, and settings. `/admin/#/remote` is the installable phone remote. It uses the same API documented here.
+
 ## Ops
 
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/api/v1/health` | Status, version, FFmpeg version and encoder, channels currently on air. |
+| GET | `/api/v1/health` | Status, version, FFmpeg version and encoder, channels currently on air (public even with a token). |
+| GET | `/api/v1/system` | Version, OS/arch, time zone, FFmpeg capabilities, whether a token is required. |
 
 The daemon also runs an autopilot loop (every minute) that tops up every channel's schedule to 72 hours, commits aired episodes and trims history. There is nothing to call.

@@ -129,6 +129,71 @@ pub async fn scan(State(s): State<AppState>, Path(id): Path<i64>) -> ApiResult<J
     ))
 }
 
+/// Remove a library and its indexed files (the files on disk are untouched).
+/// Channels that used it lose it and, on autopilot, are re-rolled.
+pub async fn remove(State(s): State<AppState>, Path(id): Path<i64>) -> ApiResult<StatusCode> {
+    let affected: Vec<tvmaster_core::Channel> = tvmaster_db::list_channels(&s.db())?
+        .into_iter()
+        .filter(|c| c.library_ids.contains(&id))
+        .collect();
+    if !tvmaster_db::delete_library(&s.db(), id)? {
+        return Err(ApiError::new(StatusCode::NOT_FOUND, "no such library"));
+    }
+    s.analysis
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .remove(&id);
+    // The files are gone: plan again from now (a manual-lock channel is only topped up).
+    let now = crate::plan::now_ms();
+    for c in &affected {
+        // Bind first: a guard in an `if let` scrutinee lives through its body.
+        let fresh = tvmaster_db::get_channel(&s.db(), &c.id)?;
+        if let Some(fresh) = fresh {
+            if fresh.autopilot {
+                crate::autopilot::rebuild(&s.db(), &fresh, now)?;
+            } else {
+                crate::autopilot::maintain(&s.db(), &fresh, now)?;
+            }
+            s.emit(json!({ "type": "schedule.changed", "channel": fresh.id }));
+        }
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+fn reroll_users(s: &AppState, channels: &[tvmaster_core::Channel]) -> ApiResult<()> {
+    let now = crate::plan::now_ms();
+    for c in channels.iter().filter(|c| c.autopilot) {
+        let fresh = tvmaster_db::get_channel(&s.db(), &c.id)?;
+        if let Some(fresh) = fresh {
+            crate::autopilot::reroll(&s.db(), &fresh, now)?;
+            s.emit(json!({ "type": "schedule.changed", "channel": fresh.id }));
+        }
+    }
+    Ok(())
+}
+
+#[derive(Deserialize)]
+pub struct LibraryPatch {
+    enabled: bool,
+}
+
+/// Turn a library off (its files stop being scheduled) or back on.
+pub async fn patch(
+    State(s): State<AppState>,
+    Path(id): Path<i64>,
+    Json(body): Json<LibraryPatch>,
+) -> ApiResult<Json<Value>> {
+    if !tvmaster_db::set_library_enabled(&s.db(), id, body.enabled)? {
+        return Err(ApiError::new(StatusCode::NOT_FOUND, "no such library"));
+    }
+    let affected: Vec<tvmaster_core::Channel> = tvmaster_db::list_channels(&s.db())?
+        .into_iter()
+        .filter(|c| c.library_ids.contains(&id))
+        .collect();
+    reroll_users(&s, &affected)?;
+    Ok(Json(json!({ "id": id, "enabled": body.enabled })))
+}
+
 /// Start detecting ad-break points (chapters are already known; this scans
 /// for the black frames between acts). Returns how many files were queued.
 pub(crate) fn start_analysis(s: &AppState, library_id: i64) -> usize {
@@ -307,4 +372,127 @@ fn probe_library(
     let mut v = results.into_inner().unwrap();
     v.sort_by_key(|(i, _)| *i);
     (files.len(), v.into_iter().map(|(_, m)| m).collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::test_util::call;
+    use crate::{router, AppState};
+    use axum::http::StatusCode;
+    use tvmaster_db::{add_library, upsert_media, NewMedia};
+
+    fn seeded() -> (AppState, i64, i64) {
+        let state = AppState::in_memory();
+        let (a, b) = {
+            let db = state.db();
+            let a = add_library(&db, "/a", "shows").unwrap();
+            let b = add_library(&db, "/b", "shows").unwrap();
+            for (lib, show) in [(a.id, "Alpha"), (b.id, "Beta")] {
+                upsert_media(
+                    &db,
+                    &NewMedia {
+                        library_id: lib,
+                        path: format!("/{show}/1.mp4"),
+                        show: Some(show.into()),
+                        duration_ms: 20 * 60_000,
+                        acodec: Some("aac".into()),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+            }
+            (a.id, b.id)
+        };
+        (state, a, b)
+    }
+
+    #[tokio::test]
+    async fn disabling_and_removing_libraries_updates_channels() {
+        let (state, a, b) = seeded();
+        let app = router(state.clone());
+        let body = format!(
+            r#"{{"id":"c","number":1,"name":"C","strategy":"sequential","library_ids":[{a},{b}]}}"#
+        );
+        call(&app, "POST", "/api/v1/channels", &body).await;
+        let shows = |app: axum::Router| async move {
+            let (_, g) = call(&app, "GET", "/api/v1/channels/c/schedule?hours=2", "").await;
+            g.as_array()
+                .unwrap()
+                .iter()
+                .filter_map(|p| p["show"].as_str().map(str::to_string))
+                .collect::<std::collections::BTreeSet<_>>()
+        };
+        assert_eq!(shows(app.clone()).await.len(), 2);
+
+        // turning a library off takes its shows off the air (after the locked slot)
+        let (st, _) = call(
+            &app,
+            "PATCH",
+            &format!("/api/v1/libraries/{b}"),
+            r#"{"enabled":false}"#,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let (_, items) = call(
+            &app,
+            "GET",
+            "/api/v1/channels/c/schedule?hours=3&detail=items",
+            "",
+        )
+        .await;
+        let last = items.as_array().unwrap().last().unwrap();
+        assert_ne!(last["title"], "Beta", "{last}");
+        call(
+            &app,
+            "PATCH",
+            &format!("/api/v1/libraries/{b}"),
+            r#"{"enabled":true}"#,
+        )
+        .await;
+
+        // removing deletes it, drops it from the channel, and 404s afterwards
+        assert_eq!(
+            call(&app, "DELETE", &format!("/api/v1/libraries/{a}"), "")
+                .await
+                .0,
+            StatusCode::NO_CONTENT
+        );
+        assert_eq!(
+            call(&app, "DELETE", &format!("/api/v1/libraries/{a}"), "")
+                .await
+                .0,
+            StatusCode::NOT_FOUND
+        );
+        let (_, ch) = call(&app, "GET", "/api/v1/channels/c", "").await;
+        assert_eq!(ch["library_ids"], serde_json::json!([b]));
+        assert_eq!(
+            call(
+                &app,
+                "PATCH",
+                "/api/v1/libraries/999",
+                r#"{"enabled":true}"#
+            )
+            .await
+            .0,
+            StatusCode::NOT_FOUND
+        );
+    }
+
+    #[tokio::test]
+    async fn tvs_can_be_removed() {
+        let app = router(AppState::in_memory());
+        call(&app, "POST", "/api/v1/tvs", r#"{"id":"den","name":"Den"}"#).await;
+        assert_eq!(
+            call(&app, "DELETE", "/api/v1/tvs/den", "").await.0,
+            StatusCode::NO_CONTENT
+        );
+        assert_eq!(
+            call(&app, "DELETE", "/api/v1/tvs/den", "").await.0,
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            call(&app, "GET", "/api/v1/tvs/den", "").await.0,
+            StatusCode::NOT_FOUND
+        );
+    }
 }

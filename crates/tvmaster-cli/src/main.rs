@@ -41,7 +41,13 @@ enum Command {
         /// Stop an on-demand channel after this many seconds without viewers.
         #[arg(long, default_value_t = 60)]
         idle_seconds: u64,
+        /// Require this token on every request (8-128 letters, digits, - _ . ~).
+        /// Without one the server is open to the whole network.
+        #[arg(long, env = "TVMASTER_TOKEN")]
+        token: Option<String>,
     },
+    /// Print a new random access token to use with --token.
+    Token,
     /// Print a service definition for running TVMaster unattended.
     Service {
         #[arg(value_enum)]
@@ -72,7 +78,23 @@ async fn main() -> Result<()> {
             ffprobe,
             encoder,
             idle_seconds,
-        } => serve(bind, data_dir, ffmpeg, ffprobe, encoder, idle_seconds).await,
+            token,
+        } => {
+            serve(
+                bind,
+                data_dir,
+                ffmpeg,
+                ffprobe,
+                encoder,
+                idle_seconds,
+                token,
+            )
+            .await
+        }
+        Command::Token => {
+            println!("{}", tvmaster_server::generate_token());
+            Ok(())
+        }
         Command::Service {
             kind,
             bin,
@@ -97,7 +119,16 @@ async fn serve(
     ffprobe: PathBuf,
     encoder: Option<String>,
     idle_seconds: u64,
+    token: Option<String>,
 ) -> Result<()> {
+    if let Some(t) = &token {
+        anyhow::ensure!(
+            tvmaster_server::valid_token(t),
+            "the token must be 8-128 characters: letters, digits, - _ . ~ (run `tvmaster token` for one)"
+        );
+    } else if !bind.starts_with("127.") && !bind.starts_with("localhost") {
+        tracing::warn!("no --token set: anyone on your network can control this server");
+    }
     std::fs::create_dir_all(&data_dir)
         .with_context(|| format!("creating {}", data_dir.display()))?;
     let conn = tvmaster_db::open(data_dir.join("tvmaster.db"))?;
@@ -128,7 +159,7 @@ async fn serve(
         }
     };
 
-    let state = AppState::new(conn, info, playout.clone());
+    let state = AppState::new(conn, info, playout.clone()).with_token(token);
     // Keeps every channel's schedule filled days ahead; the first pass runs now.
     state.spawn_autopilot();
     // Pushes "now playing" changes to connected remotes and players.

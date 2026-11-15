@@ -176,6 +176,14 @@ pub async fn get(State(s): State<AppState>, Path(id): Path<String>) -> ApiResult
     Ok(Json(s.tv_view(tv)))
 }
 
+pub async fn remove(State(s): State<AppState>, Path(id): Path<String>) -> ApiResult<StatusCode> {
+    if !tvmaster_db::delete_tv(&s.db(), &id)? {
+        return Err(not_found());
+    }
+    s.emit(serde_json::json!({ "type": "tv.removed", "id": id }));
+    Ok(StatusCode::NO_CONTENT)
+}
+
 #[derive(Deserialize)]
 pub struct ChannelChange {
     /// Channel number to tune to.

@@ -43,12 +43,13 @@ fn text_response(content_type: &'static str, body: String) -> Response {
 
 pub async fn playlist(State(s): State<AppState>, headers: HeaderMap) -> ApiResult<Response> {
     let base = base_url(&headers);
+    let tok = crate::auth::url_suffix(&s);
     let channels = tvmaster_db::list_channels(&s.db())?;
-    let mut out = format!("#EXTM3U x-tvg-url=\"{base}/iptv/guide.xml\"\n");
+    let mut out = format!("#EXTM3U x-tvg-url=\"{base}/iptv/guide.xml{tok}\"\n");
     for c in channels {
         let name = m3u_attr(&c.name);
         out.push_str(&format!(
-            "#EXTINF:-1 tvg-id=\"{id}\" tvg-chno=\"{n}\" tvg-name=\"{name}\" group-title=\"{group}\",{name}\n{base}/stream/{id}/index.m3u8\n",
+            "#EXTINF:-1 tvg-id=\"{id}\" tvg-chno=\"{n}\" tvg-name=\"{name}\" group-title=\"{group}\",{name}\n{base}/stream/{id}/index.m3u8{tok}\n",
             id = c.id,
             n = c.number,
             group = m3u_attr(c.group.as_deref().unwrap_or("TVMaster")),
