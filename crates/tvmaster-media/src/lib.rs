@@ -1,5 +1,11 @@
-//! FFmpeg/ffprobe integration: probing media files now; scanning, break
-//! detection and the FFmpeg binary manager come next.
+//! FFmpeg/ffprobe integration: probing, library scanning and FFmpeg capability
+//! detection. Break detection comes in a later milestone.
+
+mod ffmpeg;
+mod scan;
+
+pub use ffmpeg::{Encoder, FfmpegInfo};
+pub use scan::{find_videos, parse_name, ParsedName};
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
@@ -18,6 +24,7 @@ pub struct ProbeInfo {
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub video_codec: Option<String>,
+    pub audio_codec: Option<String>,
     pub chapters: Vec<Chapter>,
 }
 
@@ -66,6 +73,10 @@ pub fn parse_ffprobe(json: &str) -> Result<ProbeInfo> {
         .streams
         .iter()
         .find(|s| s.codec_type.as_deref() == Some("video"));
+    let audio = raw
+        .streams
+        .iter()
+        .find(|s| s.codec_type.as_deref() == Some("audio"));
     Ok(ProbeInfo {
         duration_ms: raw
             .format
@@ -75,6 +86,7 @@ pub fn parse_ffprobe(json: &str) -> Result<ProbeInfo> {
         width: video.and_then(|v| v.width),
         height: video.and_then(|v| v.height),
         video_codec: video.and_then(|v| v.codec_name.clone()),
+        audio_codec: audio.and_then(|a| a.codec_name.clone()),
         chapters: raw
             .chapters
             .into_iter()
@@ -88,9 +100,14 @@ pub fn parse_ffprobe(json: &str) -> Result<ProbeInfo> {
     })
 }
 
-/// Run `ffprobe` on a file (expects `ffprobe` on `PATH` for now).
+/// Run `ffprobe` on a file (expects `ffprobe` on `PATH`).
 pub fn probe(path: &Path) -> Result<ProbeInfo> {
-    let out = Command::new("ffprobe")
+    probe_with(Path::new("ffprobe"), path)
+}
+
+/// Run a specific `ffprobe` binary on a file.
+pub fn probe_with(ffprobe: &Path, path: &Path) -> Result<ProbeInfo> {
+    let out = Command::new(ffprobe)
         .args([
             "-v",
             "error",
@@ -135,6 +152,7 @@ mod tests {
         assert_eq!(info.width, Some(720));
         assert_eq!(info.height, Some(480));
         assert_eq!(info.video_codec.as_deref(), Some("h264"));
+        assert_eq!(info.audio_codec.as_deref(), Some("aac"));
         assert_eq!(info.chapters.len(), 2);
         assert_eq!(info.chapters[1].start_ms, 312_500);
         assert_eq!(info.chapters[0].title.as_deref(), Some("Cold open"));

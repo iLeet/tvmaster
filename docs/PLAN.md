@@ -120,6 +120,8 @@ docs/                 plan, API, design
 
 ## 12. Milestones
 
+Status: **M1 done. M2 done** (see notes below). M3 next.
+
 1. **Foundation:** repo, workspace, CI matrix, FFmpeg manager, library scanner, SQLite schema, API skeleton.
 2. **One channel on air:** playout runner, HLS/M3U/XMLTV, shuffle + sequential, web player, watchdog, service installers, state recovery.
 3. **Real scheduling and Autopilot:** block grid, dayparts, rotation, seasons, events, chaos slider, run-out policies, reserved/committed cursors, rolling top-up.
@@ -138,3 +140,11 @@ Golden-file schedule tests (same seed → same schedule), fake-FFmpeg harness fo
 - A webview cannot do true Liquid Glass lensing; that is why macOS gets a native SwiftUI app and Windows/Linux get the best close approximation.
 - Bundled FFmpeg licensing: ship an LGPL build, or invoke GPL builds (libx264) only as an external subprocess.
 - Copyrighted bumpers/commercials are BYO; the repo ships only original assets.
+
+## 15. M2 notes (what was built and learned)
+
+- **Pipeline:** each item is encoded by its own FFmpeg process to MPEG-TS, pushed through a bounded buffer into one long-running HLS segmenter. The segmenter reads at 1x with an initial burst, so tune-in is about 0.7 s and the next item is always already encoded when the current one ends.
+- **Gotcha fixed:** concatenating separately encoded transport streams resets the per-PID continuity counters at every item boundary, which makes demuxers drop packets of the first keyframe. The playout crate rewrites the counters so the joined stream is one continuous TS (`crates/tvmaster-playout/src/ts.rs`). The end-to-end test confirms no gap longer than one frame across items with different sizes, frame rates and a clip with no audio.
+- **Timeline:** M2 uses an endless deterministic timeline anchored at the channel's epoch (shuffle re-seeded per pass). This already gives "keeps going and wraps" behaviour; the reserved/committed cursors, run-out policies and block grids replace it in M3.
+- **Autopilot basics in place:** watchdog with exponential backoff, restart on segmenter crash, unplayable files skipped, idle channels stop, config and TV state persist, service templates. Still to come: cursors, fallback ladder beyond skip-to-next, health alerts.
+- **Known limits:** scans are synchronous (large libraries should become a background job), drift between wall clock and encode is not corrected yet (M3 resync), only software/VideoToolbox/NVENC encoders are wired (NVENC untested), no auth.

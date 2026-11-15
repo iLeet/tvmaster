@@ -2,29 +2,54 @@
 
 Self-hosted retro TV station and IPTV engine. Add your TV collections, and TVMaster runs real-feeling channels: complete chaos or scheduled time slots, retro commercials placed at natural breaks, "Up Next / Later Today" bumpers, a guide channel, and a phone/web remote. Runs headless or with a GUI on Windows, macOS and Linux (x64 and arm64).
 
-**Status:** early scaffolding (milestone 1). See [docs/PLAN.md](docs/PLAN.md) for the full design and [docs/API.md](docs/API.md) for the API draft.
+**Status:** milestone 2 complete: one or more channels can go on air from your own folders. See [docs/PLAN.md](docs/PLAN.md) for the full design and roadmap, and [docs/API.md](docs/API.md) for the API.
 
-## Highlights (planned)
+## What works today
 
-- One stream per channel; many TVs can watch different channels at once.
-- Works with VLC, Plex/Jellyfin/Emby (HDHomeRun emulation), Kodi, TiviMate, plus a built-in web player.
-- Phone/web remote to change channels on any registered TV.
-- Autopilot: never runs out. Episodes continue in order and wrap, or fall back to chaos.
-- Commercial pods and bumpers generated automatically from the schedule.
-- Channel 3 guide channel that always shows what's next.
-- Native Liquid Glass app on macOS; modern glass UI on Windows and Linux; web UI everywhere.
+- Library scanner: point it at a folder of shows; parses `Show/Season N/Show - S01E02 - Title.mkv` (and flat / `1x02` styles), probes with ffprobe, skips broken files.
+- Channels: sequential (episodes in order, shows interleaved) or shuffle/chaos, endless and deterministic, started on first viewer and stopped when idle (or always-on).
+- Normalized HLS output (1280x720, H.264/AAC) from mismatched sources, gapless across items, about 0.7 s tune-in.
+- Many TVs can watch different channels at once; one encode per channel is shared by all viewers.
+- M3U playlist and XMLTV guide for VLC, Kodi, TiviMate and similar clients.
+- Web player with channel list, now/next, and a phone remote that controls any registered TV.
+- Watchdog restarts a crashed channel; config and TV state persist in SQLite.
+- Service templates for launchd, systemd and Windows Task Scheduler.
 
-## Build
+Not yet: commercials, bumpers, the guide channel, time-slot scheduling and Autopilot cursors, HDHomeRun emulation, native/desktop GUI (see the roadmap).
 
-Requires Rust (stable) and FFmpeg on `PATH` for now.
+## Quick start
+
+Requires Rust (stable) and FFmpeg (`ffmpeg` and `ffprobe` on `PATH`).
 
 ```bash
-cargo build
-cargo test
 cargo run -p tvmaster-cli -- serve
 ```
 
-Then open http://localhost:8787/api/v1/health.
+Then, from another terminal (or any HTTP client):
+
+```bash
+B=http://localhost:8787
+curl -XPOST $B/api/v1/libraries -H 'content-type: application/json' -d '{"path":"/path/to/your/tv"}'
+curl -XPOST $B/api/v1/libraries/1/scan
+curl -XPOST $B/api/v1/channels -H 'content-type: application/json' \
+  -d '{"id":"retro","number":4,"name":"Retro TV","strategy":"sequential","library_ids":[1]}'
+```
+
+- Watch in a browser: `http://localhost:8787/`
+- IPTV clients: playlist `http://<host>:8787/iptv/playlist.m3u`, guide `http://<host>:8787/iptv/guide.xml`
+- Make a screen a TV: open `http://<host>:8787/?tv=living-room` on it (smart-TV browser, tablet, laptop)
+- Phone remote for that TV: open `http://<host>:8787/?remote=living-room`
+
+Run unattended: `tvmaster service launchd|systemd|windows` prints a definition that starts on boot and restarts on failure.
+
+Hardware encoding: VideoToolbox is used automatically on macOS; use `--encoder nvenc` to opt in to NVENC, `--encoder software` for libx264.
+
+## Develop
+
+```bash
+cargo test --workspace      # unit tests; the HLS end-to-end test runs when FFmpeg is installed
+cargo clippy --workspace --all-targets -- -D warnings
+```
 
 ## License
 

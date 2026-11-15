@@ -1,4 +1,8 @@
-//! SQLite persistence: schema and connection helpers.
+//! SQLite persistence: schema, connection helpers and typed queries.
+
+mod store;
+
+pub use store::*;
 
 use rusqlite::Connection;
 use std::path::Path;
@@ -29,6 +33,7 @@ CREATE TABLE IF NOT EXISTS media_items (
     width       INTEGER,
     height      INTEGER,
     vcodec      TEXT,
+    acodec      TEXT,
     breaks_json TEXT,
     missing     INTEGER NOT NULL DEFAULT 0
 );
@@ -40,7 +45,16 @@ CREATE TABLE IF NOT EXISTS channels (
     strategy  TEXT NOT NULL,
     run_out   TEXT NOT NULL,
     autopilot INTEGER NOT NULL DEFAULT 1,
-    chaos     INTEGER NOT NULL DEFAULT 0
+    chaos     INTEGER NOT NULL DEFAULT 0,
+    seed      INTEGER NOT NULL DEFAULT 0,
+    epoch_ms  INTEGER NOT NULL DEFAULT 0,
+    always_on INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS channel_libraries (
+    channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+    PRIMARY KEY (channel_id, library_id)
 );
 
 -- Reserved vs committed episode cursors (see tvmaster-core::EpisodeCursor).

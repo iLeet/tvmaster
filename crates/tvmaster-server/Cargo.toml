@@ -12,6 +12,10 @@ serde_json.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tvmaster-core.workspace = true
+tvmaster-db.workspace = true
+tvmaster-media.workspace = true
+tvmaster-playout.workspace = true
+rusqlite.workspace = true
 
 [dev-dependencies]
 http-body-util.workspace = true

@@ -1,0 +1,179 @@
+//! IPTV outputs: M3U playlist and XMLTV guide.
+
+use crate::plan::{build_plan, now_ms};
+use crate::{ApiResult, AppState};
+use axum::{
+    extract::State,
+    http::{header, HeaderMap, HeaderValue},
+    response::{IntoResponse, Response},
+};
+use tvmaster_core::xmltv_time;
+
+/// Guide look-ahead.
+const GUIDE_HOURS: i64 = 24;
+/// Safety cap on programmes per channel (very short items).
+const MAX_PROGRAMMES: usize = 1000;
+
+fn base_url(headers: &HeaderMap) -> String {
+    let host = headers
+        .get(header::HOST)
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("localhost:8787");
+    format!("http://{host}")
+}
+
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
+fn m3u_attr(s: &str) -> String {
+    s.replace('"', "'").replace(['\n', '\r'], " ")
+}
+
+fn text_response(content_type: &'static str, body: String) -> Response {
+    let mut res = body.into_response();
+    res.headers_mut()
+        .insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
+    res
+}
+
+pub async fn playlist(State(s): State<AppState>, headers: HeaderMap) -> ApiResult<Response> {
+    let base = base_url(&headers);
+    let channels = tvmaster_db::list_channels(&s.db())?;
+    let mut out = format!("#EXTM3U x-tvg-url=\"{base}/iptv/guide.xml\"\n");
+    for c in channels {
+        let name = m3u_attr(&c.name);
+        out.push_str(&format!(
+            "#EXTINF:-1 tvg-id=\"{id}\" tvg-chno=\"{n}\" tvg-name=\"{name}\" group-title=\"TVMaster\",{name}\n{base}/stream/{id}/index.m3u8\n",
+            id = c.id,
+            n = c.number,
+        ));
+    }
+    Ok(text_response("audio/x-mpegurl; charset=utf-8", out))
+}
+
+pub async fn guide(State(s): State<AppState>) -> ApiResult<Response> {
+    let channels = tvmaster_db::list_channels(&s.db())?;
+    let mut xml = String::from(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<tv generator-info-name=\"TVMaster\">\n",
+    );
+    for c in &channels {
+        xml.push_str(&format!(
+            "  <channel id=\"{id}\"><display-name>{name}</display-name><display-name>{n}</display-name></channel>\n",
+            id = xml_escape(&c.id),
+            name = xml_escape(&c.name),
+            n = c.number
+        ));
+    }
+    let start = now_ms();
+    let end = start + GUIDE_HOURS * 3_600_000;
+    for c in channels {
+        let id = c.id.clone();
+        let Some(plan) = build_plan(&s.db(), c)? else {
+            continue;
+        };
+        for slot in plan
+            .timeline
+            .iter_from(start)
+            .take_while(|sl| sl.start_ms < end)
+            .take(MAX_PROGRAMMES)
+        {
+            let m = plan.media.get(&slot.media_id);
+            let show = m.and_then(|m| m.show.clone());
+            let title = m.and_then(|m| m.title.clone()).unwrap_or_default();
+            let main_title = show.clone().unwrap_or_else(|| title.clone());
+            xml.push_str(&format!(
+                "  <programme start=\"{}\" stop=\"{}\" channel=\"{}\">\n    <title>{}</title>\n",
+                xmltv_time(slot.start_ms),
+                xmltv_time(slot.end_ms),
+                xml_escape(&id),
+                xml_escape(&main_title),
+            ));
+            if show.is_some() && !title.is_empty() {
+                xml.push_str(&format!(
+                    "    <sub-title>{}</sub-title>\n",
+                    xml_escape(&title)
+                ));
+            }
+            if let Some((Some(sn), Some(ep))) = m.map(|m| (m.season, m.episode)) {
+                xml.push_str(&format!(
+                    "    <episode-num system=\"onscreen\">S{sn:02}E{ep:02}</episode-num>\n"
+                ));
+            }
+            xml.push_str("  </programme>\n");
+        }
+    }
+    xml.push_str("</tv>\n");
+    Ok(text_response("application/xml; charset=utf-8", xml))
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::test_util::call_raw;
+    use crate::{router, AppState};
+    use tvmaster_db::{add_library, upsert_media, NewMedia};
+
+    async fn app() -> axum::Router {
+        let state = AppState::in_memory();
+        let lib = {
+            let db = state.db();
+            let lib = add_library(&db, "/tv", "shows").unwrap();
+            upsert_media(
+                &db,
+                &NewMedia {
+                    library_id: lib.id,
+                    path: "/tv/a.mp4".into(),
+                    show: Some("Tom & Jerry".into()),
+                    season: Some(1),
+                    episode: Some(2),
+                    title: Some("The <Cat>".into()),
+                    duration_ms: 600_000,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            lib.id
+        };
+        let app = router(state);
+        call_raw(
+            &app,
+            "POST",
+            "/api/v1/channels",
+            &format!(
+                r#"{{"id":"toons","number":8,"name":"Toons \"24/7\"","library_ids":[{lib}]}}"#
+            ),
+        )
+        .await;
+        app
+    }
+
+    #[tokio::test]
+    async fn m3u_uses_request_host_and_channel_numbers() {
+        let app = app().await;
+        let (_, m3u) = call_raw(&app, "GET", "/iptv/playlist.m3u", "").await;
+        assert!(m3u.starts_with("#EXTM3U x-tvg-url=\"http://tv.local:8787/iptv/guide.xml\""));
+        assert!(m3u.contains("tvg-id=\"toons\" tvg-chno=\"8\""));
+        assert!(m3u.contains("http://tv.local:8787/stream/toons/index.m3u8"));
+        assert!(
+            !m3u.contains("\"24/7\""),
+            "quotes in names must be neutralised"
+        );
+    }
+
+    #[tokio::test]
+    async fn xmltv_escapes_and_lists_programmes() {
+        let app = app().await;
+        let (_, xml) = call_raw(&app, "GET", "/iptv/guide.xml", "").await;
+        assert!(xml.contains("<channel id=\"toons\">"));
+        assert!(xml.contains("<title>Tom &amp; Jerry</title>"));
+        assert!(xml.contains("<sub-title>The &lt;Cat&gt;</sub-title>"));
+        assert!(xml.contains("S01E02"));
+        // 10-minute items over 24h: lots of programmes
+        assert!(xml.matches("<programme ").count() >= 100);
+        assert!(xml.trim_end().ends_with("</tv>"));
+    }
+}

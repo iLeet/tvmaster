@@ -30,6 +30,48 @@ pub enum RunOutPolicy {
     Hybrid,
 }
 
+impl Strategy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Strategy::Chaos => "chaos",
+            Strategy::Shuffle => "shuffle",
+            Strategy::Sequential => "sequential",
+            Strategy::BlockGrid => "block_grid",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "chaos" => Strategy::Chaos,
+            "shuffle" => Strategy::Shuffle,
+            "sequential" => Strategy::Sequential,
+            "block_grid" => Strategy::BlockGrid,
+            _ => return None,
+        })
+    }
+}
+
+impl RunOutPolicy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            RunOutPolicy::KeepGoing => "keep_going",
+            RunOutPolicy::NextInRotation => "next_in_rotation",
+            RunOutPolicy::ChaosFill => "chaos_fill",
+            RunOutPolicy::Hybrid => "hybrid",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "keep_going" => RunOutPolicy::KeepGoing,
+            "next_in_rotation" => RunOutPolicy::NextInRotation,
+            "chaos_fill" => RunOutPolicy::ChaosFill,
+            "hybrid" => RunOutPolicy::Hybrid,
+            _ => return None,
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Channel {
     pub id: String,
@@ -41,6 +83,14 @@ pub struct Channel {
     pub autopilot: bool,
     /// 0 (fully structured) to 100 (complete chaos).
     pub chaos: u8,
+    /// Seed for deterministic shuffling.
+    pub seed: u64,
+    /// The channel "started broadcasting" at this instant (epoch ms).
+    pub epoch_ms: i64,
+    /// Keep encoding even with no viewers (otherwise starts on first viewer).
+    pub always_on: bool,
+    /// Libraries this channel draws programming from.
+    pub library_ids: Vec<i64>,
 }
 
 /// A registered player (a TV) that a remote can control.

@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>TVMaster</title>
+<style>
+  :root {
+    --bg: #0b0d12; --panel: rgba(255,255,255,.07); --edge: rgba(255,255,255,.14);
+    --text: #f2f4f8; --dim: #9aa3b2; --accent: #6ea8ff;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg: #e9edf5; --panel: rgba(255,255,255,.65); --edge: rgba(0,0,0,.10);
+            --text: #11151c; --dim: #566074; --accent: #1a5fd6; }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 15px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  body { display: flex; gap: 16px; padding: 16px; }
+  .glass { background: var(--panel); border: 1px solid var(--edge); border-radius: 18px;
+    -webkit-backdrop-filter: blur(24px) saturate(1.4); backdrop-filter: blur(24px) saturate(1.4); }
+  #screen { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+  #stage { position: relative; flex: 1; min-height: 0; background: #000; border-radius: 18px; overflow: hidden; }
+  video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+  #osd { position: absolute; top: 14px; left: 16px; padding: 8px 14px; border-radius: 12px;
+    background: rgba(0,0,0,.55); color: #fff; font-weight: 600; opacity: 0; transition: opacity .4s; pointer-events: none; }
+  #osd.show { opacity: 1; }
+  #off { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; background: #000; color: #666; }
+  #side { width: 300px; padding: 12px; overflow: auto; flex-shrink: 0; }
+  h1 { font-size: 13px; letter-spacing: .12em; text-transform: uppercase; color: var(--dim); margin: 4px 8px 10px; }
+  .ch { display: flex; gap: 10px; width: 100%; text-align: left; padding: 10px; border: 0; border-radius: 12px;
+    background: transparent; color: inherit; cursor: pointer; font: inherit; }
+  .ch:hover { background: var(--panel); }
+  .ch.active { background: color-mix(in srgb, var(--accent) 22%, transparent); outline: 1px solid var(--edge); }
+  .num { min-width: 2ch; font-weight: 700; color: var(--accent); }
+  .meta { min-width: 0; } .name { font-weight: 600; }
+  .now, .next { color: var(--dim); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #bar { padding: 10px 14px; display: flex; gap: 12px; align-items: center; justify-content: space-between; }
+  #bar .t { font-weight: 600; } #bar .s { color: var(--dim); font-size: 13px; }
+  .hint { color: var(--dim); font-size: 12px; padding: 8px; }
+  /* remote mode */
+  body.remote #screen, body.remote #side { display: none; }
+  #remote { display: none; flex-direction: column; gap: 12px; width: 100%; max-width: 480px; margin: 0 auto; }
+  body.remote #remote { display: flex; }
+  #remote .row { display: flex; gap: 10px; }
+  #remote button.big { flex: 1; padding: 18px; border-radius: 16px; border: 1px solid var(--edge); background: var(--panel);
+    color: inherit; font: inherit; font-weight: 700; font-size: 18px; cursor: pointer; }
+  body.tv #side, body.tv #bar { display: none; }
+  body.tv { padding: 0; } body.tv #stage { border-radius: 0; }
+  @media (max-width: 760px) { body:not(.remote) { flex-direction: column; } #side { width: 100%; max-height: 40vh; } }
+</style>
+</head>
+<body>
+<div id="screen">
+  <div id="stage"><video id="v" autoplay playsinline></video><div id="osd"></div><div id="off">Off</div></div>
+  <div id="bar" class="glass"><div><div class="t" id="t">TVMaster</div><div class="s" id="s">Pick a channel</div></div></div>
+</div>
+<aside id="side" class="glass"><h1>Channels</h1><div id="list"></div>
+  <div class="hint">↑ / ↓ change channel · F fullscreen</div></aside>
+<div id="remote" class="glass" style="padding:16px">
+  <h1 id="rtitle">Remote</h1>
+  <div class="row"><button class="big" id="rup">Ch ▲</button><button class="big" id="rdown">Ch ▼</button></div>
+  <div class="row"><button class="big" id="rpower">Power</button></div>
+  <div id="rlist"></div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.17/hls.min.js"></script>
+<script>
+const q = new URLSearchParams(location.search);
+const tvId = q.get('tv'), remoteId = q.get('remote');
+const $ = id => document.getElementById(id);
+const v = $('v');
+let channels = [], current = null, hls = null, osdTimer = null;
+
+const api = (p, opt) => fetch('/api/v1' + p, opt).then(r => r.ok ? r.json() : Promise.reject(r));
+const post = (p, body) => api(p, { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify(body) });
+const fmt = ms => new Date(ms).toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
+const label = p => p ? (p.show ? `${p.show} — ${p.title}` : p.title) : '—';
+
+function osd(text) {
+  const o = $('osd'); o.textContent = text; o.classList.add('show');
+  clearTimeout(osdTimer); osdTimer = setTimeout(() => o.classList.remove('show'), 2500);
+}
+
+function play(ch) {
+  if (!ch || (current && current.id === ch.id && !v.paused)) return;
+  current = ch;
+  const url = `/stream/${ch.id}/index.m3u8`;
+  if (hls) { hls.destroy(); hls = null; }
+  if (window.Hls && Hls.isSupported()) {
+    hls = new Hls({ liveSyncDurationCount: 3, maxBufferLength: 20 });
+    hls.loadSource(url); hls.attachMedia(v);
+    hls.on(Hls.Events.ERROR, (_, d) => { if (d.fatal) setTimeout(() => { const c = current; current = null; play(c); }, 3000); });
+  } else { v.src = url; }   // Safari plays HLS natively
+  v.play().catch(() => {});
+  osd(`${ch.number}  ${ch.name}`);
+  render();
+}
+
+function render() {
+  $('list').innerHTML = '';
+  for (const ch of channels) {
+    const b = document.createElement('button');
+    b.className = 'ch' + (current && current.id === ch.id ? ' active' : '');
+    b.innerHTML = `<span class="num">${ch.number}</span><span class="meta"><div class="name"></div><div class="now"></div><div class="next"></div></span>`;
+    b.querySelector('.name').textContent = ch.name;
+    b.querySelector('.now').textContent = 'Now: ' + label(ch.now);
+    b.querySelector('.next').textContent = ch.next ? `${fmt(ch.next.start_ms)}: ${label(ch.next)}` : '';
+    b.onclick = () => selectChannel(ch);
+    $('list').appendChild(b);
+  }
+  if (current) {
+    const c = channels.find(c => c.id === current.id) || current;
+    $('t').textContent = `${c.number}  ${c.name}`;
+    $('s').textContent = c.now ? `Now: ${label(c.now)}${c.next ? '  ·  Next: ' + label(c.next) : ''}` : '';
+  }
+}
+
+function selectChannel(ch) {
+  if (tvId) post(`/tvs/${tvId}/channel`, { number: ch.number }); else play(ch);
+}
+
+function step(dir) {
+  if (!channels.length) return;
+  const i = current ? channels.findIndex(c => c.id === current.id) : -1;
+  const n = (i + (dir === 'up' ? 1 : -1) + channels.length) % channels.length;
+  selectChannel(channels[n]);
+}
+
+async function refresh() {
+  try { channels = await api('/channels'); } catch { return; }
+  if (current) current = channels.find(c => c.id === current.id) || current;
+  if (remoteId) renderRemote(); else render();
+}
+
+// ---- Virtual TV mode: follow the remote ----
+async function followTv() {
+  try {
+    const tv = await api(`/tvs/${tvId}`);
+    $('off').style.display = tv.power ? 'none' : 'flex';
+    if (!tv.power) { v.pause(); current = null; return; }
+    v.muted = tv.muted; v.volume = tv.volume / 100;
+    const ch = channels.find(c => c.number === tv.channel);
+    if (ch && (!current || current.id !== ch.id)) play(ch);
+  } catch {}
+}
+
+// ---- Remote mode ----
+let tvState = null;
+async function renderRemote() {
+  try { tvState = await api(`/tvs/${remoteId}`); } catch { tvState = null; }
+  $('rtitle').textContent = tvState ? `Remote — ${tvState.name}` : 'Remote — TV not registered';
+  $('rpower').textContent = tvState && tvState.power ? 'Power: On' : 'Power: Off';
+  const list = $('rlist'); list.innerHTML = '';
+  for (const ch of channels) {
+    const b = document.createElement('button');
+    b.className = 'ch' + (tvState && tvState.channel === ch.number ? ' active' : '');
+    b.innerHTML = `<span class="num">${ch.number}</span><span class="meta"><div class="name"></div><div class="now"></div></span>`;
+    b.querySelector('.name').textContent = ch.name;
+    b.querySelector('.now').textContent = 'Now: ' + label(ch.now);
+    b.onclick = async () => { await post(`/tvs/${remoteId}/channel`, { number: ch.number }); renderRemote(); };
+    list.appendChild(b);
+  }
+}
+
+addEventListener('keydown', e => {
+  if (remoteId) return;
+  if (e.key === 'ArrowUp') step('up');
+  else if (e.key === 'ArrowDown') step('down');
+  else if (e.key === 'f') (document.fullscreenElement ? document.exitFullscreen() : $('stage').requestFullscreen());
+});
+
+(async function main() {
+  if (remoteId) {
+    document.body.classList.add('remote');
+    $('rup').onclick = async () => { await post(`/tvs/${remoteId}/channel`, { step: 'up' }); renderRemote(); };
+    $('rdown').onclick = async () => { await post(`/tvs/${remoteId}/channel`, { step: 'down' }); renderRemote(); };
+    $('rpower').onclick = async () => { await post(`/tvs/${remoteId}/power`, { on: !(tvState && tvState.power) }); renderRemote(); };
+    await refresh(); setInterval(refresh, 5000); setInterval(renderRemote, 2000);
+    return;
+  }
+  await refresh();
+  if (tvId) {
+    document.body.classList.add('tv');
+    // Register only if new, so a friendly name set elsewhere is not overwritten.
+    await api(`/tvs/${tvId}`).catch(() => post('/tvs', { id: tvId, name: tvId }).catch(() => {}));
+    await followTv(); setInterval(followTv, 1500);
+  } else if (channels.length) { play(channels[0]); }
+  setInterval(refresh, 15000);
+})();
+</script>
+</body>
+</html>
