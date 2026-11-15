@@ -9,7 +9,9 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use tvmaster_core::{Channel, ItemKind, Lineup, RunOutPolicy, Strategy, Zone};
+use tvmaster_core::{
+    Channel, ChannelKind, GuideConfig, ItemKind, Lineup, RunOutPolicy, Strategy, Zone,
+};
 
 const VIEW_LOOKAHEAD_MS: i64 = 12 * 3_600_000;
 
@@ -91,9 +93,11 @@ pub struct ChannelInput {
     chaos: Option<u8>,
     seed: Option<u64>,
     always_on: Option<bool>,
-    #[serde(default)]
-    library_ids: Vec<i64>,
+    library_ids: Option<Vec<i64>>,
     lineup: Option<Lineup>,
+    kind: Option<ChannelKind>,
+    group: Option<String>,
+    guide: Option<GuideConfig>,
 }
 
 fn valid_id(id: &str) -> bool {
@@ -108,7 +112,8 @@ fn valid_id(id: &str) -> bool {
 
 /// Do these two channels differ in anything that changes what airs?
 fn programming_differs(a: &Channel, b: &Channel) -> bool {
-    a.strategy != b.strategy
+    a.kind != b.kind
+        || a.strategy != b.strategy
         || a.run_out != b.run_out
         || a.chaos != b.chaos
         || a.seed != b.seed
@@ -154,13 +159,19 @@ fn bad_lineup(reason: String) -> ApiError {
 /// channel is on autopilot, otherwise leave the locked schedule alone (it is
 /// still topped up so the channel never runs dry).
 fn apply_programming_change(s: &AppState, channel: &Channel, existed: bool) -> ApiResult<()> {
-    let db = s.db();
-    let now = now_ms();
-    if existed && channel.autopilot {
-        autopilot::reroll(&db, channel, now)?;
-    } else {
-        autopilot::maintain(&db, channel, now)?;
+    if channel.kind == ChannelKind::Guide {
+        return Ok(()); // rendered live; nothing to schedule
     }
+    {
+        let db = s.db();
+        let now = now_ms();
+        if existed && channel.autopilot {
+            autopilot::reroll(&db, channel, now)?;
+        } else {
+            autopilot::maintain(&db, channel, now)?;
+        }
+    }
+    s.emit(json!({ "type": "schedule.changed", "channel": channel.id }));
     Ok(())
 }
 
@@ -182,8 +193,7 @@ pub async fn upsert(
             "number must be > 0 and name must not be empty",
         ));
     }
-    let chaos = body.chaos.unwrap_or(0);
-    if chaos > 100 {
+    if body.chaos.is_some_and(|c| c > 100) {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             "chaos must be 0-100",
@@ -193,10 +203,37 @@ pub async fn upsert(
         l.validate().map_err(bad_lineup)?;
         check_ad_libraries(&s.db(), l)?;
     }
+    if let Some(g) = &body.guide {
+        g.validate()
+            .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, e))?;
+        for id in &g.music_library_ids {
+            match tvmaster_db::get_library(&s.db(), *id)? {
+                Some(l) if l.kind == "music" => {}
+                _ => {
+                    return Err(ApiError::new(
+                        StatusCode::BAD_REQUEST,
+                        format!("library {id} is not a 'music' library"),
+                    ))
+                }
+            }
+        }
+    }
+    let group = body
+        .group
+        .as_deref()
+        .map(str::trim)
+        .filter(|g| !g.is_empty())
+        .map(str::to_string);
+    if group.as_ref().is_some_and(|g| g.chars().count() > 40) {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "group must be at most 40 characters",
+        ));
+    }
 
     let (channel, existing) = {
         let db = s.db();
-        for lib in &body.library_ids {
+        for lib in body.library_ids.iter().flatten() {
             if tvmaster_db::get_library(&db, *lib)?.is_none() {
                 return Err(ApiError::new(
                     StatusCode::BAD_REQUEST,
@@ -231,7 +268,10 @@ pub async fn upsert(
                 .autopilot
                 .or(existing.as_ref().map(|e| e.autopilot))
                 .unwrap_or(true),
-            chaos,
+            chaos: body
+                .chaos
+                .or(existing.as_ref().map(|e| e.chaos))
+                .unwrap_or(0),
             seed: body
                 .seed
                 .or(existing.as_ref().map(|e| e.seed))
@@ -241,12 +281,24 @@ pub async fn upsert(
                 .always_on
                 .or(existing.as_ref().map(|e| e.always_on))
                 .unwrap_or(false),
-            library_ids: body.library_ids,
+            library_ids: body
+                .library_ids
+                .or(existing.as_ref().map(|e| e.library_ids.clone()))
+                .unwrap_or_default(),
             lineup: with_timezone(
                 body.lineup
                     .or(existing.as_ref().map(|e| e.lineup.clone()))
                     .unwrap_or_default(),
             ),
+            kind: body
+                .kind
+                .or(existing.as_ref().map(|e| e.kind))
+                .unwrap_or_default(),
+            group: group.or(existing.as_ref().and_then(|e| e.group.clone())),
+            guide: body
+                .guide
+                .or(existing.as_ref().map(|e| e.guide.clone()))
+                .unwrap_or_default(),
         };
         tvmaster_db::upsert_channel(&db, &channel)?;
         (channel, existing)
@@ -312,6 +364,7 @@ pub async fn put_lineup(
 pub async fn reroll(State(s): State<AppState>, Path(id): Path<String>) -> ApiResult<Json<Value>> {
     let channel = load(&s, &id)?;
     let items = autopilot::reroll(&s.db(), &channel, now_ms())?;
+    s.emit(json!({ "type": "schedule.changed", "channel": channel.id }));
     Ok(Json(json!({ "items": items })))
 }
 
@@ -735,6 +788,95 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_guide_channel_lists_every_channel_and_needs_no_schedule() {
+        let (state, app, shows, _ads, _clips) = app_with_ads();
+        for (id, n, g) in [("retro", 4, "Sitcoms"), ("toons", 5, "Kids")] {
+            let body = format!(
+                r#"{{"id":"{id}","number":{n},"name":"{id} tv","group":"{g}","library_ids":[{shows}],"strategy":"sequential"}}"#
+            );
+            assert_eq!(
+                call(&app, "POST", "/api/v1/channels", &body).await.0,
+                StatusCode::CREATED
+            );
+        }
+        let g = r#"{"id":"guide","number":3,"name":"Retro","kind":"guide","always_on":false,
+                    "guide":{"hours":3,"ticker":["Welcome to Retro TV"]}}"#;
+        let (st, ch) = call(&app, "POST", "/api/v1/channels", g).await;
+        assert_eq!(st, StatusCode::CREATED, "{ch}");
+        assert_eq!(ch["kind"], "guide");
+        assert_eq!(ch["guide"]["hours"], 3);
+
+        // no schedule is generated for a guide channel
+        assert!(tvmaster_db::schedule_last_end(&state.db(), "guide")
+            .unwrap()
+            .is_none());
+        let (_, all) = call(&app, "GET", "/api/v1/channels", "").await;
+        assert_eq!(all.as_array().unwrap().len(), 3);
+
+        // what it draws: every programming channel, in number order, with live programmes
+        let now = crate::plan::now_ms();
+        let data = crate::plan::build_guide(&state.db(), "guide", now).unwrap();
+        assert_eq!(data.title, "Retro GUIDE");
+        let numbers: Vec<u32> = data.rows.iter().map(|r| r.number).collect();
+        assert_eq!(numbers, vec![4, 5], "the guide does not list itself");
+        assert!(data.rows.iter().all(|r| r.cells.len() > 3));
+        assert_eq!(data.marks.len(), 6, "a mark every half hour for 3 hours");
+        assert_eq!(data.window_ms, 3 * 3_600_000);
+        assert!(data.window_start_ms <= now && now - data.window_start_ms < 30 * 60_000);
+        assert!(data.ticker.contains("Welcome to Retro TV"));
+        assert!(data.ticker.contains("NOW ON 4: Alpha"));
+        assert!(data.clock.ends_with("AM") || data.clock.ends_with("PM"));
+
+        // playlist: groups and the guide; XMLTV: a programme for the guide
+        let (_, m3u) = crate::test_util::call_raw(&app, "GET", "/iptv/playlist.m3u", "").await;
+        assert!(m3u.contains("group-title=\"Sitcoms\"") && m3u.contains("group-title=\"Kids\""));
+        assert!(m3u.contains("tvg-chno=\"3\""));
+        assert!(
+            m3u.contains("group-title=\"TVMaster\""),
+            "ungrouped channels keep the default"
+        );
+        let (_, xml) = crate::test_util::call_raw(&app, "GET", "/iptv/guide.xml", "").await;
+        assert!(xml.contains("<title>Retro Guide</title>"));
+    }
+
+    #[tokio::test]
+    async fn guide_and_group_settings_are_validated() {
+        let (_state, app, shows, ads, clips) = app_with_ads();
+        let post = |body: String| {
+            let app = app.clone();
+            async move { call(&app, "POST", "/api/v1/channels", &body).await }
+        };
+        assert_eq!(
+            post(r#"{"id":"g","number":3,"name":"G","kind":"guide","guide":{"hours":9}}"#.into())
+                .await
+                .0,
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            post(format!(r#"{{"id":"g","number":3,"name":"G","kind":"guide","guide":{{"music_library_ids":[{shows}]}}}}"#)).await.0,
+            StatusCode::BAD_REQUEST,
+            "music libraries only"
+        );
+        assert_eq!(
+            post(format!(
+                r#"{{"id":"g","number":3,"name":"G","group":"{}"}}"#,
+                "x".repeat(41)
+            ))
+            .await
+            .0,
+            StatusCode::BAD_REQUEST
+        );
+        let _ = (ads, clips);
+        // a group is trimmed, kept on update, and can be changed
+        let (_, c) = post(r#"{"id":"a","number":1,"name":"A","group":"  Movies  "}"#.into()).await;
+        assert_eq!(c["group"], "Movies");
+        let (_, c) = post(r#"{"id":"a","number":1,"name":"A2"}"#.into()).await;
+        assert_eq!(c["group"], "Movies", "an update without a group keeps it");
+        let (_, c) = post(r#"{"id":"a","number":1,"name":"A2","group":"Kids"}"#.into()).await;
+        assert_eq!(c["group"], "Kids");
+    }
+
+    #[tokio::test]
     async fn lineups_without_a_time_zone_get_the_servers() {
         let (app, lib) = app_with_media();
         let body = format!(
@@ -819,6 +961,35 @@ mod tests {
         )
         .await;
         assert_eq!(st, StatusCode::CONFLICT);
+    }
+
+    #[tokio::test]
+    async fn omitted_fields_keep_their_values_on_update() {
+        let (app, lib) = app_with_media();
+        let create = format!(
+            r#"{{"id":"a","number":1,"name":"A","strategy":"chaos","chaos":40,"library_ids":[{lib}]}}"#
+        );
+        call(&app, "POST", "/api/v1/channels", &create).await;
+        let (_, c) = call(
+            &app,
+            "POST",
+            "/api/v1/channels",
+            r#"{"id":"a","number":1,"name":"Renamed"}"#,
+        )
+        .await;
+        assert_eq!(c["library_ids"], serde_json::json!([lib]), "libraries kept");
+        assert_eq!(c["chaos"], 40);
+        assert_eq!(c["strategy"], "chaos");
+        // but an explicit value replaces them
+        let (_, c) = call(
+            &app,
+            "POST",
+            "/api/v1/channels",
+            r#"{"id":"a","number":1,"name":"Renamed","library_ids":[],"chaos":0}"#,
+        )
+        .await;
+        assert_eq!(c["library_ids"], serde_json::json!([]));
+        assert_eq!(c["chaos"], 0);
     }
 
     #[tokio::test]

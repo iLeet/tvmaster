@@ -7,9 +7,10 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tokio::sync::Notify;
-use tvmaster_core::{ItemKind, Zone};
+use tvmaster_core::{ChannelKind, ItemKind, Zone};
 use tvmaster_db::MediaRow;
-use tvmaster_playout::{PlayItem, PlayKind, ScheduleSource, Upcoming};
+use tvmaster_playout::{GuideData, PlayItem, PlayKind, ScheduleSource, Upcoming};
+use tvmaster_render::{GuideCell, GuideRow};
 
 pub fn now_ms() -> i64 {
     std::time::SystemTime::now()
@@ -134,6 +135,76 @@ fn time_label(zone: &Zone, ms: i64) -> String {
     format!("{h12}:{m:02} {ampm}")
 }
 
+/// The listing a guide channel draws: every programming channel, from the
+/// current half hour, plus a ticker with what is on now.
+pub fn build_guide(db: &Connection, guide_id: &str, now_ms: i64) -> Option<GuideData> {
+    const HALF_HOUR: i64 = 30 * 60_000;
+    let guide = tvmaster_db::get_channel(db, guide_id).ok().flatten()?;
+    let channels = tvmaster_db::list_channels(db).ok()?;
+    let zone = Zone::parse(
+        &channels
+            .iter()
+            .find(|c| c.kind == ChannelKind::Programming)
+            .map(|c| c.lineup.timezone.clone())
+            .unwrap_or_default(),
+    )
+    .or_else(|| Zone::parse(&guide.lineup.timezone))
+    .unwrap_or_else(Zone::utc);
+    let start = zone.floor_grid(now_ms, HALF_HOUR);
+    let window_ms = guide.guide.hours as i64 * 3_600_000;
+
+    let mut rows = Vec::new();
+    let mut ticker: Vec<String> = guide.guide.ticker.clone();
+    for ch in channels
+        .iter()
+        .filter(|c| c.kind == ChannelKind::Programming)
+    {
+        let progs = programs(db, &ch.id, start, start + window_ms).unwrap_or_default();
+        if let (Some(now), _) = now_and_next(&progs, now_ms) {
+            ticker.push(format!(
+                "NOW ON {}: {}",
+                ch.number,
+                now.show.clone().unwrap_or(now.title.clone())
+            ));
+        }
+        rows.push(GuideRow {
+            number: ch.number,
+            name: ch.name.clone(),
+            cells: progs
+                .into_iter()
+                .map(|p| GuideCell {
+                    start_ms: p.start_ms,
+                    end_ms: p.end_ms,
+                    title: p.show.unwrap_or(p.title),
+                })
+                .collect(),
+        });
+    }
+    let title = guide
+        .guide
+        .title
+        .clone()
+        .filter(|t| !t.trim().is_empty())
+        .unwrap_or_else(|| format!("{} GUIDE", guide.name));
+    let local = zone.local(now_ms);
+    Some(GuideData {
+        title,
+        now_ms,
+        window_start_ms: start,
+        window_ms,
+        clock: time_label(&zone, now_ms),
+        date: local.format("%a %b %-d").to_string().to_uppercase(),
+        marks: (0..window_ms / HALF_HOUR)
+            .map(|i| {
+                let at = start + i * HALF_HOUR;
+                (at, time_label(&zone, at))
+            })
+            .collect(),
+        rows,
+        ticker: ticker.join("   *   "),
+    })
+}
+
 impl DbSchedule {
     fn zone_for(&self, db: &Connection, channel: &str) -> Zone {
         tvmaster_db::get_channel(db, channel)
@@ -166,6 +237,11 @@ impl ScheduleSource for DbSchedule {
             start_ms: it.start_ms,
             end_ms: it.end_ms,
         })
+    }
+
+    fn guide_data(&self, channel: &str, now_ms: i64) -> Option<GuideData> {
+        let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
+        build_guide(&db, channel, now_ms)
     }
 
     fn upcoming(&self, channel: &str, after_ms: i64, limit: usize) -> Upcoming {

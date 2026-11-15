@@ -11,7 +11,10 @@ mod runner;
 mod ts;
 
 pub use manager::Manager;
-pub use profile::{item_args, rendered_args, segmenter_args, slate_args, ItemJob, OutputProfile};
+pub use profile::{
+    guide_args, item_args, rendered_args, segmenter_args, slate_args, ItemJob, OutputProfile,
+};
+pub use tvmaster_render::GuideData;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -67,6 +70,17 @@ pub trait ScheduleSource: Send + Sync + 'static {
     fn upcoming(&self, _channel: &str, _after_ms: i64, _limit: usize) -> Upcoming {
         Upcoming::default()
     }
+    /// The listing to draw on a guide channel at `now_ms`.
+    fn guide_data(&self, _channel: &str, _now_ms: i64) -> Option<GuideData> {
+        None
+    }
+}
+
+/// What a guide channel needs besides the schedule data.
+#[derive(Debug, Clone, Default)]
+pub struct GuideSpec {
+    /// Music files to loop under the guide (silence if empty).
+    pub music: Vec<PathBuf>,
 }
 
 /// Everything the runner needs to put one channel on air.
@@ -77,6 +91,8 @@ pub struct ChannelSpec {
     pub name: String,
     pub always_on: bool,
     pub source: Arc<dyn ScheduleSource>,
+    /// Set for guide channels, which are rendered instead of scheduled.
+    pub guide: Option<GuideSpec>,
 }
 
 #[derive(Debug, Clone)]

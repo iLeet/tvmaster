@@ -120,7 +120,7 @@ docs/                 plan, API, design
 
 ## 12. Milestones
 
-Status: **M1-M4 done** (see notes below). M5 (multi-channel polish, Channel 3 guide, HDHomeRun, WebSocket remote) next.
+Status: **M1-M5 done** (see notes below). M6 (web admin UI, PWA remote, Tauri desktop shell) next.
 
 1. **Foundation:** repo, workspace, CI matrix, FFmpeg manager, library scanner, SQLite schema, API skeleton.
 2. **One channel on air:** playout runner, HLS/M3U/XMLTV, shuffle + sequential, web player, watchdog, service installers, state recovery.
@@ -167,3 +167,12 @@ Golden-file schedule tests (same seed → same schedule), fake-FFmpeg harness fo
 - **Renderer:** `tvmaster-render` draws 640x360 RGB frames with an embedded 8x8 pixel font (`font8x8`, MIT/Apache) and original stripes/scanline art, piped into FFmpeg and scaled up without smoothing. It needs no `drawtext` filter and no font files, so it works with any FFmpeg build and looks the same everywhere. `cargo run -p tvmaster-render --example preview -- <dir>` writes sample frames.
 - **Playout:** acts start part-way into a file, rendered bumpers share the same gapless pipeline (a mixed item stream shows no gap longer than one frame in the end-to-end test).
 - **Known limits:** commercials are not loudness-normalised; short test clips (under about 5 minutes) get fewer breaks because of the 90 s margins; no channel bug or lower third yet; bumpers are silent.
+
+## 18. M5 notes (guide channel, tuners, live remote)
+
+- **Guide channel:** a channel of `kind: guide` is rendered live by `tvmaster-render` (`render_guide`): a Prevue-style grid with a "now" marker, a clock, scrolling pages when there are more than six channels, and a "now on" ticker. One long-running encoder is fed raw frames at 15 fps (FFmpeg duplicates up to 30), plus looping music. The listing is refreshed from the schedule every 5 seconds of stream time, and the on-screen clock follows the stream, not the encoder, so it stays right despite encode-ahead buffering. Music files are converted once to a common format in `cache/music` so different formats can share a playlist.
+- **Tuner compatibility:** `/discover.json`, `/lineup.json`, `/lineup_status.json`, `/device.xml` imitate the HDHomeRun HTTP API, and `/stream/{id}.ts` serves each channel as continuous MPEG-TS by following the HLS segments. Built to the API those servers use; **not yet verified against a real Plex, Jellyfin or Emby** (none available here).
+- **Live remote:** an event bus feeds WebSocket clients (`tv.state`, `channel.now`, `schedule.changed`). Players say `hello` over the socket so TVs show `online`; commands over the socket and REST share the same code. The web player and remote use it, with REST polling as a fallback. Verified in a real browser: a remote click changed the TV page's channel, volume, mute and power immediately.
+- **A deadlock the live run found:** starting a guide channel built its spec (a database read) while the request already held the database lock, hanging the first request for the guide. Unit tests could not see it (no FFmpeg in the server tests). There is now a regression test; the fix is to build the spec after releasing the lock.
+- **Other fixes:** channel updates are now partial (omitting `library_ids` or `chaos` used to reset them); music libraries scan audio files; very narrow guide cells draw as blocks without unreadable text.
+- **Known limits:** no auth on the WebSocket or tuner endpoints; the guide is a fixed look (themes per channel colour only); `/tv/{id}.m3u8` does not follow later channel changes (players that need that should use the web player); channel groups are labels only (no per-group scheduling).

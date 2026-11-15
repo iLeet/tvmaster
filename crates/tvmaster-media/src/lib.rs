@@ -7,7 +7,7 @@ mod scan;
 
 pub use breaks::{analyze, detect_black, from_black, from_chapters, parse_blackdetect, BreakInfo};
 pub use ffmpeg::{find_system_font, Encoder, FfmpegInfo};
-pub use scan::{find_videos, parse_name, parse_year, ParsedName};
+pub use scan::{find_audio, find_videos, parse_name, parse_year, ParsedName};
 
 use anyhow::{Context, Result};
 use serde::Deserialize;

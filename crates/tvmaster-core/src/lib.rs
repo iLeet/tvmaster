@@ -19,7 +19,8 @@ pub use catalog::{Catalog, Ep, MediaRef, ShowEps};
 pub use clock::Zone;
 pub use cursor::EpisodeCursor;
 pub use lineup::{Advance, Block, CatchUp, Event, Lineup, Order, Season, Source};
-pub use model::{Channel, RunOutPolicy, Strategy, Tv};
+pub use model::{Channel, ChannelKind, GuideConfig, RunOutPolicy, Strategy, Tv};
+pub use rng::fnv1a;
 pub use scheduler::{
     align_start, commit_aired, generate, rebuild_reservations, Cursors, ItemKind, SchedConfig,
     ScheduledItem,

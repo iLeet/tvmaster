@@ -9,6 +9,10 @@ const VIDEO_EXTS: &[&str] = &[
     "mkv", "mp4", "m4v", "avi", "mov", "ts", "m2ts", "mpg", "mpeg", "wmv", "webm", "flv",
 ];
 
+const AUDIO_EXTS: &[&str] = &[
+    "mp3", "m4a", "aac", "flac", "wav", "ogg", "opus", "wma", "aiff",
+];
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ParsedName {
     pub show: Option<String>,
@@ -49,8 +53,7 @@ fn clean(s: &str) -> String {
         .join(" ")
 }
 
-/// All video files under `root`, sorted for stable results.
-pub fn find_videos(root: &Path) -> Vec<PathBuf> {
+fn find_with_exts(root: &Path, exts: &[&str]) -> Vec<PathBuf> {
     let mut v: Vec<PathBuf> = WalkDir::new(root)
         .follow_links(true)
         .into_iter()
@@ -61,13 +64,23 @@ pub fn find_videos(root: &Path) -> Vec<PathBuf> {
                 && e.path()
                     .extension()
                     .and_then(|x| x.to_str())
-                    .map(|x| VIDEO_EXTS.contains(&x.to_ascii_lowercase().as_str()))
+                    .map(|x| exts.contains(&x.to_ascii_lowercase().as_str()))
                     .unwrap_or(false)
         })
         .map(|e| e.into_path())
         .collect();
     v.sort();
     v
+}
+
+/// All video files under `root`, sorted for stable results.
+pub fn find_videos(root: &Path) -> Vec<PathBuf> {
+    find_with_exts(root, VIDEO_EXTS)
+}
+
+/// All audio files under `root` (for music libraries), sorted.
+pub fn find_audio(root: &Path) -> Vec<PathBuf> {
+    find_with_exts(root, AUDIO_EXTS)
 }
 
 /// A release year (1920-2039) in the file's name or any folder under `root`,
@@ -178,6 +191,30 @@ mod tests {
     fn missing_episode_title_falls_back_to_code() {
         let n = p("/tv", "/tv/Show Beta/Show Beta S01E04.mkv");
         assert_eq!(n.title, "S01E04");
+    }
+
+    #[test]
+    fn audio_and_video_are_found_separately() {
+        let dir = std::env::temp_dir().join(format!("tvmaster-scan-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        for f in [
+            "a.mp4",
+            "sub/b.MKV",
+            "c.mp3",
+            "sub/d.WAV",
+            ".hidden.mp4",
+            "notes.txt",
+        ] {
+            std::fs::write(dir.join(f), b"x").unwrap();
+        }
+        let names = |v: Vec<PathBuf>| -> Vec<String> {
+            v.iter()
+                .map(|p| p.strip_prefix(&dir).unwrap().to_string_lossy().to_string())
+                .collect()
+        };
+        assert_eq!(names(find_videos(&dir)), vec!["a.mp4", "sub/b.MKV"]);
+        assert_eq!(names(find_audio(&dir)), vec!["c.mp3", "sub/d.WAV"]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

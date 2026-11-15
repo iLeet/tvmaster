@@ -3,8 +3,8 @@
 use rusqlite::{params, Connection, OptionalExtension, Result, Row};
 use serde::Serialize;
 use tvmaster_core::{
-    BumperKind, Channel, Cursors, EpisodeCursor, ItemKind, RunOutPolicy, ScheduledItem, Strategy,
-    Tv,
+    BumperKind, Channel, ChannelKind, Cursors, EpisodeCursor, ItemKind, RunOutPolicy,
+    ScheduledItem, Strategy, Tv,
 };
 
 // ---------- libraries ----------
@@ -243,11 +243,17 @@ fn channel_from(r: &Row) -> Result<Channel> {
             .get::<_, Option<String>>(10)?
             .and_then(|j| serde_json::from_str(&j).ok())
             .unwrap_or_default(),
+        kind: ChannelKind::parse(&r.get::<_, String>(11)?).unwrap_or_default(),
+        group: r.get(12)?,
+        guide: r
+            .get::<_, Option<String>>(13)?
+            .and_then(|j| serde_json::from_str(&j).ok())
+            .unwrap_or_default(),
     })
 }
 
 const CHANNEL_COLS: &str =
-    "id, number, name, strategy, run_out, autopilot, chaos, seed, epoch_ms, always_on, lineup_json";
+    "id, number, name, strategy, run_out, autopilot, chaos, seed, epoch_ms, always_on, lineup_json, kind, grp, guide_json";
 
 fn channel_library_ids(conn: &Connection, channel_id: &str) -> Result<Vec<i64>> {
     let mut st = conn.prepare(
@@ -259,13 +265,14 @@ fn channel_library_ids(conn: &Connection, channel_id: &str) -> Result<Vec<i64>> 
 
 pub fn upsert_channel(conn: &Connection, c: &Channel) -> Result<()> {
     conn.execute(
-        "INSERT INTO channels (id, number, name, strategy, run_out, autopilot, chaos, seed, epoch_ms, always_on, lineup_json)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+        "INSERT INTO channels (id, number, name, strategy, run_out, autopilot, chaos, seed, epoch_ms, always_on, lineup_json, kind, grp, guide_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
          ON CONFLICT(id) DO UPDATE SET
             number = excluded.number, name = excluded.name, strategy = excluded.strategy,
             run_out = excluded.run_out, autopilot = excluded.autopilot, chaos = excluded.chaos,
             seed = excluded.seed, epoch_ms = excluded.epoch_ms, always_on = excluded.always_on,
-            lineup_json = excluded.lineup_json",
+            lineup_json = excluded.lineup_json, kind = excluded.kind, grp = excluded.grp,
+            guide_json = excluded.guide_json",
         params![
             c.id,
             c.number as i64,
@@ -277,7 +284,10 @@ pub fn upsert_channel(conn: &Connection, c: &Channel) -> Result<()> {
             c.seed as i64,
             c.epoch_ms,
             c.always_on as i64,
-            serde_json::to_string(&c.lineup).unwrap_or_else(|_| "{}".into())
+            serde_json::to_string(&c.lineup).unwrap_or_else(|_| "{}".into()),
+            c.kind.as_str(),
+            c.group,
+            serde_json::to_string(&c.guide).unwrap_or_else(|_| "{}".into())
         ],
     )?;
     conn.execute(
@@ -552,6 +562,7 @@ fn tv_from(r: &Row) -> Result<Tv> {
         power: r.get::<_, i64>(3)? != 0,
         volume: r.get::<_, i64>(4)?.clamp(0, 100) as u8,
         muted: r.get::<_, i64>(5)? != 0,
+        online: false,
     })
 }
 
@@ -608,6 +619,9 @@ mod tests {
             always_on: false,
             library_ids: libs,
             lineup: Lineup::default(),
+            kind: ChannelKind::Programming,
+            group: None,
+            guide: Default::default(),
         }
     }
 

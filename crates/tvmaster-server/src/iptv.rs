@@ -48,9 +48,10 @@ pub async fn playlist(State(s): State<AppState>, headers: HeaderMap) -> ApiResul
     for c in channels {
         let name = m3u_attr(&c.name);
         out.push_str(&format!(
-            "#EXTINF:-1 tvg-id=\"{id}\" tvg-chno=\"{n}\" tvg-name=\"{name}\" group-title=\"TVMaster\",{name}\n{base}/stream/{id}/index.m3u8\n",
+            "#EXTINF:-1 tvg-id=\"{id}\" tvg-chno=\"{n}\" tvg-name=\"{name}\" group-title=\"{group}\",{name}\n{base}/stream/{id}/index.m3u8\n",
             id = c.id,
             n = c.number,
+            group = m3u_attr(c.group.as_deref().unwrap_or("TVMaster")),
         ));
     }
     Ok(text_response("audio/x-mpegurl; charset=utf-8", out))
@@ -72,6 +73,19 @@ pub async fn guide(State(s): State<AppState>) -> ApiResult<Response> {
     let start = now_ms();
     let end = start + GUIDE_HOURS * 3_600_000;
     for c in channels {
+        if c.kind == tvmaster_core::ChannelKind::Guide {
+            // One long programme, so clients show the guide channel as "on".
+            let hour = 3_600_000;
+            let from = start.div_euclid(hour) * hour;
+            xml.push_str(&format!(
+                "  <programme start=\"{}\" stop=\"{}\" channel=\"{}\">\n    <title>{}</title>\n    <desc>Live listing of what is on every channel.</desc>\n  </programme>\n",
+                xmltv_time(from),
+                xmltv_time(end),
+                xml_escape(&c.id),
+                xml_escape(&format!("{} Guide", c.name)),
+            ));
+            continue;
+        }
         let progs = programs(&s.db(), &c.id, start, end)?;
         for p in progs.into_iter().take(MAX_PROGRAMMES) {
             let main_title = p.show.clone().unwrap_or_else(|| p.title.clone());

@@ -293,6 +293,85 @@ pub fn rendered_args(
     a
 }
 
+/// Frame rate the guide is drawn at; FFmpeg duplicates frames up to the output
+/// rate. Drawing fewer frames keeps the renderer comfortably ahead of real time.
+pub const GUIDE_FPS: u32 = 15;
+
+/// Arguments for the guide channel: an endless stream of raw RGB frames on
+/// stdin plus looping music (or silence) as the audio.
+pub fn guide_args(
+    src_w: usize,
+    src_h: usize,
+    music_list: Option<&Path>,
+    p: &OutputProfile,
+    enc: Encoder,
+) -> Vec<String> {
+    let mut a: Vec<String> = ["-hide_banner", "-loglevel", "error"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    a.extend([
+        "-f".into(),
+        "rawvideo".into(),
+        "-pixel_format".into(),
+        "rgb24".into(),
+        "-video_size".into(),
+        format!("{src_w}x{src_h}"),
+        "-framerate".into(),
+        GUIDE_FPS.to_string(),
+        "-i".into(),
+        "pipe:0".into(),
+    ]);
+    match music_list {
+        Some(list) => a.extend([
+            "-stream_loop".into(),
+            "-1".into(),
+            "-f".into(),
+            "concat".into(),
+            "-safe".into(),
+            "0".into(),
+            "-i".into(),
+            list.to_string_lossy().to_string(),
+        ]),
+        None => a.extend([
+            "-f".into(),
+            "lavfi".into(),
+            "-i".into(),
+            "anullsrc=r=48000:cl=stereo".into(),
+        ]),
+    }
+    a.extend([
+        "-map".into(),
+        "0:v:0".into(),
+        "-map".into(),
+        "1:a:0".into(),
+        "-vf".into(),
+        format!(
+            "scale={}:{}:flags=neighbor,setsar=1,fps={},format=yuv420p",
+            p.width, p.height, p.fps
+        ),
+    ]);
+    a.extend(video_args(enc, p));
+    a.extend([
+        "-c:a".into(),
+        "aac".into(),
+        "-b:a".into(),
+        format!("{}k", p.audio_kbps),
+        "-ar".into(),
+        "48000".into(),
+        "-ac".into(),
+        "2".into(),
+        "-muxdelay".into(),
+        "0".into(),
+        "-muxpreload".into(),
+        "0".into(),
+        "-f".into(),
+        "mpegts".into(),
+        "pipe:1".into(),
+    ]);
+    a
+}
+
 /// Arguments for the long-running segmenter that turns the continuous
 /// MPEG-TS on stdin into a rolling HLS playlist in `dir`.
 pub fn segmenter_args(dir: &Path, p: &OutputProfile, readrate_burst: bool) -> Vec<String> {
@@ -412,6 +491,25 @@ mod tests {
             .unwrap();
         assert!(vf.contains("scale=1280:720:flags=neighbor"));
         assert!(a.iter().any(|x| x.starts_with("anullsrc")));
+    }
+
+    #[test]
+    fn guide_args_loop_music_or_fall_back_to_silence() {
+        let p = OutputProfile::default();
+        let with = guide_args(
+            640,
+            360,
+            Some(Path::new("/c/list.txt")),
+            &p,
+            Encoder::Software,
+        );
+        assert!(has_pair(&with, "-stream_loop", "-1"));
+        assert!(has_pair(&with, "-f", "concat"));
+        assert!(has_pair(&with, "-framerate", "15"));
+        assert!(!with.contains(&"-t".to_string()), "endless");
+        let without = guide_args(640, 360, None, &p, Encoder::Software);
+        assert!(without.iter().any(|x| x.starts_with("anullsrc")));
+        assert_eq!(without.last().unwrap(), "pipe:1");
     }
 
     #[test]

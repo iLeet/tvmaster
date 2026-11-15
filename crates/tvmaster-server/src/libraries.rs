@@ -11,8 +11,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 use tvmaster_db::NewMedia;
 use tvmaster_media::{
-    analyze as analyze_breaks, find_videos, from_chapters, parse_name, parse_year, probe_with,
-    BreakInfo,
+    analyze as analyze_breaks, find_audio, find_videos, from_chapters, parse_name, parse_year,
+    probe_with, BreakInfo,
 };
 
 const KINDS: &[&str] = &["shows", "commercials", "bumpers", "music"];
@@ -247,7 +247,12 @@ fn probe_library(
     library_id: i64,
     kind: &str,
 ) -> (usize, Vec<NewMedia>) {
-    let files = find_videos(root);
+    let music = kind == "music";
+    let files = if music {
+        find_audio(root)
+    } else {
+        find_videos(root)
+    };
     let next = AtomicUsize::new(0);
     let results: Mutex<Vec<(usize, NewMedia)>> = Mutex::new(Vec::new());
 
@@ -257,7 +262,13 @@ fn probe_library(
                 let i = next.fetch_add(1, Ordering::Relaxed);
                 let Some(file) = files.get(i) else { break };
                 let info = match probe_with(ffprobe, file) {
-                    Ok(info) if info.duration_ms > 0 && info.video_codec.is_some() => info,
+                    Ok(info)
+                        if info.duration_ms > 0
+                            && (info.video_codec.is_some()
+                                || (music && info.audio_codec.is_some())) =>
+                    {
+                        info
+                    }
                     Ok(_) => {
                         tracing::warn!(file = %file.display(), "skipping: no video or zero length");
                         continue;

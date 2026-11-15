@@ -49,7 +49,10 @@ CREATE TABLE IF NOT EXISTS channels (
     seed      INTEGER NOT NULL DEFAULT 0,
     epoch_ms  INTEGER NOT NULL DEFAULT 0,
     always_on INTEGER NOT NULL DEFAULT 0,
-    lineup_json TEXT
+    lineup_json TEXT,
+    kind      TEXT NOT NULL DEFAULT 'programming',
+    grp       TEXT,
+    guide_json TEXT
 );
 
 CREATE TABLE IF NOT EXISTS channel_libraries (
@@ -119,6 +122,9 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute_batch(SCHEMA)?;
     for (table, column, decl) in [
         ("channels", "lineup_json", "TEXT"),
+        ("channels", "kind", "TEXT NOT NULL DEFAULT 'programming'"),
+        ("channels", "grp", "TEXT"),
+        ("channels", "guide_json", "TEXT"),
         ("schedule_items", "cursor_key", "TEXT"),
         ("schedule_items", "cursor_pos", "INTEGER"),
         ("schedule_items", "label", "TEXT"),

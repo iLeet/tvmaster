@@ -2,7 +2,7 @@
 
 Self-hosted retro TV station and IPTV engine. Add your TV collections, and TVMaster runs real-feeling channels: complete chaos or scheduled time slots, retro commercials placed at natural breaks, "Up Next / Later Today" bumpers, a guide channel, and a phone/web remote. Runs headless or with a GUI on Windows, macOS and Linux (x64 and arm64).
 
-**Status:** milestone 4 complete: commercials and bumpers. See [docs/PLAN.md](docs/PLAN.md) for the full design and roadmap, and [docs/API.md](docs/API.md) for the API.
+**Status:** milestone 5 complete: guide channel, tuner support, live remote. See [docs/PLAN.md](docs/PLAN.md) for the full design and roadmap, and [docs/API.md](docs/API.md) for the API.
 
 ## What works today
 
@@ -11,13 +11,15 @@ Self-hosted retro TV station and IPTV engine. Add your TV collections, and TVMas
 - Autopilot: schedules are kept 72 hours ahead forever, episodes continue in order and wrap (or switch to chaos), cursors never skip or repeat across edits, downtime is handled (resume or advance), and bad files are covered and replaced automatically.
 - Commercials and bumpers: shows are split at natural breaks (chapters or detected black frames), and each break is filled exactly with retro commercials plus "we'll be right back", "back to", "up next", "later today" and station-ID bumpers drawn by TVMaster itself. Filter commercials by year. See [docs/ADS.md](docs/ADS.md).
 - Normalized HLS output (1280x720, H.264/AAC) from mismatched sources, gapless across items, about 0.7 s tune-in.
-- Many TVs can watch different channels at once; one encode per channel is shared by all viewers.
+- Channel 3, the guide channel: a live Prevue-style scrolling grid of every channel with a clock, a "now on" ticker and background music. Always accurate because it reads the same schedule as everything else.
+- Many TVs can watch different channels at once; one encode per channel is shared by all viewers. Register each TV, and control it from a phone: the remote updates live over a WebSocket (channel, volume, mute, power, and whether the TV's player is connected).
+- Tuner mode: Plex, Jellyfin and Emby can add TVMaster as an HDHomeRun-style network tuner. Channels can be grouped (Kids, Movies, ...).
 - M3U playlist and XMLTV guide for VLC, Kodi, TiviMate and similar clients.
 - Web player with channel list, now/next, and a phone remote that controls any registered TV.
 - Watchdog restarts a crashed channel; config and TV state persist in SQLite.
 - Service templates for launchd, systemd and Windows Task Scheduler.
 
-Not yet: the guide channel, HDHomeRun emulation, native/desktop GUI (see the roadmap).
+Not yet: the web admin UI, desktop/native apps, authentication (see the roadmap).
 
 ## Quick start
 
@@ -43,6 +45,8 @@ For a real lineup (blocks, seasons, events), see the example in [docs/SCHEDULING
 - IPTV clients: playlist `http://<host>:8787/iptv/playlist.m3u`, guide `http://<host>:8787/iptv/guide.xml`
 - Make a screen a TV: open `http://<host>:8787/?tv=living-room` on it (smart-TV browser, tablet, laptop)
 - Phone remote for that TV: open `http://<host>:8787/?remote=living-room`
+- Plex/Jellyfin/Emby: add a network tuner at `<host>:8787` (HDHomeRun) and use `http://<host>:8787/iptv/guide.xml` for guide data. This follows the HDHomeRun API those servers speak; it has not been tested against a real one yet.
+- A guide channel: `POST /api/v1/channels` with `"kind": "guide"` (see [docs/API.md](docs/API.md)).
 
 Run unattended: `tvmaster service launchd|systemd|windows` prints a definition that starts on boot and restarts on failure.
 

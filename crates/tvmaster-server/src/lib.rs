@@ -3,11 +3,13 @@
 
 mod autopilot;
 mod channels;
+mod hdhr;
 mod iptv;
 mod libraries;
 mod plan;
 mod stream;
 mod tvs;
+mod ws;
 
 use axum::{
     http::StatusCode,
@@ -20,10 +22,10 @@ use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
-use tokio::sync::Notify;
-use tvmaster_core::Channel;
+use tokio::sync::{broadcast, Notify};
+use tvmaster_core::{Channel, ChannelKind, Tv};
 use tvmaster_media::FfmpegInfo;
-use tvmaster_playout::{ChannelSpec, Manager};
+use tvmaster_playout::{ChannelSpec, GuideSpec, Manager};
 
 const PLAYER_HTML: &str = include_str!("player.html");
 
@@ -38,6 +40,10 @@ pub struct AppState {
     wake: Arc<Notify>,
     /// Background break-detection progress per library.
     pub(crate) analysis: Arc<Mutex<HashMap<i64, libraries::Progress>>>,
+    /// JSON events pushed to WebSocket clients.
+    pub(crate) events: broadcast::Sender<String>,
+    /// How many connected players each TV has (online while > 0).
+    presence: Arc<Mutex<HashMap<String, usize>>>,
 }
 
 /// How often the autopilot loop tops up schedules and commits aired episodes.
@@ -56,6 +62,8 @@ impl AppState {
             dirty: Arc::new(Mutex::new(HashSet::new())),
             wake: Arc::new(Notify::new()),
             analysis: Arc::new(Mutex::new(HashMap::new())),
+            events: broadcast::channel(256).0,
+            presence: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -72,9 +80,107 @@ impl AppState {
         self.db.lock().unwrap_or_else(|p| p.into_inner())
     }
 
+    /// Push an event to every connected WebSocket client.
+    pub(crate) fn emit(&self, event: Value) {
+        let _ = self.events.send(event.to_string());
+    }
+
+    /// A TV with its live `online` flag filled in.
+    pub(crate) fn tv_view(&self, mut tv: Tv) -> Tv {
+        tv.online = self
+            .presence
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(&tv.id)
+            .is_some_and(|n| *n > 0);
+        tv
+    }
+
+    /// Announce a TV's new state to everyone listening.
+    pub(crate) fn tv_changed(&self, tv: Tv) -> Tv {
+        let tv = self.tv_view(tv);
+        self.emit(json!({ "type": "tv.state", "tv": tv }));
+        tv
+    }
+
+    pub(crate) fn presence_inc(&self, id: &str) {
+        *self
+            .presence
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .entry(id.to_string())
+            .or_insert(0) += 1;
+        self.announce(id);
+    }
+
+    pub(crate) fn presence_dec(&self, id: &str) {
+        {
+            let mut p = self.presence.lock().unwrap_or_else(|p| p.into_inner());
+            if let Some(n) = p.get_mut(id) {
+                *n = n.saturating_sub(1);
+            }
+        }
+        self.announce(id);
+    }
+
+    fn announce(&self, id: &str) {
+        if let Ok(Some(tv)) = tvmaster_db::get_tv(&self.db(), id) {
+            self.tv_changed(tv);
+        }
+    }
+
+    /// Watch what is on air and push `channel.now` when a channel moves on to
+    /// its next programme. Needs a Tokio runtime.
+    pub fn spawn_now_watcher(&self) -> tokio::task::JoinHandle<()> {
+        let state = self.clone();
+        tokio::spawn(async move {
+            let mut last: HashMap<String, Option<(i64, i64)>> = HashMap::new();
+            loop {
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                let now = plan::now_ms();
+                let events: Vec<Value> = {
+                    let db = state.db();
+                    let mut out = Vec::new();
+                    for ch in tvmaster_db::list_channels(&db)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .filter(|c| c.kind == ChannelKind::Programming)
+                    {
+                        let progs = plan::programs(&db, &ch.id, now, now + 12 * 3_600_000)
+                            .unwrap_or_default();
+                        let (cur, next) = plan::now_and_next(&progs, now);
+                        let key = cur.as_ref().map(|p| (p.media_id, p.start_ms));
+                        if last
+                            .insert(ch.id.clone(), key)
+                            .is_some_and(|prev| prev != key)
+                        {
+                            out.push(json!({ "type": "channel.now", "channel": ch.id, "now": cur, "next": next }));
+                        }
+                    }
+                    out
+                };
+                for e in events {
+                    state.emit(e);
+                }
+            }
+        })
+    }
+
     /// What playout needs to put a channel on air.
     pub(crate) fn channel_spec(&self, channel: &Channel) -> ChannelSpec {
+        let guide = (channel.kind == ChannelKind::Guide).then(|| GuideSpec {
+            music: tvmaster_db::list_media_of_kind(
+                &self.db(),
+                &channel.guide.music_library_ids,
+                "music",
+            )
+            .unwrap_or_default()
+            .into_iter()
+            .map(|m| m.path.into())
+            .collect(),
+        });
         ChannelSpec {
+            guide,
             id: channel.id.clone(),
             name: channel.name.clone(),
             always_on: channel.always_on,
@@ -97,8 +203,10 @@ impl AppState {
             }
         };
         for ch in channels.into_iter().filter(|c| c.always_on) {
-            if let Err(e) = autopilot::maintain(&self.db(), &ch, plan::now_ms()) {
-                tracing::error!(channel = %ch.id, "scheduling: {e}");
+            if ch.kind == ChannelKind::Programming {
+                if let Err(e) = autopilot::maintain(&self.db(), &ch, plan::now_ms()) {
+                    tracing::error!(channel = %ch.id, "scheduling: {e}");
+                }
             }
             playout.start_if_absent(self.channel_spec(&ch));
         }
@@ -140,6 +248,10 @@ pub struct ApiError {
 }
 
 impl ApiError {
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
     pub fn new(status: StatusCode, message: impl Into<String>) -> Self {
         Self {
             status,
@@ -192,6 +304,18 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/tvs/:id", get(tvs::get))
         .route("/api/v1/tvs/:id/channel", post(tvs::set_channel))
         .route("/api/v1/tvs/:id/power", post(tvs::set_power))
+        .route("/api/v1/tvs/:id/volume", post(tvs::set_volume))
+        .route("/api/v1/ws", get(ws::handler))
+        .route("/tv/:name", get(tvs::tv_stream))
+        .route("/discover.json", get(hdhr::discover))
+        .route("/lineup.json", get(hdhr::lineup))
+        .route("/lineup_status.json", get(hdhr::lineup_status))
+        .route(
+            "/lineup.post",
+            post(hdhr::lineup_post).get(hdhr::lineup_post),
+        )
+        .route("/device.xml", get(hdhr::device_xml))
+        .route("/stream/:name", get(stream::ts))
         .route("/stream/:channel/:file", get(stream::hls))
         .route("/iptv/playlist.m3u", get(iptv::playlist))
         .route("/iptv/guide.xml", get(iptv::guide))

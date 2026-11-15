@@ -10,11 +10,11 @@ Errors are `{"error": "message"}` with a suitable status code.
 |---|---|---|---|
 | GET | `/stream/{channel}/index.m3u8` | done | HLS. First request puts the channel on air; many clients share one encode. |
 | GET | `/stream/{channel}/seg_{n}.ts` | done | HLS segments. |
-| GET | `/iptv/playlist.m3u` | done | All channels with `tvg-id`, `tvg-chno`; uses the request's Host. |
+| GET | `/stream/{channel}.ts` | done | The channel as one continuous MPEG-TS stream, for tuner-style clients (Plex, Jellyfin, Emby, VLC). Starts a few seconds behind live; the channel stays on air while the connection is open. |
+| GET | `/iptv/playlist.m3u` | done | All channels with `tvg-id`, `tvg-chno` and `group-title` (the channel's group, default "TVMaster"); uses the request's Host. |
 | GET | `/iptv/guide.xml` | done | XMLTV, next 24 hours. |
-| GET | `/discover.json`, `/lineup.json`, `/lineup_status.json` | planned (M5) | HDHomeRun emulation for Plex/Jellyfin/Emby. |
-| GET | `/stream/{channel}.ts` | planned | Raw MPEG-TS. |
-| GET | `/tv/{tv_id}.m3u8` | planned | Per-TV URL that follows that TV's channel. |
+| GET | `/discover.json`, `/lineup.json`, `/lineup_status.json`, `/device.xml`, `/lineup.post` | done | HDHomeRun-compatible tuner API, so Plex, Jellyfin and Emby can add TVMaster as a network tuner. `TunerCount` is the number of channels (they share encodes). |
+| GET | `/tv/{tv_id}.m3u8` | done | Redirects to the stream of the channel that TV is tuned to *when it is opened* (409 if the TV is off). For plain IPTV clients; to follow a remote live use the web player or the WebSocket API. |
 
 ## Libraries
 
@@ -34,7 +34,7 @@ See [SCHEDULING.md](SCHEDULING.md) for what these mean.
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/api/v1/channels` | List with `on_air`, `now` and `next`. |
-| POST | `/api/v1/channels` | Create or update. Body: `id` (a-z0-9-_), `number`, `name`, optional `strategy` (`sequential`, `shuffle`, `chaos`, `block_grid`), `run_out` (`keep_going`, `next_in_rotation`, `chaos_fill`, `hybrid`), `autopilot`, `chaos` (0-100), `seed`, `always_on`, `library_ids`, `lineup`. Updating keeps the channel's epoch and seed. A lineup with no `timezone` gets the server's. Invalid lineups are rejected with a reason. |
+| POST | `/api/v1/channels` | Create or update. Body: `id` (a-z0-9-_), `number`, `name`, optional `strategy` (`sequential`, `shuffle`, `chaos`, `block_grid`), `run_out` (`keep_going`, `next_in_rotation`, `chaos_fill`, `hybrid`), `autopilot`, `chaos` (0-100), `seed`, `always_on`, `library_ids`, `lineup`, `group`, `kind` (`programming` or `guide`), `guide`. **Updates are partial:** fields you leave out keep their values. Updating keeps the channel's epoch and seed. A lineup with no `timezone` gets the server's. Invalid lineups are rejected with a reason. |
 | GET | `/api/v1/channels/{id}` | One channel. |
 | DELETE | `/api/v1/channels/{id}` | |
 | GET | `/api/v1/channels/{id}/lineup` | The lineup. |
@@ -42,6 +42,20 @@ See [SCHEDULING.md](SCHEDULING.md) for what these mean.
 | POST | `/api/v1/channels/{id}/reroll` | Regenerate the not-yet-aired schedule now (works on manual-lock channels). Returns `{"items": n}`. |
 | GET | `/api/v1/channels/{id}/schedule?hours=6` | Programmes (max 72 h). `end_ms` is the slot end (includes ad breaks and padding), `runtime_end_ms` is when the show's last act ends, `label` is the block or event. Add `&detail=items` for the raw timeline: every show act (`in_ms` is where in the file it starts), commercial, bumper (`bumper`: `brb`, `back_to`, `up_next`, `later_today`, `station_id`; none for your own clips) and filler. |
 | GET | `/api/v1/channels/{id}/cursors` | Episode cursors: `committed` have aired, `reserved` are on the schedule. |
+
+## Groups and the guide channel
+
+- `group` (up to 40 characters) organises channels ("Kids", "Movies"). It becomes the playlist `group-title` and a heading in the web player and remote.
+- `kind: "guide"` makes the channel a **live guide** (Channel 3 in the classic setup): a Prevue-style scrolling grid of every programming channel, with a clock, a "now on" ticker and optional music. It is drawn live, needs no libraries, and is not scheduled.
+
+```json
+{ "id": "guide", "number": 3, "name": "Retro TV", "kind": "guide",
+  "guide": { "hours": 3, "title": "Retro TV Guide",
+             "ticker": ["Welcome to Retro TV - all day, all night"],
+             "music_library_ids": [4] } }
+```
+
+`hours` is 2-6. `music_library_ids` are libraries of kind `music` (audio files are scanned like video; the music loops under the guide, silence if none). The ticker announces what is on now on every channel after your own lines.
 
 ## Virtual TVs and remote
 
@@ -51,11 +65,31 @@ A TV is a registered player with a stable id; the remote changes its channel. Di
 |---|---|---|
 | GET | `/api/v1/tvs` | All TVs. |
 | POST | `/api/v1/tvs` | Register `{"id": "living-room", "name": "Living Room"}`. Re-registering keeps channel and volume. |
-| GET | `/api/v1/tvs/{id}` | `{id, name, channel, power, volume, muted}`. |
+| GET | `/api/v1/tvs/{id}` | `{id, name, channel, power, volume, muted, online}`. `online` is true while a player is connected over the WebSocket. |
 | POST | `/api/v1/tvs/{id}/channel` | `{"number": 4}` or `{"step": "up"\|"down"}` (steps through real channels, wraps). Turns the TV on. 404 for unknown channel numbers. |
 | POST | `/api/v1/tvs/{id}/power` | `{"on": true}`. |
-| WS | `/api/v1/ws` | planned (M5): push `tv.state` / `channel.now` instead of polling. The web player polls every 1.5 s for now. |
-| POST | `/api/v1/tvs/{id}/volume` | planned. |
+| POST | `/api/v1/tvs/{id}/volume` | `{"level": 0-100}` and/or `{"muted": bool}`. Raising the volume un-mutes. |
+| WS | `/api/v1/ws` | Live updates and remote control: see below. |
+
+### WebSocket
+
+Connect to `/api/v1/ws`. The server sends a `snapshot` (`tvs`, `channels`) and then pushes events as they happen:
+
+| Event | When |
+|---|---|
+| `tv.state` `{tv}` | A TV's channel, power, volume or online state changed. |
+| `channel.now` `{channel, now, next}` | A channel moved on to its next programme. |
+| `schedule.changed` `{channel}` | A channel's schedule was re-rolled. |
+
+Messages you can send:
+
+| Message | Effect |
+|---|---|
+| `{"type":"hello","tv":"living-room"}` | This socket is that TV's player. The TV counts as online while it stays connected (and is created if it did not exist). |
+| `{"type":"tv","id":"living-room","channel":4}` | Control a TV. Fields (any combination): `channel`, `step` (`up`/`down`), `power`, `volume`, `muted`. Errors come back as `{"type":"error","message":…}`. |
+| `{"type":"ping"}` | Answered with `{"type":"pong"}`. |
+
+The web player (`/?tv=…` and `/?remote=…`) uses this and falls back to polling the REST API if the socket is unavailable.
 
 ## Web pages
 
@@ -63,7 +97,7 @@ A TV is a registered player with a stable id; the remote changes its channel. Di
 |---|---|
 | `/` | Watch locally: channel list, now/next, arrow keys to change channel, `F` for fullscreen. |
 | `/?tv=living-room` | Full-screen TV that registers itself and follows its remote. |
-| `/?remote=living-room` | Phone-friendly remote for that TV. |
+| `/?remote=living-room` | Phone-friendly remote for that TV: channel up/down, volume, mute, power, and a list of channels grouped by group. Shows whether the TV's player is connected. |
 
 ## Ops
 

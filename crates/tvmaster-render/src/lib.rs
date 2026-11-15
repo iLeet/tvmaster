@@ -96,6 +96,27 @@ impl Canvas {
         self.text_shadow(x, y, text, scale, c);
     }
 
+    /// Copy `src` onto this canvas with its top-left corner at (x, y), clipped.
+    pub fn blit(&mut self, src: &Canvas, x: i32, y: i32) {
+        for sy in 0..src.h as i32 {
+            let dy = y + sy;
+            if dy < 0 || dy >= self.h as i32 {
+                continue;
+            }
+            for sx in 0..src.w as i32 {
+                let dx = x + sx;
+                if dx < 0 || dx >= self.w as i32 {
+                    continue;
+                }
+                let (si, di) = (
+                    (sy as usize * src.w + sx as usize) * 3,
+                    (dy as usize * self.w + dx as usize) * 3,
+                );
+                self.px[di..di + 3].copy_from_slice(&src.px[si..si + 3]);
+            }
+        }
+    }
+
     /// Multiply every pixel's brightness by `f` (0 = black, 1 = unchanged).
     pub fn brightness(&mut self, f: f32) {
         if f >= 0.999 {
@@ -415,6 +436,230 @@ pub fn render(scene: &Scene, th: &Theme, t: f32, dur: f32) -> Canvas {
     c
 }
 
+// ------------------------------------------------------------------ guide
+
+/// One programme on the guide grid.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GuideCell {
+    pub start_ms: i64,
+    pub end_ms: i64,
+    pub title: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GuideRow {
+    pub number: u32,
+    pub name: String,
+    pub cells: Vec<GuideCell>,
+}
+
+/// Everything the guide channel draws. The caller formats times (it knows the
+/// time zone), so this crate stays free of time-zone logic.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct GuideData {
+    pub title: String,
+    pub now_ms: i64,
+    pub window_start_ms: i64,
+    pub window_ms: i64,
+    /// "9:04 PM"
+    pub clock: String,
+    /// "SUN NOV 15"
+    pub date: String,
+    /// Time header labels: (instant, text), e.g. every half hour.
+    pub marks: Vec<(i64, String)>,
+    pub rows: Vec<GuideRow>,
+    /// Text that scrolls along the bottom.
+    pub ticker: String,
+}
+
+const GUIDE_HEADER_H: i32 = 36;
+const GUIDE_TIMEBAR_H: i32 = 20;
+const GUIDE_ROW_H: i32 = 43;
+const GUIDE_ROWS: usize = 6;
+const GUIDE_LABEL_W: i32 = 104;
+const GUIDE_GRID_X: i32 = 108;
+const GUIDE_GRID_W: i32 = 528;
+const GUIDE_TICKER_Y: i32 = 326;
+/// Seconds each page of channels stays up before scrolling to the next.
+const GUIDE_PAGE_SECS: f32 = 9.0;
+const GUIDE_SCROLL_SECS: f32 = 0.9;
+
+fn guide_scroll_offset(rows: usize, t: f32) -> i32 {
+    if rows <= GUIDE_ROWS {
+        return 0;
+    }
+    let pages = rows.div_ceil(GUIDE_ROWS);
+    let page = (t / GUIDE_PAGE_SECS).floor();
+    let into = t - page * GUIDE_PAGE_SECS;
+    let page = page as usize % pages;
+    let base = (page * GUIDE_ROWS) as i32 * GUIDE_ROW_H;
+    let step = GUIDE_ROWS as i32 * GUIDE_ROW_H;
+    let k = (into - (GUIDE_PAGE_SECS - GUIDE_SCROLL_SECS)) / GUIDE_SCROLL_SECS;
+    base + (ease_out(k.max(0.0)) * step as f32) as i32
+}
+
+fn guide_x(data: &GuideData, ms: i64) -> i32 {
+    let f = (ms - data.window_start_ms) as f64 / data.window_ms.max(1) as f64;
+    // Clamp so absurd times (or a tiny window) cannot overflow.
+    GUIDE_GRID_X
+        + (f * GUIDE_GRID_W as f64)
+            .round()
+            .clamp(-100_000.0, 100_000.0) as i32
+}
+
+fn guide_row(c: &mut Canvas, th: &Theme, data: &GuideData, row: &GuideRow, y: i32, alt: bool) {
+    // channel label
+    c.rect(
+        0,
+        y,
+        GUIDE_LABEL_W,
+        GUIDE_ROW_H - 2,
+        mix(th.dark, th.primary, 0.25),
+    );
+    c.text_shadow(8, y + 4, &row.number.to_string(), 3, WHITE);
+    c.text(8, y + 31, &truncate(&row.name, 12), 1, th.accent);
+    // programme cells
+    let base = if alt {
+        mix(th.dark, [0, 0, 0], 0.15)
+    } else {
+        mix(th.dark, th.primary, 0.12)
+    };
+    c.rect(GUIDE_GRID_X, y, GUIDE_GRID_W, GUIDE_ROW_H - 2, [8, 8, 12]);
+    for cell in &row.cells {
+        let (s, e) = (
+            cell.start_ms.max(data.window_start_ms),
+            cell.end_ms.min(data.window_start_ms + data.window_ms),
+        );
+        if e <= s {
+            continue;
+        }
+        let (x0, x1) = (guide_x(data, s), guide_x(data, e));
+        let w = x1 - x0 - 2;
+        if w < 10 {
+            continue;
+        }
+        let airing = cell.start_ms <= data.now_ms && data.now_ms < cell.end_ms;
+        let fill = if airing {
+            mix(th.dark, th.primary, 0.55)
+        } else {
+            base
+        };
+        c.rect(x0 + 1, y, w, GUIDE_ROW_H - 2, fill);
+        if airing {
+            c.rect(x0 + 1, y, w, 2, th.accent);
+        }
+        // Too narrow for readable text (very short programmes): just a block.
+        if w < 56 {
+            continue;
+        }
+        let mut title = cell.title.clone();
+        if cell.start_ms < data.window_start_ms {
+            title = format!("< {title}");
+        }
+        if cell.end_ms > data.window_start_ms + data.window_ms {
+            title.push_str(" >");
+        }
+        let chars = ((w - 8) / 8).max(1) as usize;
+        let lines = wrap(&title, chars, 3).unwrap_or_else(|| {
+            let mut l = wrap(&title, chars, usize::MAX).unwrap_or_default();
+            l.truncate(3);
+            if let Some(last) = l.last_mut() {
+                *last = truncate(last, chars);
+                if !last.ends_with("...") {
+                    last.push_str("...");
+                    *last = last.chars().take(chars).collect();
+                }
+            }
+            l
+        });
+        for (i, line) in lines.iter().enumerate() {
+            let col = if airing { WHITE } else { [210, 210, 220] };
+            c.text(x0 + 5, y + 6 + i as i32 * 11, line, 1, col);
+        }
+    }
+}
+
+/// Render one frame of the guide channel, `t` seconds into the stream.
+pub fn render_guide(data: &GuideData, th: &Theme, t: f32) -> Canvas {
+    let mut c = Canvas::new(WIDTH, HEIGHT);
+    c.vgradient(th.dark, [4, 4, 8]);
+
+    // header
+    c.rect(
+        0,
+        0,
+        WIDTH as i32,
+        GUIDE_HEADER_H,
+        mix(th.dark, th.primary, 0.35),
+    );
+    c.rect(0, GUIDE_HEADER_H - 3, WIDTH as i32, 3, th.accent);
+    let title = if data.title.trim().is_empty() {
+        "TV GUIDE"
+    } else {
+        data.title.as_str()
+    };
+    c.text_shadow(12, 9, &truncate(title, 28), 2, WHITE);
+    let clock_w = text_width(&data.clock, 2);
+    c.text_shadow(WIDTH as i32 - clock_w - 12, 5, &data.clock, 2, WHITE);
+    let date_w = text_width(&data.date, 1);
+    c.text(WIDTH as i32 - date_w - 12, 24, &data.date, 1, th.accent);
+
+    // time bar
+    let tb = GUIDE_HEADER_H;
+    c.rect(0, tb, WIDTH as i32, GUIDE_TIMEBAR_H, [6, 6, 10]);
+    c.text(8, tb + 6, "CHANNEL", 1, th.accent);
+    for (ms, label) in &data.marks {
+        let x = guide_x(data, *ms);
+        if x >= GUIDE_GRID_X && x < GUIDE_GRID_X + GUIDE_GRID_W - 8 * label.chars().count() as i32 {
+            c.rect(x, tb + 2, 1, GUIDE_TIMEBAR_H - 2, th.primary);
+            c.text(x + 4, tb + 6, label, 1, WHITE);
+        }
+    }
+
+    // channel rows (scrolling pages when there are more than fit)
+    let top = GUIDE_HEADER_H + GUIDE_TIMEBAR_H;
+    let mut grid = Canvas::new(WIDTH, GUIDE_ROWS * GUIDE_ROW_H as usize);
+    grid.fill([4, 4, 8]);
+    let n = data.rows.len();
+    if n > 0 {
+        let off = guide_scroll_offset(n, t);
+        let first = off / GUIDE_ROW_H;
+        for v in first..first + GUIDE_ROWS as i32 + 2 {
+            let (virt, y) = (v as usize, v * GUIDE_ROW_H - off);
+            if n <= GUIDE_ROWS && virt >= n {
+                break;
+            }
+            guide_row(&mut grid, th, data, &data.rows[virt % n], y, virt % 2 == 1);
+        }
+    }
+    c.blit(&grid, 0, top);
+
+    // "now" marker
+    let nx = guide_x(data, data.now_ms);
+    if (GUIDE_GRID_X..GUIDE_GRID_X + GUIDE_GRID_W).contains(&nx) {
+        c.rect(
+            nx,
+            tb,
+            2,
+            GUIDE_TIMEBAR_H + (GUIDE_ROWS as i32 * GUIDE_ROW_H),
+            th.accent,
+        );
+        c.rect(nx - 3, tb, 8, 4, th.accent);
+    }
+
+    // ticker
+    c.rect(0, GUIDE_TICKER_Y, WIDTH as i32, 26, [6, 6, 10]);
+    c.rect(0, GUIDE_TICKER_Y, WIDTH as i32, 2, th.primary);
+    if !data.ticker.is_empty() {
+        let text = format!("   {}   *   ", data.ticker.to_uppercase());
+        let tw = text_width(&text, 2);
+        let x = WIDTH as i32 - ((t * 70.0) as i32 % (tw + WIDTH as i32));
+        c.text(x, GUIDE_TICKER_Y + 6, &text, 2, th.accent);
+    }
+    c.scanlines(0.12);
+    c
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -539,6 +784,137 @@ mod tests {
         // drawing off-canvas is clipped, not a panic
         c.text(-50, -50, "CLIPPED", 3, [1, 2, 3]);
         c.text(95, 15, "EDGE", 3, [1, 2, 3]);
+    }
+
+    fn guide(rows: usize) -> GuideData {
+        let start = 1_000_000_000_000;
+        let half = 30 * 60_000;
+        GuideData {
+            title: "Retro TV Guide".into(),
+            now_ms: start + 10 * 60_000,
+            window_start_ms: start,
+            window_ms: 3 * 60 * 60_000,
+            clock: "9:10 PM".into(),
+            date: "SUN NOV 15".into(),
+            marks: (0..6)
+                .map(|i| {
+                    (
+                        start + i * half,
+                        format!("{}:{:02}", 9 + i / 2, (i % 2) * 30),
+                    )
+                })
+                .collect(),
+            rows: (0..rows)
+                .map(|r| GuideRow {
+                    number: r as u32 + 2,
+                    name: format!("Channel {r}"),
+                    cells: vec![
+                        GuideCell {
+                            start_ms: start - half,
+                            end_ms: start + half,
+                            title: format!("Show {r} Pilot"),
+                        },
+                        GuideCell {
+                            start_ms: start + half,
+                            end_ms: start + 2 * half,
+                            title: "A Very Long Programme Title That Needs Wrapping".into(),
+                        },
+                        GuideCell {
+                            start_ms: start + 2 * half,
+                            end_ms: start + 6 * half,
+                            title: "Marathon".into(),
+                        },
+                    ],
+                })
+                .collect(),
+            ticker: "Now on channel 4: Taxi".into(),
+        }
+    }
+
+    #[test]
+    fn the_guide_renders_with_any_number_of_channels() {
+        let th = Theme::for_channel("guide");
+        for n in [0, 1, 5, 6, 7, 20] {
+            for t in [0.0, 3.0, 8.5, 9.4, 40.0] {
+                let c = render_guide(&guide(n), &th, t);
+                assert_eq!((c.w, c.h), (WIDTH, HEIGHT));
+            }
+        }
+        let c = render_guide(&guide(5), &th, 1.0);
+        let distinct: std::collections::HashSet<&[u8]> = c.px.chunks(3).step_by(29).collect();
+        assert!(distinct.len() > 10);
+    }
+
+    #[test]
+    fn few_channels_stay_put_and_many_channels_scroll_in_pages() {
+        let th = Theme::for_channel("guide");
+        let grid_area = |c: &Canvas| c.px[(60 * WIDTH * 3)..(300 * WIDTH * 3)].to_vec();
+        let few = guide(4);
+        assert_eq!(
+            grid_area(&render_guide(&few, &th, 0.0)),
+            grid_area(&render_guide(&few, &th, 30.0)),
+            "no scrolling needed"
+        );
+        let many = guide(14);
+        let first = grid_area(&render_guide(&many, &th, 1.0));
+        let later = grid_area(&render_guide(&many, &th, 12.0));
+        assert_ne!(first, later, "moved on to the next page");
+        // mid-scroll differs from both ends
+        let mid = grid_area(&render_guide(&many, &th, 9.0 - 0.45));
+        assert_ne!(mid, first);
+        assert_ne!(mid, later);
+        // it wraps: three pages of 6 -> back at the start
+        assert_eq!(first, grid_area(&render_guide(&many, &th, 1.0 + 3.0 * 9.0)));
+    }
+
+    #[test]
+    fn scroll_offsets_move_by_whole_pages() {
+        assert_eq!(guide_scroll_offset(6, 100.0), 0);
+        assert_eq!(guide_scroll_offset(12, 1.0), 0);
+        let page = GUIDE_ROWS as i32 * GUIDE_ROW_H;
+        assert_eq!(guide_scroll_offset(12, 9.0 + 1.0), page);
+        assert_eq!(
+            guide_scroll_offset(12, 18.0 + 1.0),
+            0,
+            "wraps after two pages"
+        );
+    }
+
+    #[test]
+    fn the_clock_and_airing_highlight_change_the_picture() {
+        let th = Theme::for_channel("guide");
+        let a = guide(3);
+        let mut b = guide(3);
+        b.clock = "9:11 PM".into();
+        assert_ne!(render_guide(&a, &th, 1.0).px, render_guide(&b, &th, 1.0).px);
+        let mut c = guide(3);
+        c.now_ms += 40 * 60_000; // the second programme is now airing
+        assert_ne!(render_guide(&a, &th, 1.0).px, render_guide(&c, &th, 1.0).px);
+    }
+
+    #[test]
+    fn degenerate_guide_data_does_not_panic() {
+        let th = Theme::for_channel("g");
+        let mut d = guide(3);
+        d.window_ms = 0;
+        render_guide(&d, &th, 1.0);
+        d.window_ms = 1;
+        d.rows[0].cells[0].title = "😀".repeat(200);
+        render_guide(&d, &th, 1.0);
+        let d = GuideData::default();
+        render_guide(&d, &th, 5.0);
+    }
+
+    #[test]
+    fn blit_clips_to_the_canvas() {
+        let mut dst = Canvas::new(4, 4);
+        let mut src = Canvas::new(3, 3);
+        src.fill([9, 9, 9]);
+        dst.blit(&src, 2, 2);
+        dst.blit(&src, -2, -2);
+        dst.blit(&src, 100, 100);
+        assert_eq!(&dst.px[(3 * 4 + 3) * 3..(3 * 4 + 3) * 3 + 3], &[9, 9, 9]);
+        assert_eq!(&dst.px[0..3], &[9, 9, 9]);
     }
 
     #[test]

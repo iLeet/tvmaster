@@ -6,7 +6,9 @@
 //! the encoder, and the next item is already encoded when the current one ends
 //! (no gap at item boundaries).
 
-use crate::profile::{item_args, rendered_args, segmenter_args, slate_args, ItemJob};
+use crate::profile::{
+    guide_args, item_args, rendered_args, segmenter_args, slate_args, ItemJob, GUIDE_FPS,
+};
 use crate::ts::ContinuityFixer;
 use crate::{ChannelSpec, EngineConfig, PlayItem, PlayKind};
 use anyhow::{anyhow, bail, Context, Result};
@@ -19,7 +21,7 @@ use tokio::process::Command;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tvmaster_core::BumperKind;
-use tvmaster_render::{render, Scene, Theme, FPS, HEIGHT, WIDTH};
+use tvmaster_render::{render, render_guide, Scene, Theme, FPS, HEIGHT, WIDTH};
 
 /// Buffered MPEG-TS chunks between the encoder and the segmenter.
 const CHUNK_BUFFER: usize = 256;
@@ -119,7 +121,11 @@ async fn run_once(
         stdin.shutdown().await.ok();
         Ok::<(), std::io::Error>(())
     });
-    let mut producer = tokio::spawn(produce(cfg.clone(), spec.clone(), tx));
+    let mut producer = if spec.guide.is_some() {
+        tokio::spawn(produce_guide(cfg.clone(), spec.clone(), tx))
+    } else {
+        tokio::spawn(produce(cfg.clone(), spec.clone(), tx))
+    };
 
     let result = tokio::select! {
         _ = cancel.cancelled() => Ok(()),
@@ -381,6 +387,160 @@ async fn run_rendered(
         bytes,
         ok: status.success(),
     })
+}
+
+/// Convert a music file to a common format in the cache so different files
+/// can be joined in one playlist. Returns the cached path.
+async fn cache_music(cfg: &EngineConfig, src: &Path) -> Option<std::path::PathBuf> {
+    use std::hash::{Hash, Hasher};
+    let meta = tokio::fs::metadata(src).await.ok()?;
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (src, meta.len()).hash(&mut h);
+    let dir = cfg.root.join("cache").join("music");
+    tokio::fs::create_dir_all(&dir).await.ok()?;
+    let out = dir.join(format!("{:016x}.aac", h.finish()));
+    if tokio::fs::metadata(&out)
+        .await
+        .map(|m| m.len() > 0)
+        .unwrap_or(false)
+    {
+        return Some(out);
+    }
+    let tmp = out.with_extension("part");
+    let status = Command::new(&cfg.ffmpeg)
+        .args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
+        .arg(src)
+        .args([
+            "-vn", "-ac", "2", "-ar", "48000", "-c:a", "aac", "-b:a", "128k", "-f", "adts",
+        ])
+        .arg(&tmp)
+        .stdin(Stdio::null())
+        .status()
+        .await
+        .ok()?;
+    if !status.success() {
+        let _ = tokio::fs::remove_file(&tmp).await;
+        tracing::warn!(file = %src.display(), "skipping unreadable music file");
+        return None;
+    }
+    tokio::fs::rename(&tmp, &out).await.ok()?;
+    Some(out)
+}
+
+/// Write a playlist of the (cached) music for FFmpeg's concat demuxer.
+async fn music_playlist(
+    cfg: &EngineConfig,
+    spec: &ChannelSpec,
+    dir: &Path,
+) -> Option<std::path::PathBuf> {
+    let files = &spec.guide.as_ref()?.music;
+    let mut cached = Vec::new();
+    for f in files.iter().take(24) {
+        if let Some(c) = cache_music(cfg, f).await {
+            cached.push(c);
+        }
+    }
+    if cached.is_empty() {
+        return None;
+    }
+    let mut list = String::new();
+    // Repeat so the list is long even without -stream_loop support.
+    for _ in 0..20 {
+        for c in &cached {
+            list.push_str(&format!(
+                "file '{}'\n",
+                c.to_string_lossy().replace('\'', "'\\''")
+            ));
+        }
+    }
+    let path = dir.join("music.txt");
+    tokio::fs::write(&path, list).await.ok()?;
+    Some(path)
+}
+
+/// Draw the guide channel: one long-running encoder fed with rendered frames.
+/// The listing is refreshed from the schedule every few seconds of stream time.
+async fn produce_guide(
+    cfg: Arc<EngineConfig>,
+    spec: Arc<ChannelSpec>,
+    tx: mpsc::Sender<Vec<u8>>,
+) -> Result<()> {
+    const BATCH: u64 = 3;
+    const REFRESH_FRAMES: u64 = GUIDE_FPS as u64 * 5;
+    let dir = cfg.root.join("hls").join(
+        spec.id
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect::<String>(),
+    );
+    let music = music_playlist(&cfg, &spec, &dir).await;
+    let args = guide_args(WIDTH, HEIGHT, music.as_deref(), &cfg.profile, cfg.encoder);
+    let mut child = Command::new(&cfg.ffmpeg)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .kill_on_drop(true)
+        .spawn()
+        .with_context(|| format!("starting {}", cfg.ffmpeg.display()))?;
+    let mut stdin = child.stdin.take().context("guide encoder has no stdin")?;
+    let mut out = child.stdout.take().context("guide encoder has no stdout")?;
+
+    let (source, id) = (spec.source.clone(), spec.id.clone());
+    let theme = Theme::for_channel(&spec.id);
+    let start_wall = now_ms();
+    let writer = tokio::spawn(async move {
+        let mut data = tvmaster_render::GuideData::default();
+        let mut frame: u64 = 0;
+        loop {
+            if frame.is_multiple_of(REFRESH_FRAMES) {
+                // "now" on screen is where the stream is, not where the encoder is.
+                let wall = start_wall + (frame as f64 * 1000.0 / GUIDE_FPS as f64) as i64;
+                let (src, ch) = (source.clone(), id.clone());
+                if let Ok(Some(d)) =
+                    tokio::task::spawn_blocking(move || src.guide_data(&ch, wall)).await
+                {
+                    data = d;
+                }
+            }
+            let (d, th, first) = (data.clone(), theme, frame);
+            let chunk = tokio::task::spawn_blocking(move || {
+                let mut buf = Vec::with_capacity(BATCH as usize * WIDTH * HEIGHT * 3);
+                for k in 0..BATCH {
+                    let t = (first + k) as f32 / GUIDE_FPS as f32;
+                    buf.extend_from_slice(&render_guide(&d, &th, t).px);
+                }
+                buf
+            })
+            .await
+            .map_err(std::io::Error::other)?;
+            stdin.write_all(&chunk).await?;
+            frame += BATCH;
+        }
+        #[allow(unreachable_code)]
+        Ok::<(), std::io::Error>(())
+    });
+
+    let mut buf = vec![0u8; 64 * 1024];
+    let mut fixer = ContinuityFixer::new();
+    let result: Result<()> = loop {
+        let n = out.read(&mut buf).await?;
+        if n == 0 {
+            break Err(anyhow!("guide encoder ended"));
+        }
+        let packets = fixer.process(&buf[..n]);
+        if !packets.is_empty() && tx.send(packets).await.is_err() {
+            break Err(anyhow!("segmenter writer closed"));
+        }
+    };
+    writer.abort();
+    result
 }
 
 async fn report_unplayable(spec: &Arc<ChannelSpec>, media_id: Option<i64>) {

@@ -73,6 +73,79 @@ impl RunOutPolicy {
     }
 }
 
+/// What a channel is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChannelKind {
+    /// Airs shows from the library on a schedule.
+    #[default]
+    Programming,
+    /// The guide channel: a rendered, scrolling listing of every channel.
+    Guide,
+}
+
+impl ChannelKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ChannelKind::Programming => "programming",
+            ChannelKind::Guide => "guide",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "programming" => Some(ChannelKind::Programming),
+            "guide" => Some(ChannelKind::Guide),
+            _ => None,
+        }
+    }
+}
+
+/// Settings for a guide channel.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GuideConfig {
+    /// How many hours ahead the grid shows (2-6).
+    #[serde(default = "default_guide_hours")]
+    pub hours: u32,
+    /// Heading; blank = "<channel name> GUIDE".
+    #[serde(default)]
+    pub title: Option<String>,
+    /// Extra lines for the scrolling ticker (promos, announcements). The ticker
+    /// also announces what is on now.
+    #[serde(default)]
+    pub ticker: Vec<String>,
+    /// Libraries (kind `music`) for background music. Silence if empty.
+    #[serde(default)]
+    pub music_library_ids: Vec<i64>,
+}
+
+fn default_guide_hours() -> u32 {
+    3
+}
+
+impl Default for GuideConfig {
+    fn default() -> Self {
+        Self {
+            hours: default_guide_hours(),
+            title: None,
+            ticker: Vec::new(),
+            music_library_ids: Vec::new(),
+        }
+    }
+}
+
+impl GuideConfig {
+    pub fn validate(&self) -> Result<(), String> {
+        if !(2..=6).contains(&self.hours) {
+            return Err("guide.hours must be 2-6".into());
+        }
+        if self.ticker.len() > 20 || self.ticker.iter().any(|t| t.chars().count() > 200) {
+            return Err("guide.ticker: at most 20 lines of 200 characters".into());
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Channel {
     pub id: String,
@@ -94,6 +167,15 @@ pub struct Channel {
     pub library_ids: Vec<i64>,
     /// Block grid, seasons, events and fill. Empty = just follow the strategy.
     pub lineup: Lineup,
+    #[serde(default)]
+    pub kind: ChannelKind,
+    /// A group for organising channels ("Kids", "Movies"); shown in the
+    /// playlist and the web player.
+    #[serde(default)]
+    pub group: Option<String>,
+    /// Used when `kind` is `guide`.
+    #[serde(default)]
+    pub guide: GuideConfig,
 }
 
 /// A registered player (a TV) that a remote can control.
@@ -105,6 +187,9 @@ pub struct Tv {
     pub power: bool,
     pub volume: u8,
     pub muted: bool,
+    /// A player is connected right now (not stored).
+    #[serde(default)]
+    pub online: bool,
 }
 
 impl Tv {
@@ -116,6 +201,7 @@ impl Tv {
             power: false,
             volume: 50,
             muted: false,
+            online: false,
         }
     }
 }

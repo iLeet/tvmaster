@@ -191,6 +191,7 @@ async fn mixed_clips_slate_and_missing_file_become_one_continuous_stream() {
         name: "Test TV".into(),
         always_on: true,
         source: schedule.clone(),
+        guide: None,
     };
     // A previous run's playlist must never be served after a (re)start.
     let stale_dir = manager.hls_dir("test");

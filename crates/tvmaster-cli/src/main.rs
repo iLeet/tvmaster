@@ -131,6 +131,8 @@ async fn serve(
     let state = AppState::new(conn, info, playout.clone());
     // Keeps every channel's schedule filled days ahead; the first pass runs now.
     state.spawn_autopilot();
+    // Pushes "now playing" changes to connected remotes and players.
+    state.spawn_now_watcher();
     state.start_always_on();
 
     let listener = tokio::net::TcpListener::bind(&bind)

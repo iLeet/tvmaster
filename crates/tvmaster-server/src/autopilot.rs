@@ -242,7 +242,10 @@ pub fn tick(conn: &Connection, dirty: &[String], now_ms: i64) {
         }
     };
     let dirty: HashMap<&str, ()> = dirty.iter().map(|d| (d.as_str(), ())).collect();
-    for ch in channels {
+    for ch in channels
+        .into_iter()
+        .filter(|c| c.kind == tvmaster_core::ChannelKind::Programming)
+    {
         let result = if dirty.contains_key(ch.id.as_str()) {
             reroll_locked(conn, &ch, now_ms, UNPLAYABLE_LOCK_MS)
         } else {
@@ -302,6 +305,9 @@ mod tests {
             always_on: false,
             library_ids: vec![lib.id],
             lineup: serde_json::from_str::<Lineup>(lineup_json).unwrap(),
+            kind: Default::default(),
+            group: None,
+            guide: Default::default(),
         };
         upsert_channel(&conn, &ch).unwrap();
         (conn, ch)
