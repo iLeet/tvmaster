@@ -26,11 +26,9 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - name: Format
-        continue-on-error: true  # make blocking once verified locally
         if: matrix.os == 'ubuntu-latest'
         run: cargo fmt --all -- --check
       - name: Clippy
-        continue-on-error: true  # make blocking once verified locally
         if: matrix.os == 'ubuntu-latest'
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test

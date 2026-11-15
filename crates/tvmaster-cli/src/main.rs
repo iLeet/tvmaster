@@ -3,7 +3,11 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "tvmaster", version, about = "Self-hosted retro TV station and IPTV engine")]
+#[command(
+    name = "tvmaster",
+    version,
+    about = "Self-hosted retro TV station and IPTV engine"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -26,8 +30,7 @@ enum Command {
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
 

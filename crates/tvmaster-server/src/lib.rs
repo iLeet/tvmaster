@@ -45,10 +45,7 @@ struct NewTv {
     name: String,
 }
 
-async fn register_tv(
-    State(s): State<AppState>,
-    Json(body): Json<NewTv>,
-) -> (StatusCode, Json<Tv>) {
+async fn register_tv(State(s): State<AppState>, Json(body): Json<NewTv>) -> (StatusCode, Json<Tv>) {
     let tv = Tv::new(body.id.clone(), body.name);
     s.tvs.lock().unwrap().insert(body.id, tv.clone());
     (StatusCode::CREATED, Json(tv))
@@ -134,10 +131,34 @@ mod tests {
     #[tokio::test]
     async fn two_tvs_watch_different_channels() {
         let app = router();
-        call(&app, "POST", "/api/v1/tvs", r#"{"id":"living-room","name":"Living Room"}"#).await;
-        call(&app, "POST", "/api/v1/tvs", r#"{"id":"bedroom","name":"Bedroom"}"#).await;
-        call(&app, "POST", "/api/v1/tvs/living-room/channel", r#"{"number":3}"#).await;
-        call(&app, "POST", "/api/v1/tvs/bedroom/channel", r#"{"number":7}"#).await;
+        call(
+            &app,
+            "POST",
+            "/api/v1/tvs",
+            r#"{"id":"living-room","name":"Living Room"}"#,
+        )
+        .await;
+        call(
+            &app,
+            "POST",
+            "/api/v1/tvs",
+            r#"{"id":"bedroom","name":"Bedroom"}"#,
+        )
+        .await;
+        call(
+            &app,
+            "POST",
+            "/api/v1/tvs/living-room/channel",
+            r#"{"number":3}"#,
+        )
+        .await;
+        call(
+            &app,
+            "POST",
+            "/api/v1/tvs/bedroom/channel",
+            r#"{"number":7}"#,
+        )
+        .await;
         let (_, a) = call(&app, "GET", "/api/v1/tvs/living-room", "").await;
         let (_, b) = call(&app, "GET", "/api/v1/tvs/bedroom", "").await;
         assert_eq!(a["channel"], 3);

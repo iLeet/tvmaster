@@ -41,11 +41,7 @@ impl EpisodeCursor {
 
     /// Full passes through the list completed so far.
     pub fn passes(&self, total: u64) -> u64 {
-        if total == 0 {
-            0
-        } else {
-            self.committed / total
-        }
+        self.committed.checked_div(total).unwrap_or(0)
     }
 }
 

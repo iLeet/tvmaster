@@ -31,5 +31,4 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 tvmaster-core = { path = "crates/tvmaster-core" }
 tvmaster-db = { path = "crates/tvmaster-db" }
-tvmaster-media = { path = "crates/tvmaster-media" }
 tvmaster-server = { path = "crates/tvmaster-server" }
