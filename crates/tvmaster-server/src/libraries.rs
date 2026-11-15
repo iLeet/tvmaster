@@ -91,11 +91,15 @@ pub async fn scan(State(s): State<AppState>, Path(id): Path<i64>) -> ApiResult<J
         }
     }
 
-    // Channels using this library must rebuild their timelines.
-    if let Some(playout) = &s.playout {
-        let channels = tvmaster_db::list_channels(&s.db())?;
-        for c in channels.iter().filter(|c| c.library_ids.contains(&lib.id)) {
-            playout.stop(&c.id);
+    // Channels on autopilot pick up new and removed files right away.
+    {
+        let db = s.db();
+        let now = crate::plan::now_ms();
+        for c in tvmaster_db::list_channels(&db)?
+            .iter()
+            .filter(|c| c.library_ids.contains(&lib.id) && c.autopilot)
+        {
+            crate::autopilot::reroll(&db, c, now)?;
         }
     }
 

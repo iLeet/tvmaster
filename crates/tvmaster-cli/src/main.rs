@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::time::Duration;
-use tvmaster_media::{Encoder, FfmpegInfo};
+use tvmaster_media::{find_system_font, Encoder, FfmpegInfo};
 use tvmaster_playout::{EngineConfig, Manager};
 use tvmaster_server::AppState;
 
@@ -116,6 +116,9 @@ async fn serve(
             let mut cfg = EngineConfig::new(&info.ffmpeg, enc, &data_dir);
             cfg.readrate_burst = info.has_readrate_burst;
             cfg.idle_timeout = Duration::from_secs(idle_seconds);
+            if info.has_drawtext {
+                cfg.slate_font = find_system_font();
+            }
             let manager = Manager::new(cfg);
             (Some(info), Some(manager))
         }
@@ -126,6 +129,8 @@ async fn serve(
     };
 
     let state = AppState::new(conn, info, playout.clone());
+    // Keeps every channel's schedule filled days ahead; the first pass runs now.
+    state.spawn_autopilot();
     state.start_always_on();
 
     let listener = tokio::net::TcpListener::bind(&bind)

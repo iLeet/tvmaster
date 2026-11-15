@@ -1,6 +1,7 @@
 //! HTTP API: libraries, channels, Virtual TVs/remote, HLS streams, M3U/XMLTV
 //! and the web player. See docs/API.md.
 
+mod autopilot;
 mod channels;
 mod iptv;
 mod libraries;
@@ -16,9 +17,13 @@ use axum::{
 };
 use rusqlite::Connection;
 use serde_json::{json, Value};
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Duration;
+use tokio::sync::Notify;
+use tvmaster_core::Channel;
 use tvmaster_media::FfmpegInfo;
-use tvmaster_playout::Manager;
+use tvmaster_playout::{ChannelSpec, Manager};
 
 const PLAYER_HTML: &str = include_str!("player.html");
 
@@ -27,7 +32,14 @@ pub struct AppState {
     db: Arc<Mutex<Connection>>,
     pub(crate) playout: Option<Arc<Manager>>,
     pub(crate) ffmpeg: Option<Arc<FfmpegInfo>>,
+    /// Channels whose schedule must be re-rolled (e.g. a file turned out to be unplayable).
+    dirty: Arc<Mutex<HashSet<String>>>,
+    /// Wakes the autopilot loop early.
+    wake: Arc<Notify>,
 }
+
+/// How often the autopilot loop tops up schedules and commits aired episodes.
+const AUTOPILOT_INTERVAL: Duration = Duration::from_secs(60);
 
 impl AppState {
     pub fn new(
@@ -39,6 +51,8 @@ impl AppState {
             db: Arc::new(Mutex::new(conn)),
             playout,
             ffmpeg: ffmpeg.map(Arc::new),
+            dirty: Arc::new(Mutex::new(HashSet::new())),
+            wake: Arc::new(Notify::new()),
         }
     }
 
@@ -55,29 +69,63 @@ impl AppState {
         self.db.lock().unwrap_or_else(|p| p.into_inner())
     }
 
+    /// What playout needs to put a channel on air.
+    pub(crate) fn channel_spec(&self, channel: &Channel) -> ChannelSpec {
+        ChannelSpec {
+            id: channel.id.clone(),
+            name: channel.name.clone(),
+            always_on: channel.always_on,
+            source: Arc::new(plan::DbSchedule {
+                db: self.db.clone(),
+                dirty: self.dirty.clone(),
+                wake: self.wake.clone(),
+            }),
+        }
+    }
+
     /// Put `always_on` channels on air (call once at startup).
     pub fn start_always_on(&self) {
         let Some(playout) = &self.playout else { return };
-        let ids: Vec<String> = match tvmaster_db::list_channels(&self.db()) {
-            Ok(c) => c
-                .into_iter()
-                .filter(|c| c.always_on)
-                .map(|c| c.id)
-                .collect(),
+        let channels = match tvmaster_db::list_channels(&self.db()) {
+            Ok(c) => c,
             Err(e) => {
                 tracing::error!("listing channels: {e}");
                 return;
             }
         };
-        for id in ids {
-            match plan::build_spec(&self.db(), &id) {
-                Ok(Some(spec)) => {
-                    playout.start_if_absent(spec);
-                }
-                Ok(None) => tracing::warn!(channel = %id, "always-on channel has nothing to play"),
-                Err(e) => tracing::error!(channel = %id, "{e:?}"),
+        for ch in channels.into_iter().filter(|c| c.always_on) {
+            if let Err(e) = autopilot::maintain(&self.db(), &ch, plan::now_ms()) {
+                tracing::error!(channel = %ch.id, "scheduling: {e}");
             }
+            playout.start_if_absent(self.channel_spec(&ch));
         }
+    }
+
+    /// Start the autopilot loop: keeps every channel's schedule filled days
+    /// ahead, advances the episode cursors as items air and re-rolls channels
+    /// with unplayable files. Runs one pass immediately. Needs a Tokio runtime.
+    pub fn spawn_autopilot(&self) -> tokio::task::JoinHandle<()> {
+        let state = self.clone();
+        autopilot::fill_blank_timezones(&state.db(), &channels::system_timezone());
+        tokio::spawn(async move {
+            loop {
+                let dirty: Vec<String> = state
+                    .dirty
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .drain()
+                    .collect();
+                let s = state.clone();
+                let _ = tokio::task::spawn_blocking(move || {
+                    autopilot::tick(&s.db(), &dirty, plan::now_ms());
+                })
+                .await;
+                tokio::select! {
+                    _ = tokio::time::sleep(AUTOPILOT_INTERVAL) => {}
+                    _ = state.wake.notified() => {}
+                }
+            }
+        })
     }
 }
 
@@ -130,6 +178,12 @@ pub fn router(state: AppState) -> Router {
             get(channels::get).delete(channels::delete),
         )
         .route("/api/v1/channels/:id/schedule", get(channels::schedule))
+        .route(
+            "/api/v1/channels/:id/lineup",
+            get(channels::get_lineup).put(channels::put_lineup),
+        )
+        .route("/api/v1/channels/:id/reroll", post(channels::reroll))
+        .route("/api/v1/channels/:id/cursors", get(channels::cursors))
         .route("/api/v1/tvs", get(tvs::list).post(tvs::register))
         .route("/api/v1/tvs/:id", get(tvs::get))
         .route("/api/v1/tvs/:id/channel", post(tvs::set_channel))

@@ -1,3 +1,4 @@
+use crate::lineup::Lineup;
 use serde::{Deserialize, Serialize};
 
 /// How a channel picks what to air.
@@ -91,6 +92,8 @@ pub struct Channel {
     pub always_on: bool,
     /// Libraries this channel draws programming from.
     pub library_ids: Vec<i64>,
+    /// Block grid, seasons, events and fill. Empty = just follow the strategy.
+    pub lineup: Lineup,
 }
 
 /// A registered player (a TV) that a remote can control.

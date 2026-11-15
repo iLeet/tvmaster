@@ -120,7 +120,7 @@ docs/                 plan, API, design
 
 ## 12. Milestones
 
-Status: **M1 done. M2 done** (see notes below). M3 next.
+Status: **M1, M2 and M3 done** (see notes below). M4 (commercials and bumpers) next.
 
 1. **Foundation:** repo, workspace, CI matrix, FFmpeg manager, library scanner, SQLite schema, API skeleton.
 2. **One channel on air:** playout runner, HLS/M3U/XMLTV, shuffle + sequential, web player, watchdog, service installers, state recovery.
@@ -148,3 +148,12 @@ Golden-file schedule tests (same seed → same schedule), fake-FFmpeg harness fo
 - **Timeline:** M2 uses an endless deterministic timeline anchored at the channel's epoch (shuffle re-seeded per pass). This already gives "keeps going and wraps" behaviour; the reserved/committed cursors, run-out policies and block grids replace it in M3.
 - **Autopilot basics in place:** watchdog with exponential backoff, restart on segmenter crash, unplayable files skipped, idle channels stop, config and TV state persist, service templates. Still to come: cursors, fallback ladder beyond skip-to-next, health alerts.
 - **Known limits:** scans are synchronous (large libraries should become a background job), drift between wall clock and encode is not corrected yet (M3 resync), only software/VideoToolbox/NVENC encoders are wired (NVENC untested), no auth.
+
+## 16. M3 notes (scheduling and Autopilot)
+
+- **Design:** the scheduler (`tvmaster-core`) is pure and deterministic. It resolves *events > season blocks > base blocks > fill* at every slot start, snaps starts to a local-time grid, pads with filler, and draws from per-show/pool/event cursors. The server materializes its output into SQLite 72 hours ahead; playout, the guide, XMLTV and now/next all read that one schedule. Full reference: [SCHEDULING.md](SCHEDULING.md).
+- **Cursors:** reserved vs committed, as planned. Re-rolls rebuild reservations from what aired plus what the locked items hold, cutting at a show boundary so the grid stays aligned. Covered by a two-week fake-clock simulation and re-roll tests.
+- **Downtime:** a heartbeat distinguishes "the machine was off" from "time passed normally", so items scheduled during an outage never count as aired (`resume`), unless you chose `advance`.
+- **Playout:** follows the schedule's wall-clock times, covers gaps, scheduled filler and unplayable files with a slate, reports bad files (flagged missing, re-rolled within seconds), and resyncs to live if it falls behind. The slate has no text on FFmpeg builds without `drawtext` (the Homebrew build has none); proper station graphics arrive with the renderer in M4.
+- **Mistakes the tests caught:** a re-roll that split a show from its padding and knocked the grid off alignment; stale schedules being pruned before downtime could be detected; and wall-clock-dependent assertions.
+- **Known limits:** no mid-show ad breaks or bumpers yet (M4); scans still run in the foreground; no auth; the unplayable-file ladder covers missing/corrupt files but not slow storage.

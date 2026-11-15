@@ -145,6 +145,86 @@ pub fn item_args(job: &ItemJob, p: &OutputProfile, enc: Encoder) -> Vec<String> 
     a
 }
 
+fn slate_text(s: &str) -> String {
+    // drawtext treats : ' \\ % specially; keep the slate text to safe characters.
+    s.chars()
+        .filter(|c| c.is_ascii_alphanumeric() || " .,-!&".contains(*c))
+        .take(60)
+        .collect()
+}
+
+/// Arguments for the station slate: a plain card with silence, used for gaps,
+/// scheduled filler and files that cannot be played. Text is drawn only when a
+/// font is supplied (FFmpeg must have `drawtext`).
+pub fn slate_args(
+    text: &str,
+    duration_ms: u64,
+    ts_offset_ms: u64,
+    p: &OutputProfile,
+    enc: Encoder,
+    font: Option<&Path>,
+) -> Vec<String> {
+    let dur = secs(duration_ms);
+    let mut vf = String::new();
+    if let Some(font) = font {
+        let font = font
+            .to_string_lossy()
+            .replace('\\', "/")
+            .replace(':', "\\:");
+        vf.push_str(&format!(
+            "drawtext=fontfile='{font}':text='{}':fontcolor=white:fontsize={}:x=(w-text_w)/2:y=(h-text_h)/2,",
+            slate_text(text),
+            p.height / 14
+        ));
+    }
+    vf.push_str("format=yuv420p");
+    let mut a: Vec<String> = ["-hide_banner", "-loglevel", "error", "-nostdin"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    a.extend([
+        "-f".into(),
+        "lavfi".into(),
+        "-t".into(),
+        dur.clone(),
+        "-i".into(),
+        format!("color=c=0x0b1220:s={}x{}:r={}", p.width, p.height, p.fps),
+        "-f".into(),
+        "lavfi".into(),
+        "-t".into(),
+        dur,
+        "-i".into(),
+        "anullsrc=r=48000:cl=stereo".into(),
+        "-map".into(),
+        "0:v:0".into(),
+        "-map".into(),
+        "1:a:0".into(),
+        "-vf".into(),
+        vf,
+    ]);
+    a.extend(video_args(enc, p));
+    a.extend([
+        "-c:a".into(),
+        "aac".into(),
+        "-b:a".into(),
+        format!("{}k", p.audio_kbps),
+        "-ar".into(),
+        "48000".into(),
+        "-ac".into(),
+        "2".into(),
+        "-output_ts_offset".into(),
+        secs(ts_offset_ms),
+        "-muxdelay".into(),
+        "0".into(),
+        "-muxpreload".into(),
+        "0".into(),
+        "-f".into(),
+        "mpegts".into(),
+        "pipe:1".into(),
+    ]);
+    a
+}
+
 /// Arguments for the long-running segmenter that turns the continuous
 /// MPEG-TS on stdin into a rolling HLS playlist in `dir`.
 pub fn segmenter_args(dir: &Path, p: &OutputProfile, readrate_burst: bool) -> Vec<String> {
@@ -241,6 +321,48 @@ mod tests {
         assert!(vf.contains("scale=1280:720"));
         assert!(vf.contains("pad=1280:720"));
         assert!(vf.contains("fps=30"));
+    }
+
+    #[test]
+    fn slate_is_silent_video_with_matching_layout() {
+        let a = slate_args(
+            "Retro TV",
+            5_000,
+            1_000,
+            &OutputProfile::default(),
+            Encoder::Software,
+            None,
+        );
+        assert!(a.iter().any(|x| x.starts_with("color=c=")));
+        assert!(a.iter().any(|x| x.starts_with("anullsrc")));
+        assert!(has_pair(&a, "-output_ts_offset", "1.000"));
+        assert!(has_pair(&a, "-t", "5.000"));
+        let vf = a
+            .windows(2)
+            .find(|w| w[0] == "-vf")
+            .map(|w| w[1].clone())
+            .unwrap();
+        assert_eq!(vf, "format=yuv420p", "no text without a font");
+    }
+
+    #[test]
+    fn slate_text_is_sanitized_when_a_font_is_given() {
+        let font = Path::new("/fonts/a.ttf");
+        let a = slate_args(
+            "Bob's: 100% \\ TV",
+            1_000,
+            0,
+            &OutputProfile::default(),
+            Encoder::Software,
+            Some(font),
+        );
+        let vf = a
+            .windows(2)
+            .find(|w| w[0] == "-vf")
+            .map(|w| w[1].clone())
+            .unwrap();
+        assert!(vf.contains("text='Bobs 100  TV'"), "{vf}");
+        assert!(vf.contains("fontfile='/fonts/a.ttf'"));
     }
 
     #[test]

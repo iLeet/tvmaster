@@ -4,7 +4,7 @@
 mod ffmpeg;
 mod scan;
 
-pub use ffmpeg::{Encoder, FfmpegInfo};
+pub use ffmpeg::{find_system_font, Encoder, FfmpegInfo};
 pub use scan::{find_videos, parse_name, ParsedName};
 
 use anyhow::{Context, Result};

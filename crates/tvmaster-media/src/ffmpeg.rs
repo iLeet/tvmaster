@@ -35,6 +35,8 @@ pub struct FfmpegInfo {
     pub has_nvenc: bool,
     /// Supports `-readrate_initial_burst` (faster stream start-up).
     pub has_readrate_burst: bool,
+    /// The `drawtext` filter is built in (needed for text on the station slate).
+    pub has_drawtext: bool,
 }
 
 fn run(bin: &Path, args: &[&str]) -> Result<String> {
@@ -67,12 +69,14 @@ impl FfmpegInfo {
         }
         let encoders = run(&ffmpeg, &["-hide_banner", "-encoders"])?;
         let help = run(&ffmpeg, &["-hide_banner", "-h", "long"])?;
+        let filters = run(&ffmpeg, &["-hide_banner", "-filters"])?;
         Ok(Self {
             version: parse_version(&version_out),
             has_libx264: encoders.contains(" libx264 "),
             has_videotoolbox: encoders.contains("h264_videotoolbox"),
             has_nvenc: encoders.contains("h264_nvenc"),
             has_readrate_burst: help.contains("readrate_initial_burst"),
+            has_drawtext: filters.contains(" drawtext "),
             ffmpeg,
             ffprobe,
         })
@@ -91,6 +95,21 @@ impl FfmpegInfo {
             None => Encoder::Software,
         }
     }
+}
+
+/// A font file usable by `drawtext`, if one is installed in a standard place.
+pub fn find_system_font() -> Option<PathBuf> {
+    [
+        "/System/Library/Fonts/Helvetica.ttc",
+        "/System/Library/Fonts/Supplemental/Arial.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+        "C:/Windows/Fonts/arial.ttf",
+    ]
+    .iter()
+    .map(PathBuf::from)
+    .find(|p| p.exists())
 }
 
 #[cfg(test)]

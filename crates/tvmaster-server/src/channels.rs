@@ -1,4 +1,5 @@
-use crate::plan::{build_plan, now_ms, program, Program};
+use crate::autopilot;
+use crate::plan::{now_and_next, now_ms, programs, Program};
 use crate::{ApiError, ApiResult, AppState};
 use axum::{
     extract::{Path, Query, State},
@@ -6,7 +7,10 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
-use tvmaster_core::{Channel, RunOutPolicy, Strategy};
+use serde_json::{json, Value};
+use tvmaster_core::{Channel, Lineup, RunOutPolicy, Strategy, Zone};
+
+const VIEW_LOOKAHEAD_MS: i64 = 12 * 3_600_000;
 
 #[derive(Serialize)]
 pub struct ChannelView {
@@ -23,18 +27,40 @@ fn view(s: &AppState, channel: Channel) -> ApiResult<ChannelView> {
         .as_ref()
         .map(|p| p.is_running(&channel.id))
         .unwrap_or(false);
-    let (mut now, mut next) = (None, None);
-    if let Some(plan) = build_plan(&s.db(), channel.clone())? {
-        let mut slots = plan.timeline.iter_from(now_ms());
-        now = slots.next().map(|sl| program(&sl, &plan.media));
-        next = slots.next().map(|sl| program(&sl, &plan.media));
-    }
+    let now = now_ms();
+    let progs = programs(&s.db(), &channel.id, now, now + VIEW_LOOKAHEAD_MS)?;
+    let (now_p, next_p) = now_and_next(&progs, now);
     Ok(ChannelView {
         channel,
         on_air,
-        now,
-        next,
+        now: now_p,
+        next: next_p,
     })
+}
+
+/// The server's own time zone, so "8pm" in a new channel's lineup means 8pm
+/// where the TVs are. Falls back to UTC if it can't be determined.
+pub(crate) fn system_timezone() -> String {
+    iana_time_zone::get_timezone()
+        .ok()
+        .filter(|tz| Zone::parse(tz).is_some())
+        .unwrap_or_else(|| "UTC".to_string())
+}
+
+/// Give a lineup the server's time zone if it did not name one.
+fn with_timezone(mut lineup: Lineup) -> Lineup {
+    if lineup.timezone.is_empty() {
+        lineup.timezone = system_timezone();
+    }
+    lineup
+}
+
+fn not_found() -> ApiError {
+    ApiError::new(StatusCode::NOT_FOUND, "no such channel")
+}
+
+fn load(s: &AppState, id: &str) -> ApiResult<Channel> {
+    tvmaster_db::get_channel(&s.db(), id)?.ok_or_else(not_found)
 }
 
 pub async fn list(State(s): State<AppState>) -> ApiResult<Json<Vec<ChannelView>>> {
@@ -50,9 +76,7 @@ pub async fn get(
     State(s): State<AppState>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<ChannelView>> {
-    let channel = tvmaster_db::get_channel(&s.db(), &id)?
-        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "no such channel"))?;
-    Ok(Json(view(&s, channel)?))
+    Ok(Json(view(&s, load(&s, &id)?)?))
 }
 
 #[derive(Deserialize)]
@@ -68,6 +92,7 @@ pub struct ChannelInput {
     always_on: Option<bool>,
     #[serde(default)]
     library_ids: Vec<i64>,
+    lineup: Option<Lineup>,
 }
 
 fn valid_id(id: &str) -> bool {
@@ -78,6 +103,34 @@ fn valid_id(id: &str) -> bool {
             .map(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
             .unwrap_or(false)
         && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
+}
+
+/// Do these two channels differ in anything that changes what airs?
+fn programming_differs(a: &Channel, b: &Channel) -> bool {
+    a.strategy != b.strategy
+        || a.run_out != b.run_out
+        || a.chaos != b.chaos
+        || a.seed != b.seed
+        || a.library_ids != b.library_ids
+        || a.lineup != b.lineup
+}
+
+fn bad_lineup(reason: String) -> ApiError {
+    ApiError::new(StatusCode::BAD_REQUEST, format!("invalid lineup: {reason}"))
+}
+
+/// Apply a change to a channel's programming: re-roll the future if the
+/// channel is on autopilot, otherwise leave the locked schedule alone (it is
+/// still topped up so the channel never runs dry).
+fn apply_programming_change(s: &AppState, channel: &Channel, existed: bool) -> ApiResult<()> {
+    let db = s.db();
+    let now = now_ms();
+    if existed && channel.autopilot {
+        autopilot::reroll(&db, channel, now)?;
+    } else {
+        autopilot::maintain(&db, channel, now)?;
+    }
+    Ok(())
 }
 
 /// Create or update a channel. Updating keeps its epoch and seed unless a new
@@ -105,8 +158,11 @@ pub async fn upsert(
             "chaos must be 0-100",
         ));
     }
+    if let Some(l) = &body.lineup {
+        l.validate().map_err(bad_lineup)?;
+    }
 
-    let (channel, created) = {
+    let (channel, existing) = {
         let db = s.db();
         for lib in &body.library_ids {
             if tvmaster_db::get_library(&db, *lib)?.is_none() {
@@ -154,19 +210,27 @@ pub async fn upsert(
                 .or(existing.as_ref().map(|e| e.always_on))
                 .unwrap_or(false),
             library_ids: body.library_ids,
+            lineup: with_timezone(
+                body.lineup
+                    .or(existing.as_ref().map(|e| e.lineup.clone()))
+                    .unwrap_or_default(),
+            ),
         };
         tvmaster_db::upsert_channel(&db, &channel)?;
-        (channel, existing.is_none())
+        (channel, existing)
     };
 
-    // Settings changed: rebuild on next tune-in (or immediately if always-on).
-    if let Some(playout) = &s.playout {
-        playout.stop(&channel.id);
+    let changed = existing
+        .as_ref()
+        .map(|e| programming_differs(e, &channel))
+        .unwrap_or(true);
+    if changed {
+        apply_programming_change(&s, &channel, existing.is_some())?;
     }
     if channel.always_on {
         s.start_always_on();
     }
-    let status = if created {
+    let status = if existing.is_none() {
         StatusCode::CREATED
     } else {
         StatusCode::OK
@@ -181,8 +245,49 @@ pub async fn delete(State(s): State<AppState>, Path(id): Path<String>) -> ApiRes
     if tvmaster_db::delete_channel(&s.db(), &id)? {
         Ok(StatusCode::NO_CONTENT)
     } else {
-        Err(ApiError::new(StatusCode::NOT_FOUND, "no such channel"))
+        Err(not_found())
     }
+}
+
+pub async fn get_lineup(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Lineup>> {
+    Ok(Json(load(&s, &id)?.lineup))
+}
+
+/// Replace a channel's lineup (blocks, seasons, events, fill, catch-up).
+pub async fn put_lineup(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    Json(lineup): Json<Lineup>,
+) -> ApiResult<Json<Lineup>> {
+    lineup.validate().map_err(bad_lineup)?;
+    let lineup = with_timezone(lineup);
+    let mut channel = load(&s, &id)?;
+    let changed = channel.lineup != lineup;
+    channel.lineup = lineup;
+    tvmaster_db::upsert_channel(&s.db(), &channel)?;
+    if changed {
+        apply_programming_change(&s, &channel, true)?;
+    }
+    Ok(Json(channel.lineup))
+}
+
+/// Regenerate the not-yet-aired schedule now. Never skips or repeats episodes
+/// that have aired. Works on locked (non-autopilot) channels too.
+pub async fn reroll(State(s): State<AppState>, Path(id): Path<String>) -> ApiResult<Json<Value>> {
+    let channel = load(&s, &id)?;
+    let items = autopilot::reroll(&s.db(), &channel, now_ms())?;
+    Ok(Json(json!({ "items": items })))
+}
+
+/// Where each show (and pool, and event) is up to: `committed` episodes have
+/// aired, `reserved` ones are on the schedule.
+pub async fn cursors(State(s): State<AppState>, Path(id): Path<String>) -> ApiResult<Json<Value>> {
+    load(&s, &id)?;
+    let cursors = tvmaster_db::load_cursors(&s.db(), &id)?;
+    Ok(Json(json!(cursors)))
 }
 
 #[derive(Deserialize)]
@@ -190,27 +295,21 @@ pub struct ScheduleQuery {
     hours: Option<u32>,
 }
 
-/// Upcoming programmes (default next 6 hours, max 48).
+/// Upcoming programmes (default next 6 hours, max 72).
 pub async fn schedule(
     State(s): State<AppState>,
     Path(id): Path<String>,
     Query(q): Query<ScheduleQuery>,
 ) -> ApiResult<Json<Vec<Program>>> {
-    let channel = tvmaster_db::get_channel(&s.db(), &id)?
-        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "no such channel"))?;
-    let hours = q.hours.unwrap_or(6).clamp(1, 48) as i64;
+    load(&s, &id)?;
+    let hours = q.hours.unwrap_or(6).clamp(1, 72) as i64;
     let start = now_ms();
-    let end = start + hours * 3_600_000;
-    let Some(plan) = build_plan(&s.db(), channel)? else {
-        return Ok(Json(Vec::new()));
-    };
-    let programs = plan
-        .timeline
-        .iter_from(start)
-        .take_while(|slot| slot.start_ms < end)
-        .map(|slot| program(&slot, &plan.media))
-        .collect();
-    Ok(Json(programs))
+    Ok(Json(programs(
+        &s.db(),
+        &id,
+        start,
+        start + hours * 3_600_000,
+    )?))
 }
 
 #[cfg(test)]
@@ -248,6 +347,8 @@ mod tests {
         (router(state), lib_id)
     }
 
+    const ALPHA_ALL_DAY: &str = r#"{"blocks":[{"name":"All","start":"00:00","end":"24:00","source":{"type":"show","show":"Alpha"}}]}"#;
+
     #[tokio::test]
     async fn create_validate_and_list_with_now_next() {
         let (app, lib) = app_with_media();
@@ -266,7 +367,141 @@ mod tests {
 
         // 3 x 20 min of programming -> 6 hours of schedule is 18 items.
         let (_, sched) = call(&app, "GET", "/api/v1/channels/retro/schedule?hours=6", "").await;
-        assert!(sched.as_array().unwrap().len() >= 18);
+        assert!(sched.as_array().unwrap().len() >= 17);
+    }
+
+    #[tokio::test]
+    async fn lineup_with_blocks_is_validated_scheduled_and_visible() {
+        let (app, lib) = app_with_media();
+        let bad = format!(
+            r#"{{"id":"a","number":1,"name":"A","library_ids":[{lib}],"lineup":{{"timezone":"Nope/Land"}}}}"#
+        );
+        let (st, err) = call(&app, "POST", "/api/v1/channels", &bad).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST);
+        assert!(err["error"].as_str().unwrap().contains("timezone"));
+
+        let good = format!(
+            r#"{{"id":"a","number":1,"name":"A","strategy":"block_grid","library_ids":[{lib}],"lineup":{ALPHA_ALL_DAY}}}"#
+        );
+        assert_eq!(
+            call(&app, "POST", "/api/v1/channels", &good).await.0,
+            StatusCode::CREATED
+        );
+        let (_, sched) = call(&app, "GET", "/api/v1/channels/a/schedule?hours=3", "").await;
+        let sched = sched.as_array().unwrap();
+        assert!(sched.len() >= 5);
+        for p in sched {
+            assert_eq!(p["show"], "Alpha", "the all-day block airs Alpha only");
+            assert_eq!(p["label"], "All");
+            // 20 minute episodes occupy 30 minute slots; the guide shows the full slot
+            assert_eq!(
+                p["end_ms"].as_i64().unwrap() - p["start_ms"].as_i64().unwrap(),
+                30 * 60_000
+            );
+            assert_eq!(
+                p["runtime_end_ms"].as_i64().unwrap() - p["start_ms"].as_i64().unwrap(),
+                20 * 60_000
+            );
+        }
+        let (st, lineup) = call(&app, "GET", "/api/v1/channels/a/lineup", "").await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(lineup["blocks"][0]["name"], "All");
+    }
+
+    #[tokio::test]
+    async fn put_lineup_rerolls_the_future_without_burning_episodes() {
+        let (app, lib) = app_with_media();
+        let body = format!(
+            r#"{{"id":"a","number":1,"name":"A","strategy":"block_grid","library_ids":[{lib}],"lineup":{ALPHA_ALL_DAY}}}"#
+        );
+        call(&app, "POST", "/api/v1/channels", &body).await;
+        let (_, before) = call(&app, "GET", "/api/v1/channels/a/schedule?hours=24", "").await;
+
+        let beta = r#"{"blocks":[{"name":"Beta","start":"00:00","end":"24:00","source":{"type":"show","show":"Beta"}}]}"#;
+        let (st, _) = call(&app, "PUT", "/api/v1/channels/a/lineup", beta).await;
+        assert_eq!(st, StatusCode::OK);
+        let (_, after) = call(&app, "GET", "/api/v1/channels/a/schedule?hours=24", "").await;
+        // the slot on air (locked) is unchanged; later slots are now Beta
+        assert_eq!(before[0], after[0]);
+        assert_eq!(after.as_array().unwrap().last().unwrap()["show"], "Beta");
+
+        let (st, _) = call(
+            &app,
+            "PUT",
+            "/api/v1/channels/a/lineup",
+            r#"{"grid_minutes":7}"#,
+        )
+        .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn manual_lock_keeps_the_schedule_until_you_reroll() {
+        let (app, lib) = app_with_media();
+        let body = format!(
+            r#"{{"id":"a","number":1,"name":"A","strategy":"block_grid","autopilot":false,"library_ids":[{lib}],"lineup":{ALPHA_ALL_DAY}}}"#
+        );
+        call(&app, "POST", "/api/v1/channels", &body).await;
+        let beta = r#"{"blocks":[{"name":"Beta","start":"00:00","end":"24:00","source":{"type":"show","show":"Beta"}}]}"#;
+        call(&app, "PUT", "/api/v1/channels/a/lineup", beta).await;
+        let (_, locked) = call(&app, "GET", "/api/v1/channels/a/schedule?hours=24", "").await;
+        assert!(
+            locked
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|p| p["show"] == "Alpha"),
+            "manual lock: edits do not touch the schedule"
+        );
+        let (st, r) = call(&app, "POST", "/api/v1/channels/a/reroll", "").await;
+        assert_eq!(st, StatusCode::OK);
+        assert!(r["items"].as_i64().unwrap() > 0);
+        let (_, now) = call(&app, "GET", "/api/v1/channels/a/schedule?hours=24", "").await;
+        assert_eq!(now.as_array().unwrap().last().unwrap()["show"], "Beta");
+    }
+
+    #[tokio::test]
+    async fn lineups_without_a_time_zone_get_the_servers() {
+        let (app, lib) = app_with_media();
+        let body = format!(
+            r#"{{"id":"a","number":1,"name":"A","library_ids":[{lib}],"lineup":{{"grid_minutes":30}}}}"#
+        );
+        let (_, ch) = call(&app, "POST", "/api/v1/channels", &body).await;
+        let tz = ch["lineup"]["timezone"].as_str().unwrap();
+        assert!(!tz.is_empty(), "a blank zone is filled in on save");
+        assert!(Zone::parse(tz).is_some());
+        // an explicit zone is kept, and a PUT without one is filled in too
+        let (_, l) = call(
+            &app,
+            "PUT",
+            "/api/v1/channels/a/lineup",
+            r#"{"timezone":"Asia/Tokyo"}"#,
+        )
+        .await;
+        assert_eq!(l["timezone"], "Asia/Tokyo");
+        let (_, l) = call(&app, "PUT", "/api/v1/channels/a/lineup", r#"{}"#).await;
+        assert!(!l["timezone"].as_str().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn cursors_endpoint_shows_progress() {
+        let (app, lib) = app_with_media();
+        let body = format!(
+            r#"{{"id":"a","number":1,"name":"A","strategy":"block_grid","library_ids":[{lib}],"lineup":{ALPHA_ALL_DAY}}}"#
+        );
+        call(&app, "POST", "/api/v1/channels", &body).await;
+        let (st, cur) = call(&app, "GET", "/api/v1/channels/a/cursors", "").await;
+        assert_eq!(st, StatusCode::OK);
+        assert!(
+            cur["show:alpha"]["reserved"].as_u64().unwrap() > 100,
+            "72h of slots reserved"
+        );
+        assert_eq!(
+            call(&app, "GET", "/api/v1/channels/nope/cursors", "")
+                .await
+                .0,
+            StatusCode::NOT_FOUND
+        );
     }
 
     #[tokio::test]

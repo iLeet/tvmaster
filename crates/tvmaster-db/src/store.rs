@@ -2,7 +2,9 @@
 
 use rusqlite::{params, Connection, OptionalExtension, Result, Row};
 use serde::Serialize;
-use tvmaster_core::{Channel, RunOutPolicy, Strategy, Tv};
+use tvmaster_core::{
+    Channel, Cursors, EpisodeCursor, ItemKind, RunOutPolicy, ScheduledItem, Strategy, Tv,
+};
 
 // ---------- libraries ----------
 
@@ -195,11 +197,15 @@ fn channel_from(r: &Row) -> Result<Channel> {
         epoch_ms: r.get(8)?,
         always_on: r.get::<_, i64>(9)? != 0,
         library_ids: Vec::new(),
+        lineup: r
+            .get::<_, Option<String>>(10)?
+            .and_then(|j| serde_json::from_str(&j).ok())
+            .unwrap_or_default(),
     })
 }
 
 const CHANNEL_COLS: &str =
-    "id, number, name, strategy, run_out, autopilot, chaos, seed, epoch_ms, always_on";
+    "id, number, name, strategy, run_out, autopilot, chaos, seed, epoch_ms, always_on, lineup_json";
 
 fn channel_library_ids(conn: &Connection, channel_id: &str) -> Result<Vec<i64>> {
     let mut st = conn.prepare(
@@ -211,12 +217,13 @@ fn channel_library_ids(conn: &Connection, channel_id: &str) -> Result<Vec<i64>> 
 
 pub fn upsert_channel(conn: &Connection, c: &Channel) -> Result<()> {
     conn.execute(
-        "INSERT INTO channels (id, number, name, strategy, run_out, autopilot, chaos, seed, epoch_ms, always_on)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+        "INSERT INTO channels (id, number, name, strategy, run_out, autopilot, chaos, seed, epoch_ms, always_on, lineup_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
          ON CONFLICT(id) DO UPDATE SET
             number = excluded.number, name = excluded.name, strategy = excluded.strategy,
             run_out = excluded.run_out, autopilot = excluded.autopilot, chaos = excluded.chaos,
-            seed = excluded.seed, epoch_ms = excluded.epoch_ms, always_on = excluded.always_on",
+            seed = excluded.seed, epoch_ms = excluded.epoch_ms, always_on = excluded.always_on,
+            lineup_json = excluded.lineup_json",
         params![
             c.id,
             c.number as i64,
@@ -227,7 +234,8 @@ pub fn upsert_channel(conn: &Connection, c: &Channel) -> Result<()> {
             c.chaos as i64,
             c.seed as i64,
             c.epoch_ms,
-            c.always_on as i64
+            c.always_on as i64,
+            serde_json::to_string(&c.lineup).unwrap_or_else(|_| "{}".into())
         ],
     )?;
     conn.execute(
@@ -273,6 +281,186 @@ pub fn get_channel(conn: &Connection, id: &str) -> Result<Option<Channel>> {
 
 pub fn delete_channel(conn: &Connection, id: &str) -> Result<bool> {
     Ok(conn.execute("DELETE FROM channels WHERE id = ?1", [id])? > 0)
+}
+
+// ---------- schedule ----------
+
+fn kind_str(k: ItemKind) -> &'static str {
+    match k {
+        ItemKind::Show => "show",
+        ItemKind::Filler => "filler",
+    }
+}
+
+const SCHED_COLS: &str = "kind, media_id, start_ms, end_ms, cursor_key, cursor_pos, label";
+
+fn item_from(r: &Row) -> Result<ScheduledItem> {
+    let kind: String = r.get(0)?;
+    Ok(ScheduledItem {
+        kind: if kind == "show" {
+            ItemKind::Show
+        } else {
+            ItemKind::Filler
+        },
+        media_id: r.get(1)?,
+        start_ms: r.get(2)?,
+        end_ms: r.get(3)?,
+        cursor_key: r.get(4)?,
+        cursor_pos: r.get::<_, Option<i64>>(5)?.map(|p| p as u64),
+        label: r.get(6)?,
+    })
+}
+
+pub fn insert_schedule(conn: &Connection, channel_id: &str, items: &[ScheduledItem]) -> Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    {
+        let mut st = tx.prepare(
+            "INSERT INTO schedule_items (channel_id, kind, media_id, start_ms, end_ms, cursor_key, cursor_pos, label)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        )?;
+        for it in items {
+            st.execute(params![
+                channel_id,
+                kind_str(it.kind),
+                it.media_id,
+                it.start_ms,
+                it.end_ms,
+                it.cursor_key,
+                it.cursor_pos.map(|p| p as i64),
+                it.label
+            ])?;
+        }
+    }
+    tx.commit()
+}
+
+/// Items overlapping `[from_ms, to_ms)`, in time order.
+pub fn schedule_between(
+    conn: &Connection,
+    channel_id: &str,
+    from_ms: i64,
+    to_ms: i64,
+) -> Result<Vec<ScheduledItem>> {
+    let mut st = conn.prepare(&format!(
+        "SELECT {SCHED_COLS} FROM schedule_items
+         WHERE channel_id = ?1 AND end_ms > ?2 AND start_ms < ?3 ORDER BY start_ms"
+    ))?;
+    let rows = st.query_map(params![channel_id, from_ms, to_ms], item_from)?;
+    rows.collect()
+}
+
+pub fn schedule_last_end(conn: &Connection, channel_id: &str) -> Result<Option<i64>> {
+    conn.query_row(
+        "SELECT MAX(end_ms) FROM schedule_items WHERE channel_id = ?1",
+        [channel_id],
+        |r| r.get(0),
+    )
+}
+
+/// Remove every item that starts at or after `start_ms`.
+pub fn delete_schedule_from(conn: &Connection, channel_id: &str, start_ms: i64) -> Result<usize> {
+    conn.execute(
+        "DELETE FROM schedule_items WHERE channel_id = ?1 AND start_ms >= ?2",
+        params![channel_id, start_ms],
+    )
+}
+
+/// Remove items that ended before `end_ms` (history trimming).
+pub fn prune_schedule_before(conn: &Connection, channel_id: &str, end_ms: i64) -> Result<usize> {
+    conn.execute(
+        "DELETE FROM schedule_items WHERE channel_id = ?1 AND end_ms < ?2",
+        params![channel_id, end_ms],
+    )
+}
+
+/// What playout needs for one schedule item: the item plus its file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlayRow {
+    pub item: ScheduledItem,
+    pub path: Option<String>,
+    pub has_audio: bool,
+}
+
+/// The item on air at `at_ms`, or the next one to start after it.
+pub fn play_row_at_or_after(
+    conn: &Connection,
+    channel_id: &str,
+    at_ms: i64,
+) -> Result<Option<PlayRow>> {
+    conn.query_row(
+        "SELECT s.kind, s.media_id, s.start_ms, s.end_ms, s.cursor_key, s.cursor_pos, s.label, m.path, m.acodec
+         FROM schedule_items s LEFT JOIN media_items m ON m.id = s.media_id
+         WHERE s.channel_id = ?1 AND s.end_ms > ?2 ORDER BY s.start_ms LIMIT 1",
+        params![channel_id, at_ms],
+        |r| {
+            Ok(PlayRow {
+                item: item_from(r)?,
+                path: r.get(7)?,
+                has_audio: r.get::<_, Option<String>>(8)?.is_some(),
+            })
+        },
+    )
+    .optional()
+}
+
+pub fn mark_media_missing(conn: &Connection, media_id: i64) -> Result<()> {
+    conn.execute(
+        "UPDATE media_items SET missing = 1 WHERE id = ?1",
+        [media_id],
+    )?;
+    Ok(())
+}
+
+// ---------- cursors ----------
+
+pub fn load_cursors(conn: &Connection, channel_id: &str) -> Result<Cursors> {
+    let mut st =
+        conn.prepare("SELECT key, reserved, committed FROM cursors WHERE channel_id = ?1")?;
+    let rows = st.query_map([channel_id], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            EpisodeCursor {
+                reserved: r.get::<_, i64>(1)? as u64,
+                committed: r.get::<_, i64>(2)? as u64,
+            },
+        ))
+    })?;
+    rows.collect()
+}
+
+pub fn save_cursors(conn: &Connection, channel_id: &str, cursors: &Cursors) -> Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    tx.execute("DELETE FROM cursors WHERE channel_id = ?1", [channel_id])?;
+    {
+        let mut st = tx.prepare(
+            "INSERT INTO cursors (channel_id, key, reserved, committed) VALUES (?1, ?2, ?3, ?4)",
+        )?;
+        for (k, c) in cursors {
+            st.execute(params![
+                channel_id,
+                k,
+                c.reserved as i64,
+                c.committed as i64
+            ])?;
+        }
+    }
+    tx.commit()
+}
+
+// ---------- meta ----------
+
+pub fn meta_get(conn: &Connection, key: &str) -> Result<Option<String>> {
+    conn.query_row("SELECT value FROM meta WHERE key = ?1", [key], |r| r.get(0))
+        .optional()
+}
+
+pub fn meta_set(conn: &Connection, key: &str, value: &str) -> Result<()> {
+    conn.execute(
+        "INSERT INTO meta (key, value) VALUES (?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![key, value],
+    )?;
+    Ok(())
 }
 
 // ---------- TVs ----------
@@ -325,6 +513,7 @@ pub fn get_tv(conn: &Connection, id: &str) -> Result<Option<Tv>> {
 mod tests {
     use super::*;
     use crate::open_in_memory;
+    use tvmaster_core::Lineup;
 
     fn chan(id: &str, number: u32, libs: Vec<i64>) -> Channel {
         Channel {
@@ -339,6 +528,7 @@ mod tests {
             epoch_ms: 1_000,
             always_on: false,
             library_ids: libs,
+            lineup: Lineup::default(),
         }
     }
 
@@ -402,6 +592,123 @@ mod tests {
         assert_eq!(list_channels(&c).unwrap(), vec![edited]);
         assert!(delete_channel(&c, "ch1").unwrap());
         assert!(get_channel(&c, "ch1").unwrap().is_none());
+    }
+
+    fn item(start: i64, end: i64, id: i64, pos: u64) -> ScheduledItem {
+        ScheduledItem {
+            kind: ItemKind::Show,
+            media_id: Some(id),
+            start_ms: start,
+            end_ms: end,
+            cursor_key: Some("show:a".into()),
+            cursor_pos: Some(pos),
+            label: Some("Prime".into()),
+        }
+    }
+
+    #[test]
+    fn lineup_roundtrips_through_the_channel() {
+        let c = open_in_memory().unwrap();
+        let mut ch = chan("ch1", 5, vec![]);
+        ch.lineup = serde_json::from_str(
+            r#"{"timezone":"America/Toronto","blocks":[{"name":"P","start":"20:00","end":"21:00","source":{"type":"chaos"}}]}"#,
+        )
+        .unwrap();
+        upsert_channel(&c, &ch).unwrap();
+        assert_eq!(get_channel(&c, "ch1").unwrap().unwrap().lineup, ch.lineup);
+    }
+
+    #[test]
+    fn schedule_insert_query_and_trim() {
+        let c = open_in_memory().unwrap();
+        upsert_channel(&c, &chan("ch1", 5, vec![])).unwrap();
+        let lib = add_library(&c, "/tv", "shows").unwrap();
+        let ids: Vec<i64> = (1..=3)
+            .map(|i| upsert_media(&c, &new_media(lib.id, &format!("/tv/{i}.mp4"), 10)).unwrap())
+            .collect();
+        assert_eq!(schedule_last_end(&c, "ch1").unwrap(), None);
+        let items = vec![
+            item(0, 10, ids[0], 0),
+            item(10, 20, ids[1], 1),
+            item(20, 30, ids[2], 2),
+        ];
+        insert_schedule(&c, "ch1", &items).unwrap();
+        assert_eq!(schedule_last_end(&c, "ch1").unwrap(), Some(30));
+        assert_eq!(
+            schedule_between(&c, "ch1", 5, 15).unwrap(),
+            items[..2].to_vec()
+        );
+        assert_eq!(
+            schedule_between(&c, "ch1", 10, 20).unwrap(),
+            items[1..2].to_vec()
+        );
+        assert_eq!(delete_schedule_from(&c, "ch1", 20).unwrap(), 1);
+        assert_eq!(prune_schedule_before(&c, "ch1", 11).unwrap(), 1);
+        assert_eq!(
+            schedule_between(&c, "ch1", 0, 100).unwrap(),
+            items[1..2].to_vec()
+        );
+    }
+
+    #[test]
+    fn play_row_finds_current_then_next_and_joins_the_file() {
+        let c = open_in_memory().unwrap();
+        upsert_channel(&c, &chan("ch1", 5, vec![])).unwrap();
+        let lib = add_library(&c, "/tv", "shows").unwrap();
+        let m = upsert_media(
+            &c,
+            &NewMedia {
+                library_id: lib.id,
+                path: "/tv/a.mp4".into(),
+                duration_ms: 10,
+                acodec: Some("aac".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let mut filler = item(10, 20, 0, 0);
+        filler.kind = ItemKind::Filler;
+        filler.media_id = None;
+        insert_schedule(&c, "ch1", &[item(0, 10, m, 0), filler]).unwrap();
+        let now = play_row_at_or_after(&c, "ch1", 5).unwrap().unwrap();
+        assert_eq!(now.path.as_deref(), Some("/tv/a.mp4"));
+        assert!(now.has_audio);
+        let next = play_row_at_or_after(&c, "ch1", 10).unwrap().unwrap();
+        assert_eq!(next.item.kind, ItemKind::Filler);
+        assert_eq!(next.path, None);
+        assert!(play_row_at_or_after(&c, "ch1", 20).unwrap().is_none());
+        mark_media_missing(&c, m).unwrap();
+        assert!(list_media_in_libraries(&c, &[lib.id]).unwrap().is_empty());
+    }
+
+    #[test]
+    fn cursors_roundtrip_per_channel() {
+        let c = open_in_memory().unwrap();
+        upsert_channel(&c, &chan("a", 1, vec![])).unwrap();
+        upsert_channel(&c, &chan("b", 2, vec![])).unwrap();
+        let mut cur = Cursors::new();
+        cur.insert(
+            "show:x".into(),
+            EpisodeCursor {
+                reserved: 5,
+                committed: 3,
+            },
+        );
+        save_cursors(&c, "a", &cur).unwrap();
+        assert_eq!(load_cursors(&c, "a").unwrap(), cur);
+        assert!(load_cursors(&c, "b").unwrap().is_empty());
+        cur.get_mut("show:x").unwrap().committed = 4;
+        save_cursors(&c, "a", &cur).unwrap();
+        assert_eq!(load_cursors(&c, "a").unwrap()["show:x"].committed, 4);
+    }
+
+    #[test]
+    fn meta_roundtrip() {
+        let c = open_in_memory().unwrap();
+        assert_eq!(meta_get(&c, "k").unwrap(), None);
+        meta_set(&c, "k", "1").unwrap();
+        meta_set(&c, "k", "2").unwrap();
+        assert_eq!(meta_get(&c, "k").unwrap().as_deref(), Some("2"));
     }
 
     #[test]

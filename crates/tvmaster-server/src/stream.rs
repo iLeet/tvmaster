@@ -1,7 +1,8 @@
 //! HLS delivery. Many clients share one encode per channel; a channel starts
 //! on the first playlist request and stops after the idle timeout.
 
-use crate::plan::build_spec;
+use crate::autopilot;
+use crate::plan::now_ms;
 use crate::{ApiError, ApiResult, AppState};
 use axum::{
     extract::{Path, State},
@@ -36,14 +37,20 @@ pub async fn hls(
     }
 
     if is_playlist && !playout.touch(&channel) {
-        let spec = build_spec(&s.db(), &channel)?;
-        let Some(spec) = spec else {
-            let exists = tvmaster_db::get_channel(&s.db(), &channel)?.is_some();
-            return Err(if exists {
-                ApiError::new(StatusCode::CONFLICT, "channel has no playable media")
-            } else {
-                ApiError::new(StatusCode::NOT_FOUND, "no such channel")
-            });
+        let spec = {
+            let db = s.db();
+            let Some(ch) = tvmaster_db::get_channel(&db, &channel)? else {
+                return Err(ApiError::new(StatusCode::NOT_FOUND, "no such channel"));
+            };
+            if autopilot::catalog_for(&db, &ch)?.is_empty() {
+                return Err(ApiError::new(
+                    StatusCode::CONFLICT,
+                    "channel has no playable media",
+                ));
+            }
+            // Make sure there is a schedule to follow before going on air.
+            autopilot::maintain(&db, &ch, now_ms())?;
+            s.channel_spec(&ch)
         };
         playout.start_if_absent(spec);
         playout.touch(&channel);

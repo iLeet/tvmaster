@@ -1,6 +1,6 @@
 //! IPTV outputs: M3U playlist and XMLTV guide.
 
-use crate::plan::{build_plan, now_ms};
+use crate::plan::{now_ms, programs};
 use crate::{ApiResult, AppState};
 use axum::{
     extract::State,
@@ -72,34 +72,26 @@ pub async fn guide(State(s): State<AppState>) -> ApiResult<Response> {
     let start = now_ms();
     let end = start + GUIDE_HOURS * 3_600_000;
     for c in channels {
-        let id = c.id.clone();
-        let Some(plan) = build_plan(&s.db(), c)? else {
-            continue;
-        };
-        for slot in plan
-            .timeline
-            .iter_from(start)
-            .take_while(|sl| sl.start_ms < end)
-            .take(MAX_PROGRAMMES)
-        {
-            let m = plan.media.get(&slot.media_id);
-            let show = m.and_then(|m| m.show.clone());
-            let title = m.and_then(|m| m.title.clone()).unwrap_or_default();
-            let main_title = show.clone().unwrap_or_else(|| title.clone());
+        let progs = programs(&s.db(), &c.id, start, end)?;
+        for p in progs.into_iter().take(MAX_PROGRAMMES) {
+            let main_title = p.show.clone().unwrap_or_else(|| p.title.clone());
             xml.push_str(&format!(
                 "  <programme start=\"{}\" stop=\"{}\" channel=\"{}\">\n    <title>{}</title>\n",
-                xmltv_time(slot.start_ms),
-                xmltv_time(slot.end_ms),
-                xml_escape(&id),
+                xmltv_time(p.start_ms),
+                xmltv_time(p.end_ms),
+                xml_escape(&c.id),
                 xml_escape(&main_title),
             ));
-            if show.is_some() && !title.is_empty() {
+            if p.show.is_some() && !p.title.is_empty() {
                 xml.push_str(&format!(
                     "    <sub-title>{}</sub-title>\n",
-                    xml_escape(&title)
+                    xml_escape(&p.title)
                 ));
             }
-            if let Some((Some(sn), Some(ep))) = m.map(|m| (m.season, m.episode)) {
+            if let Some(label) = &p.label {
+                xml.push_str(&format!("    <category>{}</category>\n", xml_escape(label)));
+            }
+            if let (Some(sn), Some(ep)) = (p.season, p.episode) {
                 xml.push_str(&format!(
                     "    <episode-num system=\"onscreen\">S{sn:02}E{ep:02}</episode-num>\n"
                 ));
