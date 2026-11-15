@@ -1,0 +1,256 @@
+import Foundation
+
+// Shapes of the daemon's JSON API (see docs/API.md). The client decodes with
+// `.convertFromSnakeCase`, so `now_ms` arrives as `nowMs`.
+
+/// Arbitrary JSON, for the parts of the API this app passes through untouched
+/// (a channel's lineup is edited in the web editor; the app only reads and keeps it).
+public enum JSONValue: Codable, Sendable, Hashable {
+    case null
+    case bool(Bool)
+    case number(Double)
+    case string(String)
+    case array([JSONValue])
+    case object([String: JSONValue])
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        if c.decodeNil() { self = .null }
+        else if let v = try? c.decode(Bool.self) { self = .bool(v) }
+        else if let v = try? c.decode(Double.self) { self = .number(v) }
+        else if let v = try? c.decode(String.self) { self = .string(v) }
+        else if let v = try? c.decode([JSONValue].self) { self = .array(v) }
+        else { self = .object(try c.decode([String: JSONValue].self)) }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        switch self {
+        case .null: try c.encodeNil()
+        case .bool(let v): try c.encode(v)
+        case .number(let v): try c.encode(v)
+        case .string(let v): try c.encode(v)
+        case .array(let v): try c.encode(v)
+        case .object(let v): try c.encode(v)
+        }
+    }
+
+    /// Looks a key up as written (`grid_minutes`), camel-cased (`gridMinutes`) or
+    /// snake-cased, because the client's snake-case decoding strategy also
+    /// rewrites dictionary keys.
+    public subscript(key: String) -> JSONValue? {
+        guard case .object(let o) = self else { return nil }
+        if let v = o[key] { return v }
+        let parts = key.split(separator: "_").map(String.init)
+        let camel = (parts.first ?? "") + parts.dropFirst().map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined()
+        if let v = o[camel] { return v }
+        var snake = ""
+        for ch in key {
+            if ch.isUppercase { snake.append("_"); snake.append(contentsOf: ch.lowercased()) } else { snake.append(ch) }
+        }
+        return o[snake]
+    }
+
+    public var stringValue: String? { if case .string(let s) = self { return s }; return nil }
+    public var intValue: Int? { if case .number(let n) = self { return Int(n) }; return nil }
+    public var arrayValue: [JSONValue]? { if case .array(let a) = self { return a }; return nil }
+}
+
+public struct Program: Codable, Sendable, Hashable, Identifiable {
+    public var mediaId: Int
+    public var show: String?
+    public var title: String
+    public var season: Int?
+    public var episode: Int?
+    public var startMs: Int64
+    public var endMs: Int64
+    public var runtimeEndMs: Int64
+    public var label: String?
+
+    public var id: String { "\(mediaId)-\(startMs)" }
+    public var start: Date { Date(timeIntervalSince1970: Double(startMs) / 1000) }
+    public var end: Date { Date(timeIntervalSince1970: Double(endMs) / 1000) }
+    /// "Cheers" for a show with episodes; the title alone for a film or short.
+    public var headline: String { show ?? title }
+    public var subtitle: String? { show == nil ? nil : title }
+    public var episodeCode: String? {
+        guard let season, let episode else { return nil }
+        return String(format: "S%02dE%02d", season, episode)
+    }
+}
+
+public enum ChannelKind: String, Codable, Sendable { case programming, guide }
+
+public enum Strategy: String, Codable, Sendable, CaseIterable, Identifiable {
+    case sequential, shuffle, chaos
+    case blockGrid = "block_grid"
+    public var id: String { rawValue }
+    public var label: String {
+        switch self {
+        case .sequential: "In order"
+        case .shuffle: "Shuffle"
+        case .chaos: "Chaos"
+        case .blockGrid: "TV schedule"
+        }
+    }
+}
+
+public enum RunOut: String, Codable, Sendable, CaseIterable, Identifiable {
+    case keepGoing = "keep_going"
+    case nextInRotation = "next_in_rotation"
+    case chaosFill = "chaos_fill"
+    case hybrid
+    public var id: String { rawValue }
+    public var label: String {
+        switch self {
+        case .keepGoing: "Keep going"
+        case .nextInRotation: "Next in rotation"
+        case .chaosFill: "Chaos fill"
+        case .hybrid: "Hybrid"
+        }
+    }
+}
+
+public struct GuideConfig: Codable, Sendable, Hashable {
+    public var hours: Int
+    public var title: String?
+    public var ticker: [String]
+    public var musicLibraryIds: [Int]
+}
+
+/// A channel as the list endpoint returns it (with what is on air).
+public struct Channel: Codable, Sendable, Hashable, Identifiable {
+    public var id: String
+    public var number: Int
+    public var name: String
+    public var strategy: Strategy
+    public var runOut: RunOut
+    public var autopilot: Bool
+    public var chaos: Int
+    public var alwaysOn: Bool
+    public var libraryIds: [Int]
+    public var lineup: JSONValue
+    public var kind: ChannelKind
+    public var group: String?
+    public var guide: GuideConfig
+    public var onAir: Bool?
+    public var now: Program?
+    public var next: Program?
+
+    public var isGuide: Bool { kind == .guide }
+    public var timeZone: TimeZone? {
+        lineup["timezone"]?.stringValue.flatMap { $0.isEmpty ? nil : TimeZone(identifier: $0) }
+    }
+    /// "2 blocks · 1 season · ads on", for list rows.
+    public var lineupSummary: String {
+        var parts: [String] = []
+        func count(_ key: String, _ word: String) {
+            let n = lineup[key]?.arrayValue?.count ?? 0
+            if n > 0 { parts.append("\(n) \(word)\(n == 1 ? "" : "s")") }
+        }
+        count("blocks", "block"); count("seasons", "season"); count("events", "event")
+        if let g = lineup["grid_minutes"]?.intValue { parts.append("\(g) min grid") }
+        if let ads = lineup["ads"], ads != .null { parts.append("ads on") }
+        return parts.joined(separator: " · ")
+    }
+}
+
+public struct Tv: Codable, Sendable, Hashable, Identifiable {
+    public var id: String
+    public var name: String
+    public var channel: Int?
+    public var power: Bool
+    public var volume: Int
+    public var muted: Bool
+    public var online: Bool
+}
+
+public enum LibraryKind: String, Codable, Sendable, CaseIterable, Identifiable {
+    case shows, commercials, bumpers, music
+    public var id: String { rawValue }
+    public var label: String {
+        switch self {
+        case .shows: "TV shows"
+        case .commercials: "Commercials"
+        case .bumpers: "Bumper clips"
+        case .music: "Music"
+        }
+    }
+}
+
+public struct Library: Codable, Sendable, Hashable, Identifiable {
+    public struct Analysis: Codable, Sendable, Hashable {
+        public var total: Int
+        public var done: Int
+        public var running: Bool
+    }
+    public var id: Int
+    public var path: String
+    public var kind: LibraryKind
+    public var enabled: Bool
+    public var items: Int
+    public var analysis: Analysis?
+    public var name: String { (path as NSString).lastPathComponent }
+}
+
+public struct ScanResult: Codable, Sendable, Hashable {
+    public var found: Int
+    public var indexed: Int
+    public var skipped: Int
+    public var analysing: Int?
+}
+
+public struct ShowSummary: Codable, Sendable, Hashable, Identifiable {
+    public var name: String
+    public var episodes: Int
+    public var totalMs: Int64
+    public var id: String { name }
+}
+
+public struct SystemInfo: Codable, Sendable, Hashable {
+    public struct FFmpeg: Codable, Sendable, Hashable {
+        public var version: String
+        public var encoder: String?
+        public var hasLibx264: Bool
+        public var hasVideotoolbox: Bool
+        public var hasNvenc: Bool
+        public var hasDrawtext: Bool
+    }
+    public var version: String
+    public var os: String
+    public var arch: String
+    public var timezone: String
+    public var ffmpeg: FFmpeg?
+    public var onAir: [String]
+    public var authRequired: Bool
+}
+
+public struct AuthStatus: Codable, Sendable, Hashable {
+    public var required: Bool
+    public var authenticated: Bool
+}
+
+public struct ScheduleItem: Codable, Sendable, Hashable, Identifiable {
+    public var kind: String
+    public var bumper: String?
+    public var mediaId: Int?
+    public var title: String?
+    public var startMs: Int64
+    public var endMs: Int64
+    public var durationMs: Int64
+    public var inMs: Int64
+    public var label: String?
+    public var id: String { "\(startMs)-\(kind)-\(mediaId ?? 0)" }
+    public var start: Date { Date(timeIntervalSince1970: Double(startMs) / 1000) }
+}
+
+/// What the web player and remote both listen to.
+public enum ServerEvent: Sendable, Equatable {
+    case snapshot(tvs: [Tv])
+    case tvState(Tv)
+    case tvRemoved(String)
+    case channelNow(channel: String, now: Program?, next: Program?)
+    case scheduleChanged(channel: String)
+    /// The live connection came up or went down.
+    case connection(Bool)
+}

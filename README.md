@@ -2,7 +2,7 @@
 
 Self-hosted retro TV station and IPTV engine. Add your TV collections, and TVMaster runs real-feeling channels: complete chaos or scheduled time slots, retro commercials placed at natural breaks, "Up Next / Later Today" bumpers, a guide channel, and a phone/web remote. Runs headless or with a GUI on Windows, macOS and Linux (x64 and arm64).
 
-**Status:** milestone 6 complete: web admin UI, installable remote, desktop shell, optional token. See [docs/PLAN.md](docs/PLAN.md) for the full design and roadmap, and [docs/API.md](docs/API.md) for the API.
+**Status:** milestone 7 complete: web admin UI, installable remote, desktop shell, optional token, native macOS app with Liquid Glass. See [docs/PLAN.md](docs/PLAN.md) for the full design and roadmap, and [docs/API.md](docs/API.md) for the API.
 
 ## What works today
 
@@ -59,7 +59,7 @@ Hardware encoding: VideoToolbox is used automatically on macOS; use `--encoder n
 
 ## Develop
 
-The admin UI is in `web/` (`npm run dev` proxies to a running daemon; `npm run build && npm run sync` updates the copy embedded in the server, which is committed). The desktop shell is in `apps/desktop`.
+The admin UI is in `web/` (`npm run dev` proxies to a running daemon; `npm run build && npm run sync` updates the copy embedded in the server, which is committed). The cross-platform desktop shell is in `apps/desktop`; the native macOS app is in `apps/macos` (see its README).
 
 ```bash
 cargo test --workspace      # unit tests; the HLS end-to-end test runs when FFmpeg is installed

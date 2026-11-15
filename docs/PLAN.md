@@ -120,7 +120,7 @@ docs/                 plan, API, design
 
 ## 12. Milestones
 
-Status: **M1-M6 done** (see notes below). M7 (native macOS SwiftUI app with Liquid Glass) next.
+Status: **M1-M7 done** (see notes below). M8 onward (Windows and Linux native shells, packaging, signing) is still to come.
 
 1. **Foundation:** repo, workspace, CI matrix, FFmpeg manager, library scanner, SQLite schema, API skeleton.
 2. **One channel on air:** playout runner, HLS/M3U/XMLTV, shuffle + sequential, web player, watchdog, service installers, state recovery.
@@ -187,3 +187,12 @@ Golden-file schedule tests (same seed → same schedule), fake-FFmpeg harness fo
 - **Authentication:** optional token (`--token`, `tvmaster token`); header, `?token=` for IPTV apps (playlists and HLS segments carry it), or an HTTP-only cookie for browsers. Constant-time comparison, short delay on a wrong login. This is not a user-account system and offers no TLS: put it behind HTTPS before exposing it beyond your LAN.
 - **Bugs the testing found:** deleting a library failed when a schedule still referenced its files (now cleared first, and channels rebuild); a database lock held across an `if let` body deadlocked a handler (found by a hanging test); oversized SVG icons outside buttons.
 - **Known limits:** the folder picker lists any folder the server user can read, so use a token on shared networks; the schedule view is a list and timeline, not a drag-and-drop grid (a drag-and-drop weekly grid editor is still to come); no mobile-specific editing polish beyond the responsive layout; the UI has unit tests for its pure helpers but no browser automation suite.
+
+## 20. M7 notes (native macOS app)
+
+- **Where:** `apps/macos`, a SwiftPM package (swift-tools 6.2, macOS 15+, outside the Cargo workspace). `TVMasterKit` is a UI-free library (models, REST client, WebSocket event stream, Keychain token store, daemon locator and supervisor, formatting) with 22 Swift Testing tests; `TVMaster` is the SwiftUI app. `Scripts/build-app.sh` builds `TVMaster.app`, bundles the release `tvmaster` daemon, makes the icon and Info.plist, and ad-hoc signs it.
+- **Same API as the web UI:** nothing server-side changed. The app speaks REST plus the `/ws` event bus, so it is live like the web dashboard and works against a remote server as well as a local one. The token is kept in the Keychain per server.
+- **Daemon:** if the address is local and nothing answers, the app starts the bundled daemon (or one found via `TVMASTER_BIN`, Homebrew, cargo or PATH), restarts it with backoff if it dies, and stops it on quit. The log tail is in Settings.
+- **Screens:** Home, Watch (native `AVPlayerView` on the channel's HLS stream, Picture in Picture, channel list and overlay), Channels (list and general editor, re-roll, delete), Schedule (guide and breaks), Libraries (folder picker when local, scan, ad-break analysis), TVs (power, channel, volume, mute, step). Menu bar remote, and the Mac can register itself as a TV so the phone remote can change what it plays.
+- **Liquid Glass:** `glassEffect` and `GlassEffectContainer` plus the `.glass` button styles on macOS 26+, wrapped in `#available` helpers that fall back to system materials on macOS 15.
+- **Known limits:** the lineup, ads and guide designers still open the web admin; no notarization or Developer ID signing; checked visually only on macOS 27 (the macOS 15 fallback and Intel builds are untested); no CI job for the Swift package yet.
