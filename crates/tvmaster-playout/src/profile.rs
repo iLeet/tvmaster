@@ -225,6 +225,74 @@ pub fn slate_args(
     a
 }
 
+/// Arguments for a rendered bumper: raw RGB frames of `src_w` x `src_h` arrive
+/// on stdin, are scaled up without smoothing (crisp pixel art) and encoded
+/// with silence.
+pub fn rendered_args(
+    src_w: usize,
+    src_h: usize,
+    duration_ms: u64,
+    ts_offset_ms: u64,
+    p: &OutputProfile,
+    enc: Encoder,
+) -> Vec<String> {
+    let dur = secs(duration_ms);
+    let mut a: Vec<String> = ["-hide_banner", "-loglevel", "error"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    a.extend([
+        "-f".into(),
+        "rawvideo".into(),
+        "-pixel_format".into(),
+        "rgb24".into(),
+        "-video_size".into(),
+        format!("{src_w}x{src_h}"),
+        "-framerate".into(),
+        p.fps.to_string(),
+        "-i".into(),
+        "pipe:0".into(),
+        "-f".into(),
+        "lavfi".into(),
+        "-t".into(),
+        dur.clone(),
+        "-i".into(),
+        "anullsrc=r=48000:cl=stereo".into(),
+        "-map".into(),
+        "0:v:0".into(),
+        "-map".into(),
+        "1:a:0".into(),
+        "-vf".into(),
+        format!(
+            "scale={}:{}:flags=neighbor,setsar=1,fps={},format=yuv420p",
+            p.width, p.height, p.fps
+        ),
+        "-t".into(),
+        dur,
+    ]);
+    a.extend(video_args(enc, p));
+    a.extend([
+        "-c:a".into(),
+        "aac".into(),
+        "-b:a".into(),
+        format!("{}k", p.audio_kbps),
+        "-ar".into(),
+        "48000".into(),
+        "-ac".into(),
+        "2".into(),
+        "-output_ts_offset".into(),
+        secs(ts_offset_ms),
+        "-muxdelay".into(),
+        "0".into(),
+        "-muxpreload".into(),
+        "0".into(),
+        "-f".into(),
+        "mpegts".into(),
+        "pipe:1".into(),
+    ]);
+    a
+}
+
 /// Arguments for the long-running segmenter that turns the continuous
 /// MPEG-TS on stdin into a rolling HLS playlist in `dir`.
 pub fn segmenter_args(dir: &Path, p: &OutputProfile, readrate_burst: bool) -> Vec<String> {
@@ -321,6 +389,29 @@ mod tests {
         assert!(vf.contains("scale=1280:720"));
         assert!(vf.contains("pad=1280:720"));
         assert!(vf.contains("fps=30"));
+    }
+
+    #[test]
+    fn rendered_bumpers_scale_up_without_smoothing() {
+        let a = rendered_args(
+            640,
+            360,
+            4_000,
+            2_000,
+            &OutputProfile::default(),
+            Encoder::Software,
+        );
+        assert!(has_pair(&a, "-video_size", "640x360"));
+        assert!(has_pair(&a, "-f", "rawvideo"));
+        assert!(has_pair(&a, "-t", "4.000"));
+        assert!(has_pair(&a, "-output_ts_offset", "2.000"));
+        let vf = a
+            .windows(2)
+            .find(|w| w[0] == "-vf")
+            .map(|w| w[1].clone())
+            .unwrap();
+        assert!(vf.contains("scale=1280:720:flags=neighbor"));
+        assert!(a.iter().any(|x| x.starts_with("anullsrc")));
     }
 
     #[test]

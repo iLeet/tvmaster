@@ -6,9 +6,9 @@
 //! the encoder, and the next item is already encoded when the current one ends
 //! (no gap at item boundaries).
 
-use crate::profile::{item_args, segmenter_args, slate_args, ItemJob};
+use crate::profile::{item_args, rendered_args, segmenter_args, slate_args, ItemJob};
 use crate::ts::ContinuityFixer;
-use crate::{ChannelSpec, EngineConfig};
+use crate::{ChannelSpec, EngineConfig, PlayItem, PlayKind};
 use anyhow::{anyhow, bail, Context, Result};
 use std::path::Path;
 use std::process::Stdio;
@@ -18,11 +18,13 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
+use tvmaster_core::BumperKind;
+use tvmaster_render::{render, Scene, Theme, FPS, HEIGHT, WIDTH};
 
 /// Buffered MPEG-TS chunks between the encoder and the segmenter.
 const CHUNK_BUFFER: usize = 256;
 /// Skip slivers shorter than this (end of an item we tuned into).
-const MIN_ITEM_MS: u64 = 500;
+const MIN_ITEM_MS: u64 = 250;
 /// If the schedule position falls this far behind the wall clock (encoder
 /// stall, slow CPU), jump forward to live instead of staying late forever.
 const RESYNC_BEHIND_MS: i64 = 5_000;
@@ -65,6 +67,8 @@ pub(crate) async fn run_forever(
                 tracing::error!(channel = %spec.id, error = %format!("{e:#}"), "playout failed")
             }
         }
+        // Stop serving the dead run's playlist while we wait to restart.
+        let _ = tokio::fs::remove_dir_all(&dir).await;
         if started.elapsed() > Duration::from_secs(60) {
             backoff = Duration::from_secs(1);
         } else {
@@ -190,48 +194,72 @@ async fn produce(
             continue;
         }
 
-        let playable = item
-            .path
-            .as_deref()
-            .filter(|p| p.exists())
-            .filter(|_| item.media_id.is_some());
-        match (item.media_id, playable) {
-            (Some(_), Some(path)) => {
-                let job = ItemJob {
-                    file: path,
-                    offset_ms: offset,
-                    duration_ms: remaining,
-                    ts_offset_ms,
-                    has_audio: item.has_audio,
-                };
-                let args = item_args(&job, &cfg.profile, cfg.encoder);
-                let outcome = run_encoder(&cfg, args, &tx, &mut fixer).await?;
-                if outcome.bytes > 0 {
-                    ts_offset_ms += remaining;
-                }
-                if outcome.ok && outcome.bytes > 0 {
-                    failures = 0;
-                } else {
-                    tracing::warn!(channel = %spec.id, file = %path.display(), "item failed to encode");
-                    report_unplayable(&spec, item.media_id).await;
-                    if outcome.bytes == 0 {
-                        slate(&cfg, &spec, remaining, ts_offset_ms, &tx, &mut fixer).await?;
-                        ts_offset_ms += remaining;
-                    }
-                    failures += 1;
-                }
-            }
-            (Some(media), None) => {
-                tracing::warn!(channel = %spec.id, media, "file missing, airing the slate");
-                report_unplayable(&spec, item.media_id).await;
-                slate(&cfg, &spec, remaining, ts_offset_ms, &tx, &mut fixer).await?;
-                ts_offset_ms += remaining;
-                failures += 1;
-            }
-            (None, _) => {
+        match item.kind {
+            PlayKind::Slate => {
                 slate(&cfg, &spec, remaining, ts_offset_ms, &tx, &mut fixer).await?;
                 ts_offset_ms += remaining;
                 failures = 0;
+            }
+            PlayKind::Bumper(kind) => {
+                let scene = bumper_scene(&spec, kind, &item).await;
+                let theme = Theme::for_channel(&spec.id);
+                let outcome = run_rendered(
+                    &cfg,
+                    scene,
+                    theme,
+                    offset,
+                    remaining,
+                    ts_offset_ms,
+                    &tx,
+                    &mut fixer,
+                )
+                .await?;
+                if outcome.bytes > 0 {
+                    ts_offset_ms += remaining;
+                } else {
+                    tracing::warn!(channel = %spec.id, ?kind, "bumper failed to render, airing the slate");
+                    slate(&cfg, &spec, remaining, ts_offset_ms, &tx, &mut fixer).await?;
+                    ts_offset_ms += remaining;
+                }
+                failures = 0;
+            }
+            PlayKind::Media => {
+                let playable = item.path.as_deref().filter(|p| p.exists());
+                match (item.media_id, playable) {
+                    (Some(_), Some(path)) => {
+                        let job = ItemJob {
+                            file: path,
+                            offset_ms: item.in_ms + offset,
+                            duration_ms: remaining,
+                            ts_offset_ms,
+                            has_audio: item.has_audio,
+                        };
+                        let args = item_args(&job, &cfg.profile, cfg.encoder);
+                        let outcome = run_encoder(&cfg, args, &tx, &mut fixer).await?;
+                        if outcome.bytes > 0 {
+                            ts_offset_ms += remaining;
+                        }
+                        if outcome.ok && outcome.bytes > 0 {
+                            failures = 0;
+                        } else {
+                            tracing::warn!(channel = %spec.id, file = %path.display(), "item failed to encode");
+                            report_unplayable(&spec, item.media_id).await;
+                            if outcome.bytes == 0 {
+                                slate(&cfg, &spec, remaining, ts_offset_ms, &tx, &mut fixer)
+                                    .await?;
+                                ts_offset_ms += remaining;
+                            }
+                            failures += 1;
+                        }
+                    }
+                    (media, _) => {
+                        tracing::warn!(channel = %spec.id, ?media, "file missing, airing the slate");
+                        report_unplayable(&spec, media).await;
+                        slate(&cfg, &spec, remaining, ts_offset_ms, &tx, &mut fixer).await?;
+                        ts_offset_ms += remaining;
+                        failures += 1;
+                    }
+                }
             }
         }
         if failures >= MAX_CONSECUTIVE_FAILURES {
@@ -239,6 +267,120 @@ async fn produce(
         }
         vt = item.end_ms;
     }
+}
+
+/// The graphic for a bumper, with its words filled in from the live schedule.
+async fn bumper_scene(spec: &Arc<ChannelSpec>, kind: BumperKind, item: &PlayItem) -> Scene {
+    let name = spec.name.clone();
+    let show = item.subject.clone().unwrap_or_default();
+    match kind {
+        BumperKind::StationId => Scene::StationId { name },
+        BumperKind::Brb => Scene::Brb { name, show },
+        BumperKind::BackTo => Scene::BackTo { name, show },
+        BumperKind::UpNext | BumperKind::LaterToday => {
+            let (source, id, after) = (spec.source.clone(), spec.id.clone(), item.end_ms);
+            let limit = if kind == BumperKind::UpNext { 1 } else { 4 };
+            let up = tokio::task::spawn_blocking(move || source.upcoming(&id, after, limit))
+                .await
+                .unwrap_or_default();
+            match (kind, up.items.first()) {
+                (_, None) => Scene::StationId { name },
+                (BumperKind::UpNext, Some((time, title))) => Scene::UpNext {
+                    name,
+                    title: title.clone(),
+                    time: time.clone(),
+                },
+                _ => Scene::LaterToday {
+                    name,
+                    evening: up.evening,
+                    items: up.items,
+                },
+            }
+        }
+    }
+}
+
+/// Encode a rendered bumper: frames are drawn on a blocking thread and fed to
+/// FFmpeg, starting `offset_ms` into the bumper (if someone tuned in mid-way).
+#[allow(clippy::too_many_arguments)]
+async fn run_rendered(
+    cfg: &EngineConfig,
+    scene: Scene,
+    theme: Theme,
+    offset_ms: u64,
+    duration_ms: u64,
+    ts_offset_ms: u64,
+    tx: &mpsc::Sender<Vec<u8>>,
+    fixer: &mut ContinuityFixer,
+) -> Result<Outcome> {
+    let total_secs = (offset_ms + duration_ms) as f32 / 1000.0;
+    let frames = (duration_ms as f64 / 1000.0 * FPS as f64).ceil() as u64;
+    let args = rendered_args(
+        WIDTH,
+        HEIGHT,
+        duration_ms,
+        ts_offset_ms,
+        &cfg.profile,
+        cfg.encoder,
+    );
+    let mut child = Command::new(&cfg.ffmpeg)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .kill_on_drop(true)
+        .spawn()
+        .with_context(|| format!("starting {}", cfg.ffmpeg.display()))?;
+    let mut stdin = child.stdin.take().context("encoder has no stdin")?;
+    let mut out = child.stdout.take().context("encoder has no stdout")?;
+
+    // Draw in small batches so the async runtime is never blocked.
+    let writer = tokio::spawn(async move {
+        const BATCH: u64 = 6;
+        let mut i = 0;
+        while i < frames {
+            let n = BATCH.min(frames - i);
+            let (scene, theme) = (scene.clone(), theme);
+            let start = i;
+            let chunk = tokio::task::spawn_blocking(move || {
+                let mut buf = Vec::with_capacity(n as usize * WIDTH * HEIGHT * 3);
+                for k in 0..n {
+                    let t = offset_ms as f32 / 1000.0 + (start + k) as f32 / FPS as f32;
+                    buf.extend_from_slice(&render(&scene, &theme, t, total_secs).px);
+                }
+                buf
+            })
+            .await
+            .map_err(std::io::Error::other)?;
+            stdin.write_all(&chunk).await?;
+            i += n;
+        }
+        stdin.shutdown().await.ok();
+        Ok::<(), std::io::Error>(())
+    });
+
+    let mut buf = vec![0u8; 64 * 1024];
+    let mut bytes = 0u64;
+    loop {
+        let n = out.read(&mut buf).await?;
+        if n == 0 {
+            break;
+        }
+        bytes += n as u64;
+        let packets = fixer.process(&buf[..n]);
+        if !packets.is_empty() {
+            tx.send(packets)
+                .await
+                .map_err(|_| anyhow!("segmenter writer closed"))?;
+        }
+    }
+    fixer.end_item();
+    let status = child.wait().await?;
+    writer.abort();
+    Ok(Outcome {
+        bytes,
+        ok: status.success(),
+    })
 }
 
 async fn report_unplayable(spec: &Arc<ChannelSpec>, media_id: Option<i64>) {

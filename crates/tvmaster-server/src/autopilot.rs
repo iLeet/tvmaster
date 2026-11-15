@@ -7,11 +7,12 @@
 
 use rusqlite::Connection;
 use std::collections::HashMap;
-use tvmaster_core::ItemKind;
 use tvmaster_core::{
     align_start, commit_aired, generate, rebuild_reservations, Catalog, CatchUp, Channel, MediaRef,
     SchedConfig,
 };
+use tvmaster_core::{AdClip, AdInputs, AdPool, ItemKind};
+use tvmaster_media::BreakInfo;
 
 /// How far ahead the schedule is kept materialized.
 pub const HORIZON_MS: i64 = 72 * 3_600_000;
@@ -46,6 +47,49 @@ pub fn catalog_for(conn: &Connection, channel: &Channel) -> rusqlite::Result<Cat
         })
         .collect();
     Ok(Catalog::build(&refs))
+}
+
+/// Commercials, user bumper clips, break points and recent ads for a channel
+/// whose lineup has an `ads` section.
+pub fn ad_inputs_for(
+    conn: &Connection,
+    channel: &Channel,
+    before_ms: i64,
+) -> rusqlite::Result<Option<AdInputs>> {
+    let Some(ads) = &channel.lineup.ads else {
+        return Ok(None);
+    };
+    let clip = |m: tvmaster_db::MediaRow| AdClip {
+        id: m.id,
+        dur_ms: m.duration_ms.max(0) as u64,
+        year: m.year.map(|y| y as i32),
+    };
+    let commercials = if ads.commercials {
+        tvmaster_db::list_media_of_kind(conn, &ads.library_ids, "commercials")?
+    } else {
+        Vec::new()
+    };
+    let clips = tvmaster_db::list_media_of_kind(conn, &ads.bumper_library_ids, "bumpers")?;
+    let breaks = tvmaster_db::list_media_in_libraries(conn, &channel.library_ids)?
+        .into_iter()
+        .filter_map(|m| {
+            let info = BreakInfo::from_json(m.breaks_json.as_deref()?)?;
+            (!info.points.is_empty()).then_some((m.id, info.points))
+        })
+        .collect();
+    Ok(Some(AdInputs {
+        pool: AdPool {
+            ads: commercials.into_iter().map(clip).collect(),
+            clips: clips.into_iter().map(clip).collect(),
+        },
+        breaks,
+        recent: tvmaster_db::recent_commercials(
+            conn,
+            &channel.id,
+            before_ms,
+            ads.no_repeat.max(1) as usize * 2,
+        )?,
+    }))
 }
 
 /// "Now", as far as airing is concerned: after downtime this is the moment the
@@ -122,7 +166,9 @@ pub fn extend(conn: &Connection, channel: &Channel, now_ms: i64) -> rusqlite::Re
         return Ok(0);
     }
 
+    let ad_inputs = ad_inputs_for(conn, channel, from)?;
     let cfg = SchedConfig {
+        ads: ad_inputs.as_ref(),
         catalog: &catalog,
         lineup: &channel.lineup,
         strategy: channel.strategy,
@@ -156,7 +202,7 @@ fn reroll_locked(
     let lock = now_ms + lock_ms;
     let cut = tvmaster_db::schedule_between(conn, &channel.id, lock, i64::MAX)?
         .into_iter()
-        .find(|i| i.kind == ItemKind::Show && i.start_ms >= lock)
+        .find(|i| i.kind == ItemKind::Show && i.cursor_pos.is_some() && i.start_ms >= lock)
         .map(|i| i.start_ms)
         .unwrap_or(lock);
     tvmaster_db::delete_schedule_from(conn, &channel.id, cut)?;

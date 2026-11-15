@@ -8,7 +8,8 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tvmaster_core::{Channel, Lineup, RunOutPolicy, Strategy, Zone};
+use std::collections::HashMap;
+use tvmaster_core::{Channel, ItemKind, Lineup, RunOutPolicy, Strategy, Zone};
 
 const VIEW_LOOKAHEAD_MS: i64 = 12 * 3_600_000;
 
@@ -115,6 +116,36 @@ fn programming_differs(a: &Channel, b: &Channel) -> bool {
         || a.lineup != b.lineup
 }
 
+/// The libraries named in a lineup's `ads` must exist and be of the right kind.
+fn check_ad_libraries(db: &rusqlite::Connection, lineup: &Lineup) -> ApiResult<()> {
+    let Some(ads) = &lineup.ads else {
+        return Ok(());
+    };
+    for (ids, kind) in [
+        (&ads.library_ids, "commercials"),
+        (&ads.bumper_library_ids, "bumpers"),
+    ] {
+        for id in ids {
+            match tvmaster_db::get_library(db, *id)? {
+                Some(l) if l.kind == kind => {}
+                Some(l) => {
+                    return Err(ApiError::new(
+                        StatusCode::BAD_REQUEST,
+                        format!("library {id} is a '{}' library, expected '{kind}'", l.kind),
+                    ))
+                }
+                None => {
+                    return Err(ApiError::new(
+                        StatusCode::BAD_REQUEST,
+                        format!("library {id} does not exist"),
+                    ))
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 fn bad_lineup(reason: String) -> ApiError {
     ApiError::new(StatusCode::BAD_REQUEST, format!("invalid lineup: {reason}"))
 }
@@ -160,6 +191,7 @@ pub async fn upsert(
     }
     if let Some(l) = &body.lineup {
         l.validate().map_err(bad_lineup)?;
+        check_ad_libraries(&s.db(), l)?;
     }
 
     let (channel, existing) = {
@@ -263,6 +295,7 @@ pub async fn put_lineup(
     Json(lineup): Json<Lineup>,
 ) -> ApiResult<Json<Lineup>> {
     lineup.validate().map_err(bad_lineup)?;
+    check_ad_libraries(&s.db(), &lineup)?;
     let lineup = with_timezone(lineup);
     let mut channel = load(&s, &id)?;
     let changed = channel.lineup != lineup;
@@ -293,23 +326,64 @@ pub async fn cursors(State(s): State<AppState>, Path(id): Path<String>) -> ApiRe
 #[derive(Deserialize)]
 pub struct ScheduleQuery {
     hours: Option<u32>,
+    /// `items`: every show act, commercial, bumper and filler instead of the guide view.
+    detail: Option<String>,
 }
 
-/// Upcoming programmes (default next 6 hours, max 72).
+fn kind_name(k: ItemKind) -> &'static str {
+    match k {
+        ItemKind::Show => "show",
+        ItemKind::Commercial => "commercial",
+        ItemKind::Bumper => "bumper",
+        ItemKind::Filler => "filler",
+    }
+}
+
+/// Upcoming programmes (default next 6 hours, max 72). With `detail=items`,
+/// the raw timeline including commercials and bumpers.
 pub async fn schedule(
     State(s): State<AppState>,
     Path(id): Path<String>,
     Query(q): Query<ScheduleQuery>,
-) -> ApiResult<Json<Vec<Program>>> {
+) -> ApiResult<Json<Value>> {
     load(&s, &id)?;
     let hours = q.hours.unwrap_or(6).clamp(1, 72) as i64;
     let start = now_ms();
-    Ok(Json(programs(
-        &s.db(),
-        &id,
-        start,
-        start + hours * 3_600_000,
-    )?))
+    let end = start + hours * 3_600_000;
+    let db = s.db();
+    if q.detail.as_deref() == Some("items") {
+        let items = tvmaster_db::schedule_between(&db, &id, start, end)?;
+        let mut titles: HashMap<i64, Option<String>> = HashMap::new();
+        let mut out = Vec::with_capacity(items.len());
+        for it in items {
+            let title = match it.media_id {
+                Some(m) => titles
+                    .entry(m)
+                    .or_insert_with(|| {
+                        tvmaster_db::get_media(&db, m).ok().flatten().map(|r| {
+                            r.title
+                                .or(r.show)
+                                .unwrap_or_else(|| r.path.rsplit('/').next().unwrap_or("").into())
+                        })
+                    })
+                    .clone(),
+                None => None,
+            };
+            out.push(json!({
+                "kind": kind_name(it.kind),
+                "bumper": it.bumper.map(|b| b.as_str()),
+                "media_id": it.media_id,
+                "title": title,
+                "start_ms": it.start_ms,
+                "end_ms": it.end_ms,
+                "duration_ms": it.end_ms - it.start_ms,
+                "in_ms": it.in_ms,
+                "label": it.label,
+            }));
+        }
+        return Ok(Json(Value::Array(out)));
+    }
+    Ok(Json(json!(programs(&db, &id, start, end)?)))
 }
 
 #[cfg(test)]
@@ -458,6 +532,206 @@ mod tests {
         assert!(r["items"].as_i64().unwrap() > 0);
         let (_, now) = call(&app, "GET", "/api/v1/channels/a/schedule?hours=24", "").await;
         assert_eq!(now.as_array().unwrap().last().unwrap()["show"], "Beta");
+    }
+
+    /// A server with 3 shows' episodes, 30 commercials and 2 bumper clips.
+    fn app_with_ads() -> (AppState, axum::Router, i64, i64, i64) {
+        let state = AppState::in_memory();
+        let (shows, ads, clips) = {
+            let db = state.db();
+            let shows = add_library(&db, "/tv", "shows").unwrap();
+            let ads = add_library(&db, "/ads", "commercials").unwrap();
+            let clips = add_library(&db, "/clips", "bumpers").unwrap();
+            for i in 0..6 {
+                upsert_media(
+                    &db,
+                    &NewMedia {
+                        library_id: shows.id,
+                        path: format!("/tv/Alpha S01E0{i}.mp4"),
+                        show: Some("Alpha".into()),
+                        season: Some(1),
+                        episode: Some(i),
+                        title: Some(format!("Ep {i}")),
+                        duration_ms: 22 * 60_000,
+                        vcodec: Some("h264".into()),
+                        acodec: Some("aac".into()),
+                        breaks_json: Some(
+                            r#"{"src":"black","points":[330000,660000,990000]}"#.into(),
+                        ),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+            }
+            for i in 0..30 {
+                upsert_media(
+                    &db,
+                    &NewMedia {
+                        library_id: ads.id,
+                        path: format!("/ads/{i}.mp4"),
+                        duration_ms: [15_000, 30_000, 30_000, 45_000, 60_000][i % 5],
+                        year: Some(1985 + (i % 5) as i64),
+                        vcodec: Some("h264".into()),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+            }
+            for i in 0..2 {
+                upsert_media(
+                    &db,
+                    &NewMedia {
+                        library_id: clips.id,
+                        path: format!("/clips/{i}.mp4"),
+                        duration_ms: 6_000 + 2_000 * i as i64,
+                        vcodec: Some("h264".into()),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+            }
+            (shows.id, ads.id, clips.id)
+        };
+        (state.clone(), router(state), shows, ads, clips)
+    }
+
+    #[tokio::test]
+    async fn commercials_and_bumpers_fill_each_slot_and_show_in_the_guide() {
+        let (state, app, shows, ads, _clips) = app_with_ads();
+        let body = format!(
+            r#"{{"id":"a","number":1,"name":"Retro TV","strategy":"block_grid","library_ids":[{shows}],
+               "lineup":{{"grid_minutes":30,"ads":{{"library_ids":[{ads}]}},
+                          "blocks":[{{"name":"All","start":"00:00","end":"24:00","source":{{"type":"show","show":"Alpha"}}}}]}}}}"#
+        );
+        let (st, _) = call(&app, "POST", "/api/v1/channels", &body).await;
+        assert_eq!(st, StatusCode::CREATED);
+
+        let (_, items) = call(
+            &app,
+            "GET",
+            "/api/v1/channels/a/schedule?hours=3&detail=items",
+            "",
+        )
+        .await;
+        let items = items.as_array().unwrap();
+        let kinds = |k: &str| items.iter().filter(|i| i["kind"] == k).count();
+        assert!(kinds("commercial") > 10, "commercials air");
+        assert!(kinds("bumper") > 10, "bumpers air");
+        assert!(kinds("show") > 10, "shows air in acts");
+        for w in items.windows(2) {
+            assert_eq!(w[0]["end_ms"], w[1]["start_ms"], "contiguous");
+        }
+        // acts split at the detected break points (about 5:30, 11:00, 16:30)
+        let act2 = items
+            .iter()
+            .find(|i| i["kind"] == "show" && i["in_ms"].as_u64().unwrap() > 0)
+            .expect("a later act");
+        assert!(
+            [330_000, 660_000, 990_000].contains(&act2["in_ms"].as_u64().unwrap()),
+            "{act2}"
+        );
+
+        // the guide folds acts, ads and bumpers into 30-minute slots
+        let (_, guide) = call(&app, "GET", "/api/v1/channels/a/schedule?hours=3", "").await;
+        for p in guide.as_array().unwrap() {
+            assert_eq!(
+                p["end_ms"].as_i64().unwrap() - p["start_ms"].as_i64().unwrap(),
+                30 * 60_000
+            );
+            // the last act ends after the show's 22 minutes (mid-show breaks come
+            // first) and before the slot ends (the final break comes after)
+            let (start, run_end, end) = (
+                p["start_ms"].as_i64().unwrap(),
+                p["runtime_end_ms"].as_i64().unwrap(),
+                p["end_ms"].as_i64().unwrap(),
+            );
+            assert!(run_end - start > 22 * 60_000 && run_end < end, "{p}");
+        }
+
+        // what playout sees: up-next resolves from the live schedule, with local times
+        let ch = tvmaster_db::get_channel(&state.db(), "a").unwrap().unwrap();
+        let source = state.channel_spec(&ch).source;
+        let now = crate::plan::now_ms();
+        let up = source.upcoming("a", now, 3);
+        assert_eq!(up.items.len(), 3);
+        assert!(up.items[0].0.ends_with("AM") || up.items[0].0.ends_with("PM"));
+        assert_eq!(up.items[0].1, "Alpha");
+    }
+
+    #[tokio::test]
+    async fn ad_libraries_must_exist_and_be_the_right_kind() {
+        let (_state, app, shows, ads, clips) = app_with_ads();
+        let post = |ads_json: String| {
+            let app = app.clone();
+            async move {
+                let body = format!(
+                    r#"{{"id":"a","number":1,"name":"A","library_ids":[{shows}],"lineup":{{"ads":{ads_json}}}}}"#
+                );
+                call(&app, "POST", "/api/v1/channels", &body).await
+            }
+        };
+        assert_eq!(
+            post(format!(r#"{{"library_ids":[{shows}]}}"#)).await.0,
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            post(format!(r#"{{"bumper_library_ids":[{ads}]}}"#)).await.0,
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            post(r#"{"library_ids":[999]}"#.into()).await.0,
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            post(r#"{"pod_seconds":3}"#.into()).await.0,
+            StatusCode::BAD_REQUEST
+        );
+        let ok = post(format!(
+            r#"{{"library_ids":[{ads}],"bumper_library_ids":[{clips}],"years":[1985,1987]}}"#
+        ))
+        .await;
+        assert_eq!(ok.0, StatusCode::CREATED, "{:?}", ok.1);
+        // ads can be switched on later with PUT, and the future is re-rolled
+        let (st, _) = call(
+            &app,
+            "PUT",
+            "/api/v1/channels/a/lineup",
+            &format!(r#"{{"ads":{{"library_ids":[{shows}]}}}}"#),
+        )
+        .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn only_commercials_from_the_chosen_years_air() {
+        let (state, app, shows, ads, _clips) = app_with_ads();
+        let body = format!(
+            r#"{{"id":"a","number":1,"name":"A","library_ids":[{shows}],
+               "lineup":{{"grid_minutes":30,"ads":{{"library_ids":[{ads}],"years":[1985,1986]}}}}}}"#
+        );
+        call(&app, "POST", "/api/v1/channels", &body).await;
+        let (_, items) = call(
+            &app,
+            "GET",
+            "/api/v1/channels/a/schedule?hours=6&detail=items",
+            "",
+        )
+        .await;
+        let db = state.db();
+        let mut n = 0;
+        for i in items
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|i| i["kind"] == "commercial")
+        {
+            let m = tvmaster_db::get_media(&db, i["media_id"].as_i64().unwrap())
+                .unwrap()
+                .unwrap();
+            assert!(matches!(m.year, Some(1985 | 1986)), "{m:?}");
+            n += 1;
+        }
+        assert!(n > 5);
     }
 
     #[tokio::test]

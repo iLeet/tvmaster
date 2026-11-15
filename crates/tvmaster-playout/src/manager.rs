@@ -97,6 +97,10 @@ impl Manager {
             },
         );
         let dir = self.hls_dir(&spec.id);
+        // Never serve a previous run's playlist: its segments are about to be
+        // deleted, and a client that fetched it would get 404s.
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::create_dir_all(&dir);
         tokio::spawn(run_forever(self.cfg.clone(), Arc::new(spec), dir, cancel));
         true
     }

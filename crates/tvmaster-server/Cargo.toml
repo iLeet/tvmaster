@@ -17,6 +17,7 @@ tvmaster-media.workspace = true
 tvmaster-playout.workspace = true
 rusqlite.workspace = true
 iana-time-zone.workspace = true
+chrono.workspace = true
 
 [dev-dependencies]
 http-body-util.workspace = true

@@ -22,6 +22,7 @@ chrono = { version = "0.4", default-features = false, features = ["std", "clock"
 chrono-tz = "0.10"
 iana-time-zone = "0.1"
 axum = "0.7"
+font8x8 = { version = "0.3", default-features = false, features = ["unicode"] }
 clap = { version = "4", features = ["derive", "env"] }
 http-body-util = "0.1"
 regex = "1"
@@ -39,4 +40,5 @@ tvmaster-core = { path = "crates/tvmaster-core" }
 tvmaster-db = { path = "crates/tvmaster-db" }
 tvmaster-media = { path = "crates/tvmaster-media" }
 tvmaster-playout = { path = "crates/tvmaster-playout" }
+tvmaster-render = { path = "crates/tvmaster-render" }
 tvmaster-server = { path = "crates/tvmaster-server" }

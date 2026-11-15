@@ -2,6 +2,7 @@
 //! lineups, one-off or yearly events, and what to air when nothing is
 //! scheduled. Stored as JSON; compiled (and thereby validated) before use.
 
+use crate::ads::AdConfig;
 use crate::clock::Zone;
 use chrono::{Datelike, NaiveDateTime, NaiveTime, Timelike};
 use serde::{Deserialize, Serialize};
@@ -119,6 +120,9 @@ pub struct Lineup {
     pub fill: Option<Source>,
     #[serde(default)]
     pub catch_up: CatchUp,
+    /// Commercial breaks and bumpers. Absent = shows run clean with plain padding.
+    #[serde(default)]
+    pub ads: Option<AdConfig>,
 }
 
 impl Default for Lineup {
@@ -131,6 +135,7 @@ impl Default for Lineup {
             events: Vec::new(),
             fill: None,
             catch_up: CatchUp::Resume,
+            ads: None,
         }
     }
 }
@@ -337,6 +342,9 @@ impl<'a> Compiled<'a> {
         }
         if let Some(f) = &l.fill {
             check_source(f, 0)?;
+        }
+        if let Some(a) = &l.ads {
+            a.validate()?;
         }
         let has_blocks = !blocks.is_empty() || seasons.iter().any(|s| !s.blocks.is_empty());
         let grid_ms = l

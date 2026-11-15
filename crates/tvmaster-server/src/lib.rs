@@ -17,7 +17,7 @@ use axum::{
 };
 use rusqlite::Connection;
 use serde_json::{json, Value};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 use tokio::sync::Notify;
@@ -36,6 +36,8 @@ pub struct AppState {
     dirty: Arc<Mutex<HashSet<String>>>,
     /// Wakes the autopilot loop early.
     wake: Arc<Notify>,
+    /// Background break-detection progress per library.
+    pub(crate) analysis: Arc<Mutex<HashMap<i64, libraries::Progress>>>,
 }
 
 /// How often the autopilot loop tops up schedules and commits aired episodes.
@@ -53,6 +55,7 @@ impl AppState {
             ffmpeg: ffmpeg.map(Arc::new),
             dirty: Arc::new(Mutex::new(HashSet::new())),
             wake: Arc::new(Notify::new()),
+            analysis: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -169,6 +172,7 @@ pub fn router(state: AppState) -> Router {
             get(libraries::list).post(libraries::add),
         )
         .route("/api/v1/libraries/:id/scan", post(libraries::scan))
+        .route("/api/v1/libraries/:id/analyze", post(libraries::analyze))
         .route(
             "/api/v1/channels",
             get(channels::list).post(channels::upsert),

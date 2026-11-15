@@ -136,10 +136,13 @@ At each slot start: **events, then the active season's blocks, then the base blo
 }
 ```
 
+## Commercials and bumpers
+
+Add an `ads` section to the lineup and each slot's spare time becomes breaks, commercials and bumpers instead of a plain slate. See [ADS.md](ADS.md).
+
 ## Limits today
 
-- Commercials and bumpers are not inserted yet (M4). Grid padding is the plain station slate.
-- Only whole shows are scheduled (no mid-show breaks yet).
+- Without an `ads` section, grid padding is the plain station slate.
 - Show names in `show` sources match the show name parsed from your folders, case-insensitively.
 - Rotation `finale` only works with `show` items.
 - Shows added to a library shift episode positions for that show; the cursor keeps its numeric position.

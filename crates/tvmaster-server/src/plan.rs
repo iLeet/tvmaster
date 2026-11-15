@@ -7,9 +7,9 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tokio::sync::Notify;
-use tvmaster_core::ItemKind;
+use tvmaster_core::{ItemKind, Zone};
 use tvmaster_db::MediaRow;
-use tvmaster_playout::{PlayItem, ScheduleSource};
+use tvmaster_playout::{PlayItem, PlayKind, ScheduleSource, Upcoming};
 
 pub fn now_ms() -> i64 {
     std::time::SystemTime::now()
@@ -57,8 +57,11 @@ pub fn programs(
     let mut media: HashMap<i64, Option<MediaRow>> = HashMap::new();
     let mut out: Vec<Program> = Vec::new();
     for it in items {
-        match (it.kind, it.media_id) {
-            (ItemKind::Show, Some(id)) => {
+        let is_show = it.kind == ItemKind::Show && it.media_id.is_some();
+        match (is_show, it.cursor_pos.is_some(), out.last_mut()) {
+            // A new slot begins with the first act of a show.
+            (true, true, _) | (true, false, None) => {
+                let id = it.media_id.expect("show item has media");
                 let m = match media.get(&id) {
                     Some(m) => m.clone(),
                     None => {
@@ -85,14 +88,15 @@ pub fn programs(
                     label: it.label,
                 });
             }
-            _ => {
-                // Filler pads the show before it out to the end of its slot.
-                if let Some(last) = out.last_mut() {
-                    if last.end_ms == it.start_ms {
-                        last.end_ms = it.end_ms;
-                    }
+            // Later acts, commercials, bumpers and filler belong to the slot
+            // before them, as a printed guide would show it.
+            (is_show, _, Some(last)) if last.end_ms == it.start_ms => {
+                last.end_ms = it.end_ms;
+                if is_show {
+                    last.runtime_end_ms = it.end_ms;
                 }
             }
+            _ => {}
         }
     }
     out.retain(|p| p.end_ms > from_ms && p.start_ms < to_ms);
@@ -117,19 +121,73 @@ pub struct DbSchedule {
     pub(crate) wake: Arc<Notify>,
 }
 
+/// "8:30 PM"
+fn time_label(zone: &Zone, ms: i64) -> String {
+    let t = zone.local(ms);
+    let (h, m) = (chrono::Timelike::hour(&t), chrono::Timelike::minute(&t));
+    let (h12, ampm) = match h {
+        0 => (12, "AM"),
+        1..=11 => (h, "AM"),
+        12 => (12, "PM"),
+        _ => (h - 12, "PM"),
+    };
+    format!("{h12}:{m:02} {ampm}")
+}
+
+impl DbSchedule {
+    fn zone_for(&self, db: &Connection, channel: &str) -> Zone {
+        tvmaster_db::get_channel(db, channel)
+            .ok()
+            .flatten()
+            .and_then(|c| Zone::parse(&c.lineup.timezone))
+            .unwrap_or_else(Zone::utc)
+    }
+}
+
 impl ScheduleSource for DbSchedule {
     fn item_at_or_after(&self, channel: &str, at_ms: i64) -> Option<PlayItem> {
         let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
         let row = tvmaster_db::play_row_at_or_after(&db, channel, at_ms)
             .map_err(|e| tracing::error!(channel, "schedule lookup: {e}"))
             .ok()??;
+        let it = &row.item;
+        let kind = match (it.kind, it.bumper) {
+            (ItemKind::Filler, _) => PlayKind::Slate,
+            (ItemKind::Bumper, Some(b)) => PlayKind::Bumper(b),
+            _ => PlayKind::Media,
+        };
         Some(PlayItem {
-            media_id: row.item.media_id,
+            kind,
+            media_id: it.media_id,
             path: row.path.map(PathBuf::from),
             has_audio: row.has_audio,
-            start_ms: row.item.start_ms,
-            end_ms: row.item.end_ms,
+            in_ms: it.in_ms,
+            subject: row.show,
+            start_ms: it.start_ms,
+            end_ms: it.end_ms,
         })
+    }
+
+    fn upcoming(&self, channel: &str, after_ms: i64, limit: usize) -> Upcoming {
+        let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
+        let zone = self.zone_for(&db, channel);
+        // A programme that starts a moment before the bumper ends still counts.
+        let from = after_ms - 2_000;
+        let progs = programs(&db, channel, from, from + 12 * 3_600_000).unwrap_or_default();
+        let items: Vec<(String, String)> = progs
+            .into_iter()
+            .filter(|p| p.start_ms >= from)
+            .take(limit)
+            .map(|p| {
+                let name = p.show.unwrap_or(p.title);
+                (time_label(&zone, p.start_ms), name)
+            })
+            .collect();
+        let hour = chrono::Timelike::hour(&zone.local(after_ms));
+        Upcoming {
+            items,
+            evening: (17..24).contains(&hour),
+        }
     }
 
     fn report_unplayable(&self, channel: &str, media_id: i64) {
@@ -168,6 +226,18 @@ mod tests {
             runtime_end_ms: end,
             label: None,
         }
+    }
+
+    #[test]
+    fn time_labels_are_12_hour_in_the_channel_zone() {
+        let z = Zone::parse("America/Toronto").unwrap();
+        let at = |s: &str| {
+            z.to_utc_ms(chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M").unwrap())
+        };
+        assert_eq!(time_label(&z, at("2026-11-16 20:30")), "8:30 PM");
+        assert_eq!(time_label(&z, at("2026-11-16 00:05")), "12:05 AM");
+        assert_eq!(time_label(&z, at("2026-11-16 12:00")), "12:00 PM");
+        assert_eq!(time_label(&z, at("2026-11-16 09:00")), "9:00 AM");
     }
 
     #[test]

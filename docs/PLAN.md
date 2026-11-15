@@ -120,7 +120,7 @@ docs/                 plan, API, design
 
 ## 12. Milestones
 
-Status: **M1, M2 and M3 done** (see notes below). M4 (commercials and bumpers) next.
+Status: **M1-M4 done** (see notes below). M5 (multi-channel polish, Channel 3 guide, HDHomeRun, WebSocket remote) next.
 
 1. **Foundation:** repo, workspace, CI matrix, FFmpeg manager, library scanner, SQLite schema, API skeleton.
 2. **One channel on air:** playout runner, HLS/M3U/XMLTV, shuffle + sequential, web player, watchdog, service installers, state recovery.
@@ -157,3 +157,13 @@ Golden-file schedule tests (same seed → same schedule), fake-FFmpeg harness fo
 - **Playout:** follows the schedule's wall-clock times, covers gaps, scheduled filler and unplayable files with a slate, reports bad files (flagged missing, re-rolled within seconds), and resyncs to live if it falls behind. The slate has no text on FFmpeg builds without `drawtext` (the Homebrew build has none); proper station graphics arrive with the renderer in M4.
 - **Mistakes the tests caught:** a re-roll that split a show from its padding and knocked the grid off alignment; stale schedules being pruned before downtime could be detected; and wall-clock-dependent assertions.
 - **Known limits:** no mid-show ad breaks or bumpers yet (M4); scans still run in the foreground; no auth; the unplayable-file ladder covers missing/corrupt files but not slow storage.
+
+## 17. M4 notes (commercials and bumpers)
+
+- **Ad budget = slot minus show.** On a grid, the spare minutes of each slot become the ad budget; without a grid, `minutes_per_hour` extends the slot. The planner (`tvmaster-core/src/ads.rs`) splits the show at break points and fills every pod to the exact millisecond: opening bumper, commercials packed by a knapsack, station ID for odd seconds, closing bumper. Slots therefore always end on the grid. Reference: [ADS.md](ADS.md).
+- **Break points:** chapters (free at scan time), then a background black-frame scan (`blackdetect` at 160px, two files at a time), then a synthetic act structure. Cached in `media_items.breaks_json`, reset if the file's length changes.
+- **Schedule items grew up:** shows are stored in acts (`in_ms`), with commercials, bumpers and filler between. Only the first act carries the episode cursor, so cursor logic and re-rolls are unchanged. Re-rolls cut at the first act of a show.
+- **Late-bound bumper text.** A generated bumper is stored as just a kind ("up_next"); its words are resolved when it airs from the live schedule, so "Up next" stays right after re-rolls and top-ups, and nothing has to know the next slot at generation time.
+- **Renderer:** `tvmaster-render` draws 640x360 RGB frames with an embedded 8x8 pixel font (`font8x8`, MIT/Apache) and original stripes/scanline art, piped into FFmpeg and scaled up without smoothing. It needs no `drawtext` filter and no font files, so it works with any FFmpeg build and looks the same everywhere. `cargo run -p tvmaster-render --example preview -- <dir>` writes sample frames.
+- **Playout:** acts start part-way into a file, rendered bumpers share the same gapless pipeline (a mixed item stream shows no gap longer than one frame in the end-to-end test).
+- **Known limits:** commercials are not loudness-normalised; short test clips (under about 5 minutes) get fewer breaks because of the 90 s margins; no channel bug or lower third yet; bumpers are silent.

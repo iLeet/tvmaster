@@ -5,8 +5,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use tvmaster_core::BumperKind;
 use tvmaster_media::FfmpegInfo;
-use tvmaster_playout::{ChannelSpec, EngineConfig, Manager, PlayItem, ScheduleSource};
+use tvmaster_playout::{
+    ChannelSpec, EngineConfig, Manager, PlayItem, PlayKind, ScheduleSource, Upcoming,
+};
 
 fn gen_clip(dir: &Path, name: &str, size: &str, rate: u32, secs: u32, audio: bool) -> PathBuf {
     let path = dir.join(name);
@@ -88,6 +91,13 @@ impl ScheduleSource for TestSchedule {
     fn report_unplayable(&self, _channel: &str, media_id: i64) {
         self.unplayable.lock().unwrap().push(media_id);
     }
+
+    fn upcoming(&self, _channel: &str, _after_ms: i64, _limit: usize) -> Upcoming {
+        Upcoming {
+            items: vec![("8:30 PM".into(), "Next Show".into())],
+            evening: true,
+        }
+    }
 }
 
 fn now_ms() -> i64 {
@@ -116,23 +126,52 @@ async fn mixed_clips_slate_and_missing_file_become_one_continuous_stream() {
     let b = gen_clip(&media, "b.mp4", "320x240", 30, 4, false);
     let c = gen_clip(&media, "c.mp4", "480x360", 24, 3, true);
 
-    // 3s clip, 4s silent clip, 2s scheduled filler, 2s file that does not
-    // exist, 3s clip: 14 seconds, repeated.
+    // A realistic mix, repeated: act one of a show (from the start), a
+    // commercial, a rendered "we'll be right back" and "up next" bumper, act
+    // two of the show (starting part-way in), a silent clip, scheduled filler,
+    // a file that does not exist.
     let start = now_ms();
     let mut items = Vec::new();
     let mut t = start;
     for _ in 0..3 {
-        for (media_id, path, has_audio, secs) in [
-            (Some(1), Some(a.clone()), true, 3),
-            (Some(2), Some(b.clone()), false, 4),
-            (None, None, false, 2),
-            (Some(99), Some(media.join("gone.mp4")), true, 2),
-            (Some(3), Some(c.clone()), true, 3),
+        for (kind, media_id, path, has_audio, in_ms, secs) in [
+            (PlayKind::Media, Some(1), Some(a.clone()), true, 0, 2),
+            (PlayKind::Media, Some(2), Some(c.clone()), true, 0, 2),
+            (
+                PlayKind::Bumper(BumperKind::Brb),
+                Some(1),
+                None,
+                false,
+                0,
+                3,
+            ),
+            (PlayKind::Media, Some(1), Some(a.clone()), true, 2_000, 1),
+            (
+                PlayKind::Bumper(BumperKind::UpNext),
+                None,
+                None,
+                false,
+                0,
+                3,
+            ),
+            (PlayKind::Media, Some(3), Some(b.clone()), false, 0, 3),
+            (PlayKind::Slate, None, None, false, 0, 1),
+            (
+                PlayKind::Media,
+                Some(99),
+                Some(media.join("gone.mp4")),
+                true,
+                0,
+                2,
+            ),
         ] {
             items.push(PlayItem {
+                kind,
                 media_id,
                 path,
                 has_audio,
+                in_ms,
+                subject: Some("Test Show".into()),
                 start_ms: t,
                 end_ms: t + secs * 1000,
             });
@@ -153,7 +192,21 @@ async fn mixed_clips_slate_and_missing_file_become_one_continuous_stream() {
         always_on: true,
         source: schedule.clone(),
     };
+    // A previous run's playlist must never be served after a (re)start.
+    let stale_dir = manager.hls_dir("test");
+    std::fs::create_dir_all(&stale_dir).unwrap();
+    std::fs::write(
+        stale_dir.join("index.m3u8"),
+        "#EXTM3U\n#EXTINF:2.0,\nseg_stale.ts\n",
+    )
+    .unwrap();
     assert!(manager.start_if_absent(spec()));
+    assert!(
+        !std::fs::read_to_string(stale_dir.join("index.m3u8"))
+            .unwrap_or_default()
+            .contains("seg_stale"),
+        "stale playlist removed synchronously on start"
+    );
     assert!(
         !manager.start_if_absent(spec()),
         "second start must be a no-op"
@@ -176,8 +229,8 @@ async fn mixed_clips_slate_and_missing_file_become_one_continuous_stream() {
     }
     eprintln!("tune-in latency: {:?}", t0.elapsed());
 
-    // Run past every boundary (3, 7, 9, 11, 14s).
-    tokio::time::sleep(Duration::from_secs(16)).await;
+    // Run past every boundary (17 seconds per pass).
+    tokio::time::sleep(Duration::from_secs(19)).await;
 
     let text = std::fs::read_to_string(&playlist).unwrap();
     assert!(text.contains("#EXT-X-PROGRAM-DATE-TIME"));
@@ -195,7 +248,7 @@ async fn mixed_clips_slate_and_missing_file_become_one_continuous_stream() {
     assert!(ag < 0.25, "audio gap at an item boundary: {ag}");
 
     let span = video.last().unwrap() - video.first().unwrap();
-    assert!(span > 13.0, "stream covers only {span}s");
+    assert!(span > 16.0, "stream covers only {span}s");
 
     // Playout encodes ahead of real time, so it may reach the missing file in
     // every repeat of the pattern; each time it is reported and slated.

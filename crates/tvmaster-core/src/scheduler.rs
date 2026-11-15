@@ -6,24 +6,30 @@
 //! the base blocks > the channel's fill programming. Each pick advances a
 //! *reserved* cursor; the caller commits cursors as items actually air.
 
+use crate::ads::{expand_slot, loose_budget_ms, AdConfig, AdInputs, BumperKind, SlotPlan};
 use crate::catalog::{Catalog, Ep};
 use crate::clock::Zone;
 use crate::cursor::EpisodeCursor;
 use crate::lineup::{Advance, CBlock, Compiled, Lineup, Order, Source};
 use crate::model::{RunOutPolicy, Strategy};
-use std::collections::{BTreeMap, HashMap};
+use crate::rng::{fnv1a, shuffled, splitmix64, GOLDEN};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 
 /// Episode cursors by key (see [`ScheduledItem::cursor_key`]).
 pub type Cursors = BTreeMap<String, EpisodeCursor>;
 
-const GOLDEN: u64 = 0x9E37_79B9_7F4A_7C15;
 const IDLE_GAP_MS: i64 = 30 * 60_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ItemKind {
+    /// A show, or one act of it (see `in_ms`).
     Show,
-    /// Unfilled time at the end of a slot. Later milestones put commercials
-    /// and bumpers here; until then playout shows a station slate.
+    Commercial,
+    /// A station bumper: generated (`bumper` is set) or a user's clip
+    /// (`bumper` is `None`, `media_id` is the clip).
+    Bumper,
+    /// Unfilled time (nothing to air, or a slot too short for a break).
+    /// Playout shows a station slate.
     Filler,
 }
 
@@ -39,9 +45,16 @@ pub struct ScheduledItem {
     pub cursor_pos: Option<u64>,
     /// Block or event name, for display.
     pub label: Option<String>,
+    /// Where in the file this item starts (acts of a show start part-way in).
+    pub in_ms: u64,
+    /// For generated bumpers: which one. `media_id` then names the show it is about.
+    pub bumper: Option<BumperKind>,
 }
 
 pub struct SchedConfig<'a> {
+    /// Commercials, user bumper clips, break points and recent ads. Only used
+    /// when the lineup has an `ads` section.
+    pub ads: Option<&'a AdInputs>,
     pub catalog: &'a Catalog,
     pub lineup: &'a Lineup,
     pub strategy: Strategy,
@@ -51,33 +64,6 @@ pub struct SchedConfig<'a> {
     pub seed: u64,
     /// When the channel "started broadcasting" (anchors rotation weeks).
     pub epoch_ms: i64,
-}
-
-pub fn fnv1a(s: &str) -> u64 {
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for b in s.bytes() {
-        h ^= b as u64;
-        h = h.wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    h
-}
-
-fn splitmix64(state: &mut u64) -> u64 {
-    *state = state.wrapping_add(GOLDEN);
-    let mut z = *state;
-    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-    z ^ (z >> 31)
-}
-
-fn shuffled(n: usize, seed: u64) -> Vec<usize> {
-    let mut v: Vec<usize> = (0..n).collect();
-    let mut s = seed;
-    for i in (1..n).rev() {
-        let j = (splitmix64(&mut s) % (i as u64 + 1)) as usize;
-        v.swap(i, j);
-    }
-    v
 }
 
 fn scoped(base: String, scope: Option<&str>) -> String {
@@ -345,6 +331,11 @@ pub fn generate(
         perms: HashMap::new(),
     };
 
+    let ads_cfg: Option<&AdConfig> = cfg.lineup.ads.as_ref();
+    let default_inputs = AdInputs::default();
+    let ad_inputs: &AdInputs = cfg.ads.unwrap_or(&default_inputs);
+    let mut recent: VecDeque<i64> = ad_inputs.recent.iter().copied().collect();
+
     let mut out = Vec::new();
     let mut t = from_ms;
     while t < to_ms {
@@ -383,35 +374,57 @@ pub fn generate(
                 cursor_key: None,
                 cursor_pos: None,
                 label,
+                in_ms: 0,
+                bumper: None,
             });
             t = end;
             continue;
         };
 
         let end = t + p.dur_ms as i64;
-        out.push(ScheduledItem {
-            kind: ItemKind::Show,
-            media_id: Some(p.media_id),
-            start_ms: t,
-            end_ms: end,
-            cursor_key: Some(p.key),
-            cursor_pos: Some(p.pos),
-            label: label.clone(),
-        });
-        let slot_end = match grid {
-            Some(g) => compiled.zone.next_grid(end, g),
-            None => end,
+        // With commercials on and no grid, the slot grows by the ad budget;
+        // on a grid the ad budget is whatever is left of the slot.
+        let slot_end = match (grid, ads_cfg) {
+            (Some(g), _) => compiled.zone.next_grid(end, g),
+            (None, Some(a)) => end + loose_budget_ms(a, &ad_inputs.pool, p.dur_ms) as i64,
+            (None, None) => end,
         };
-        if slot_end > end {
-            out.push(ScheduledItem {
-                kind: ItemKind::Filler,
-                media_id: None,
-                start_ms: end,
-                end_ms: slot_end,
-                cursor_key: None,
-                cursor_pos: None,
+        if let Some(a) = ads_cfg {
+            let plan = SlotPlan {
+                start_ms: t,
+                slot_end_ms: slot_end,
+                media_id: p.media_id,
+                runtime_ms: p.dur_ms,
+                cursor_key: p.key,
+                cursor_pos: p.pos,
                 label,
+            };
+            out.extend(expand_slot(a, ad_inputs, &mut recent, cfg.seed, &plan));
+        } else {
+            out.push(ScheduledItem {
+                kind: ItemKind::Show,
+                media_id: Some(p.media_id),
+                start_ms: t,
+                end_ms: end,
+                cursor_key: Some(p.key),
+                cursor_pos: Some(p.pos),
+                label: label.clone(),
+                in_ms: 0,
+                bumper: None,
             });
+            if slot_end > end {
+                out.push(ScheduledItem {
+                    kind: ItemKind::Filler,
+                    media_id: None,
+                    start_ms: end,
+                    end_ms: slot_end,
+                    cursor_key: None,
+                    cursor_pos: None,
+                    label,
+                    in_ms: 0,
+                    bumper: None,
+                });
+            }
         }
         t = slot_end;
     }
@@ -489,6 +502,7 @@ mod tests {
         chaos: u8,
         seed: u64,
         epoch: i64,
+        ads: Option<AdInputs>,
     }
 
     impl Setup {
@@ -501,11 +515,13 @@ mod tests {
                 chaos: 0,
                 seed: 7,
                 epoch: at("UTC", "2026-11-16 00:00"),
+                ads: None,
             }
         }
 
         fn gen(&self, cursors: &mut Cursors, from: i64, to: i64) -> Vec<ScheduledItem> {
             let cfg = SchedConfig {
+                ads: self.ads.as_ref(),
                 catalog: &self.catalog,
                 lineup: &self.lineup,
                 strategy: self.strategy,
@@ -998,6 +1014,110 @@ mod tests {
         assert_eq!(items, again);
     }
 
+    fn ad_pool(n: i64) -> AdInputs {
+        use crate::ads::{AdClip, AdPool};
+        AdInputs {
+            pool: AdPool {
+                ads: (0..n)
+                    .map(|i| AdClip {
+                        id: 1000 + i,
+                        dur_ms: [15_000, 30_000, 30_000, 45_000, 60_000][(i % 5) as usize],
+                        year: None,
+                    })
+                    .collect(),
+                clips: vec![],
+            },
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn ads_fill_every_grid_slot_exactly_and_only_the_first_act_carries_the_cursor() {
+        let l = lineup(
+            r#"{"grid_minutes":30,"ads":{},"blocks":[{"name":"Prime","start":"00:00","end":"24:00","source":{"type":"show","show":"A"}}]}"#,
+        );
+        let mut s = Setup::new(catalog(&[("A", 10)]), l);
+        s.ads = Some(ad_pool(40));
+        let from = at("UTC", "2026-11-16 00:00");
+        let mut cur = Cursors::new();
+        let items = s.gen(&mut cur, from, from + 2 * DAY);
+        assert_contiguous(&items);
+        // 30-minute slots, each starting on the grid with a show's first act
+        let firsts: Vec<&ScheduledItem> = items
+            .iter()
+            .filter(|i| i.kind == ItemKind::Show && i.cursor_pos.is_some())
+            .collect();
+        assert_eq!(firsts.len(), 96);
+        for f in &firsts {
+            assert_eq!(f.start_ms % (30 * MIN), 0);
+            assert_eq!(f.in_ms, 0);
+        }
+        // cursor positions are consecutive: acts do not advance the episode counter
+        for (i, f) in firsts.iter().enumerate() {
+            assert_eq!(f.cursor_pos, Some(i as u64));
+        }
+        assert_eq!(cur["show:a"].reserved, 96);
+        assert!(items.iter().any(|i| i.kind == ItemKind::Commercial));
+        assert!(items.iter().any(|i| i.bumper.is_some()));
+        // deterministic
+        assert_eq!(items, s.gen(&mut Cursors::new(), from, from + 2 * DAY));
+    }
+
+    #[test]
+    fn ads_without_a_grid_extend_the_slot_by_minutes_per_hour() {
+        let l = lineup(r#"{"ads":{"minutes_per_hour":8}}"#);
+        let mut s = Setup::new(catalog(&[("A", 6)]), l);
+        s.strategy = Strategy::Sequential;
+        s.ads = Some(ad_pool(30));
+        let from = at("UTC", "2026-11-16 00:00");
+        let items = s.gen(&mut Cursors::new(), from, from + 6 * HOUR);
+        assert_contiguous(&items);
+        let (mut show, mut other) = (0i64, 0i64);
+        for i in &items {
+            if i.kind == ItemKind::Show {
+                show += i.end_ms - i.start_ms;
+            } else {
+                other += i.end_ms - i.start_ms;
+            }
+        }
+        // 22-minute episodes get 8/60 of their length as ad time: about 2m56s per slot
+        let ratio = other as f64 / show as f64;
+        assert!((ratio - 8.0 / 60.0).abs() < 0.01, "{ratio}");
+    }
+
+    #[test]
+    fn ads_survive_rerolls_without_burning_episodes() {
+        let l = lineup(
+            r#"{"grid_minutes":30,"ads":{},"blocks":[{"start":"00:00","end":"24:00","source":{"type":"show","show":"A"}}]}"#,
+        );
+        let mut s = Setup::new(catalog(&[("A", 50)]), l);
+        s.ads = Some(ad_pool(40));
+        let start = at("UTC", "2026-11-16 00:00");
+        let mut cur = Cursors::new();
+        let first = s.gen(&mut cur, start, start + DAY);
+        let now = start + 3 * HOUR + 10 * MIN;
+        commit_aired(&first, &mut cur, now);
+        // cut at the first show start after a 5 minute lock, as the server does
+        let lock = now + 5 * MIN;
+        let cut = first
+            .iter()
+            .find(|i| i.kind == ItemKind::Show && i.cursor_pos.is_some() && i.start_ms >= lock)
+            .unwrap()
+            .start_ms;
+        let kept: Vec<ScheduledItem> = first.iter().filter(|i| i.start_ms < cut).cloned().collect();
+        rebuild_reservations(&kept, &mut cur);
+        let again = s.gen(&mut cur, kept.last().unwrap().end_ms, start + DAY);
+        let rebuilt: Vec<ScheduledItem> = kept.into_iter().chain(again).collect();
+        let episodes = |v: &[ScheduledItem]| -> Vec<i64> {
+            v.iter()
+                .filter(|i| i.kind == ItemKind::Show && i.cursor_pos.is_some())
+                .filter_map(|i| i.media_id)
+                .collect()
+        };
+        assert_eq!(episodes(&rebuilt), episodes(&first));
+        assert_contiguous(&rebuilt);
+    }
+
     #[test]
     fn commit_and_rebuild_reservations() {
         let items = vec![
@@ -1009,6 +1129,8 @@ mod tests {
                 cursor_key: Some("k".into()),
                 cursor_pos: Some(0),
                 label: None,
+                in_ms: 0,
+                bumper: None,
             },
             ScheduledItem {
                 kind: ItemKind::Show,
@@ -1018,6 +1140,8 @@ mod tests {
                 cursor_key: Some("k".into()),
                 cursor_pos: Some(1),
                 label: None,
+                in_ms: 0,
+                bumper: None,
             },
             ScheduledItem {
                 kind: ItemKind::Show,
@@ -1027,6 +1151,8 @@ mod tests {
                 cursor_key: Some("k".into()),
                 cursor_pos: Some(2),
                 label: None,
+                in_ms: 0,
+                bumper: None,
             },
         ];
         let mut cur = Cursors::new();

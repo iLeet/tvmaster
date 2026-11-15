@@ -27,6 +27,11 @@ fn re_nxn() -> &'static Regex {
     R.get_or_init(|| Regex::new(r"(?i)\b(\d{1,2})x(\d{2,3})\b").unwrap())
 }
 
+fn re_year() -> &'static Regex {
+    static R: OnceLock<Regex> = OnceLock::new();
+    R.get_or_init(|| Regex::new(r"(?:^|[^0-9])((?:19[2-9]|20[0-3])[0-9])(?:[^0-9]|$)").unwrap())
+}
+
 fn re_season_dir() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
     R.get_or_init(|| Regex::new(r"(?i)^(season|series|specials?)\b[\s._-]*\d*$").unwrap())
@@ -63,6 +68,28 @@ pub fn find_videos(root: &Path) -> Vec<PathBuf> {
         .collect();
     v.sort();
     v
+}
+
+/// A release year (1920-2039) in the file's name or any folder under `root`,
+/// e.g. `Commercials/1987/Coke.mp4` or `Coke (1987).mp4`. Used to match
+/// commercials to a channel's era.
+pub fn parse_year(root: &Path, file: &Path) -> Option<i32> {
+    let rel = file.strip_prefix(root).unwrap_or(file);
+    // The file name wins over folders; deeper folders over shallower ones.
+    let mut parts: Vec<String> = rel
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy().to_string())
+        .collect();
+    if let Some(last) = parts.last_mut() {
+        *last = Path::new(last.as_str())
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
+    }
+    parts
+        .iter()
+        .rev()
+        .find_map(|p| re_year().captures(p).and_then(|c| c[1].parse().ok()))
 }
 
 /// Best-effort parse of show/season/episode/title from a file's path.
@@ -151,6 +178,22 @@ mod tests {
     fn missing_episode_title_falls_back_to_code() {
         let n = p("/tv", "/tv/Show Beta/Show Beta S01E04.mkv");
         assert_eq!(n.title, "S01E04");
+    }
+
+    #[test]
+    fn years_come_from_folders_or_names() {
+        let y = |f: &str| parse_year(Path::new("/ads"), Path::new(f));
+        assert_eq!(y("/ads/1987/Coke Classic.mp4"), Some(1987));
+        assert_eq!(y("/ads/Coke (1991).mp4"), Some(1991));
+        assert_eq!(y("/ads/1980s/1984/Pepsi.mkv"), Some(1984));
+        assert_eq!(y("/ads/Pepsi 1984 Super Bowl/Pepsi.mkv"), Some(1984));
+        assert_eq!(y("/ads/Pepsi_Challenge.mp4"), None);
+        assert_eq!(
+            y("/ads/Spot 12345.mp4"),
+            None,
+            "not a year inside a longer number"
+        );
+        assert_eq!(y("/ads/1080p/Clip.mp4"), None);
     }
 
     #[test]

@@ -78,7 +78,8 @@ CREATE TABLE IF NOT EXISTS schedule_items (
     out_ms     INTEGER,
     cursor_key TEXT,
     cursor_pos INTEGER,
-    label      TEXT
+    label      TEXT,
+    bumper     TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_schedule_channel_time
     ON schedule_items (channel_id, start_ms);
@@ -121,6 +122,7 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         ("schedule_items", "cursor_key", "TEXT"),
         ("schedule_items", "cursor_pos", "INTEGER"),
         ("schedule_items", "label", "TEXT"),
+        ("schedule_items", "bumper", "TEXT"),
     ] {
         if !has_column(conn, table, column)? {
             conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {decl}"))?;

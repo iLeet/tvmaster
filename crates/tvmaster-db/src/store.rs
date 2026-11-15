@@ -3,7 +3,8 @@
 use rusqlite::{params, Connection, OptionalExtension, Result, Row};
 use serde::Serialize;
 use tvmaster_core::{
-    Channel, Cursors, EpisodeCursor, ItemKind, RunOutPolicy, ScheduledItem, Strategy, Tv,
+    BumperKind, Channel, Cursors, EpisodeCursor, ItemKind, RunOutPolicy, ScheduledItem, Strategy,
+    Tv,
 };
 
 // ---------- libraries ----------
@@ -68,6 +69,9 @@ pub struct MediaRow {
     pub height: Option<i64>,
     pub vcodec: Option<String>,
     pub acodec: Option<String>,
+    pub year: Option<i64>,
+    /// JSON from `tvmaster_media::BreakInfo`, once analysed.
+    pub breaks_json: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -83,9 +87,12 @@ pub struct NewMedia {
     pub height: Option<i64>,
     pub vcodec: Option<String>,
     pub acodec: Option<String>,
+    pub year: Option<i64>,
+    /// Break points found while scanning (chapters). Later analysis may add more.
+    pub breaks_json: Option<String>,
 }
 
-const MEDIA_COLS: &str = "id, library_id, path, show, season, episode, title, duration_ms, width, height, vcodec, acodec";
+const MEDIA_COLS: &str = "id, library_id, path, show, season, episode, title, duration_ms, width, height, vcodec, acodec, year, breaks_json";
 
 fn media_from(r: &Row) -> Result<MediaRow> {
     Ok(MediaRow {
@@ -101,6 +108,8 @@ fn media_from(r: &Row) -> Result<MediaRow> {
         height: r.get(9)?,
         vcodec: r.get(10)?,
         acodec: r.get(11)?,
+        year: r.get(12)?,
+        breaks_json: r.get(13)?,
     })
 }
 
@@ -118,13 +127,17 @@ pub fn mark_library_missing(conn: &Connection, library_id: i64) -> Result<()> {
 pub fn upsert_media(conn: &Connection, m: &NewMedia) -> Result<i64> {
     conn.query_row(
         "INSERT INTO media_items
-            (library_id, path, show, season, episode, title, duration_ms, width, height, vcodec, acodec, missing)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 0)
+            (library_id, path, show, season, episode, title, duration_ms, width, height, vcodec, acodec, year, breaks_json, missing)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 0)
          ON CONFLICT(path) DO UPDATE SET
             library_id = excluded.library_id, show = excluded.show, season = excluded.season,
-            episode = excluded.episode, title = excluded.title, duration_ms = excluded.duration_ms,
+            episode = excluded.episode, title = excluded.title,
             width = excluded.width, height = excluded.height, vcodec = excluded.vcodec,
-            acodec = excluded.acodec, missing = 0
+            acodec = excluded.acodec, year = excluded.year, missing = 0,
+            -- keep earlier analysis unless the file changed
+            breaks_json = CASE WHEN excluded.duration_ms != duration_ms THEN excluded.breaks_json
+                               ELSE COALESCE(excluded.breaks_json, breaks_json) END,
+            duration_ms = excluded.duration_ms
          RETURNING id",
         params![
             m.library_id,
@@ -137,30 +150,59 @@ pub fn upsert_media(conn: &Connection, m: &NewMedia) -> Result<i64> {
             m.width,
             m.height,
             m.vcodec,
-            m.acodec
+            m.acodec,
+            m.year,
+            m.breaks_json
         ],
         |r| r.get(0),
     )
 }
 
-/// Present (not missing) media from the enabled libraries of kind `shows`
-/// among `library_ids`.
-pub fn list_media_in_libraries(conn: &Connection, library_ids: &[i64]) -> Result<Vec<MediaRow>> {
+/// Present media from the enabled libraries of `kind` among `library_ids`.
+pub fn list_media_of_kind(
+    conn: &Connection,
+    library_ids: &[i64],
+    kind: &str,
+) -> Result<Vec<MediaRow>> {
     let mut out = Vec::new();
     let sql = format!(
         "SELECT {MEDIA_COLS} FROM media_items
          WHERE library_id = ?1 AND missing = 0
-           AND library_id IN (SELECT id FROM libraries WHERE enabled = 1 AND kind = 'shows')
+           AND library_id IN (SELECT id FROM libraries WHERE enabled = 1 AND kind = ?2)
          ORDER BY id"
     );
     let mut st = conn.prepare(&sql)?;
     for lib in library_ids {
-        let rows = st.query_map([lib], media_from)?;
+        let rows = st.query_map(params![lib, kind], media_from)?;
         for r in rows {
             out.push(r?);
         }
     }
     Ok(out)
+}
+
+/// Set the analysed break points for a file.
+pub fn set_breaks(conn: &Connection, media_id: i64, breaks_json: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE media_items SET breaks_json = ?2 WHERE id = ?1",
+        params![media_id, breaks_json],
+    )?;
+    Ok(())
+}
+
+/// Present items of a library that have not been analysed for breaks yet.
+pub fn media_needing_analysis(conn: &Connection, library_id: i64) -> Result<Vec<MediaRow>> {
+    let mut st = conn.prepare(&format!(
+        "SELECT {MEDIA_COLS} FROM media_items
+         WHERE library_id = ?1 AND missing = 0 AND breaks_json IS NULL ORDER BY id"
+    ))?;
+    let rows = st.query_map([library_id], media_from)?;
+    rows.collect()
+}
+
+/// Present (not missing) media from the enabled `shows` libraries among `library_ids`.
+pub fn list_media_in_libraries(conn: &Connection, library_ids: &[i64]) -> Result<Vec<MediaRow>> {
+    list_media_of_kind(conn, library_ids, "shows")
 }
 
 pub fn get_media(conn: &Connection, id: i64) -> Result<Option<MediaRow>> {
@@ -288,26 +330,38 @@ pub fn delete_channel(conn: &Connection, id: &str) -> Result<bool> {
 fn kind_str(k: ItemKind) -> &'static str {
     match k {
         ItemKind::Show => "show",
+        ItemKind::Commercial => "commercial",
+        ItemKind::Bumper => "bumper",
         ItemKind::Filler => "filler",
     }
 }
 
-const SCHED_COLS: &str = "kind, media_id, start_ms, end_ms, cursor_key, cursor_pos, label";
+fn kind_from(s: &str) -> ItemKind {
+    match s {
+        "show" => ItemKind::Show,
+        "commercial" => ItemKind::Commercial,
+        "bumper" => ItemKind::Bumper,
+        _ => ItemKind::Filler,
+    }
+}
+
+const SCHED_COLS: &str =
+    "kind, media_id, start_ms, end_ms, cursor_key, cursor_pos, label, in_ms, bumper";
 
 fn item_from(r: &Row) -> Result<ScheduledItem> {
     let kind: String = r.get(0)?;
     Ok(ScheduledItem {
-        kind: if kind == "show" {
-            ItemKind::Show
-        } else {
-            ItemKind::Filler
-        },
+        kind: kind_from(&kind),
         media_id: r.get(1)?,
         start_ms: r.get(2)?,
         end_ms: r.get(3)?,
         cursor_key: r.get(4)?,
         cursor_pos: r.get::<_, Option<i64>>(5)?.map(|p| p as u64),
         label: r.get(6)?,
+        in_ms: r.get::<_, i64>(7)?.max(0) as u64,
+        bumper: r
+            .get::<_, Option<String>>(8)?
+            .and_then(|b| BumperKind::parse(&b)),
     })
 }
 
@@ -315,8 +369,8 @@ pub fn insert_schedule(conn: &Connection, channel_id: &str, items: &[ScheduledIt
     let tx = conn.unchecked_transaction()?;
     {
         let mut st = tx.prepare(
-            "INSERT INTO schedule_items (channel_id, kind, media_id, start_ms, end_ms, cursor_key, cursor_pos, label)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            "INSERT INTO schedule_items (channel_id, kind, media_id, start_ms, end_ms, cursor_key, cursor_pos, label, in_ms, bumper)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         )?;
         for it in items {
             st.execute(params![
@@ -327,7 +381,9 @@ pub fn insert_schedule(conn: &Connection, channel_id: &str, items: &[ScheduledIt
                 it.end_ms,
                 it.cursor_key,
                 it.cursor_pos.map(|p| p as i64),
-                it.label
+                it.label,
+                it.in_ms as i64,
+                it.bumper.map(|b| b.as_str())
             ])?;
         }
     }
@@ -379,6 +435,8 @@ pub struct PlayRow {
     pub item: ScheduledItem,
     pub path: Option<String>,
     pub has_audio: bool,
+    /// The show's name (for bumpers "about" a show).
+    pub show: Option<String>,
 }
 
 /// The item on air at `at_ms`, or the next one to start after it.
@@ -388,19 +446,40 @@ pub fn play_row_at_or_after(
     at_ms: i64,
 ) -> Result<Option<PlayRow>> {
     conn.query_row(
-        "SELECT s.kind, s.media_id, s.start_ms, s.end_ms, s.cursor_key, s.cursor_pos, s.label, m.path, m.acodec
+        "SELECT s.kind, s.media_id, s.start_ms, s.end_ms, s.cursor_key, s.cursor_pos, s.label, s.in_ms, s.bumper,
+                m.path, m.acodec, COALESCE(m.show, m.title)
          FROM schedule_items s LEFT JOIN media_items m ON m.id = s.media_id
          WHERE s.channel_id = ?1 AND s.end_ms > ?2 ORDER BY s.start_ms LIMIT 1",
         params![channel_id, at_ms],
         |r| {
             Ok(PlayRow {
                 item: item_from(r)?,
-                path: r.get(7)?,
-                has_audio: r.get::<_, Option<String>>(8)?.is_some(),
+                path: r.get(9)?,
+                has_audio: r.get::<_, Option<String>>(10)?.is_some(),
+                show: r.get(11)?,
             })
         },
     )
     .optional()
+}
+
+/// The commercials most recently scheduled before `before_ms` (oldest first).
+pub fn recent_commercials(
+    conn: &Connection,
+    channel_id: &str,
+    before_ms: i64,
+    limit: usize,
+) -> Result<Vec<i64>> {
+    let mut st = conn.prepare(
+        "SELECT media_id FROM schedule_items
+         WHERE channel_id = ?1 AND kind = 'commercial' AND start_ms < ?2 AND media_id IS NOT NULL
+         ORDER BY start_ms DESC LIMIT ?3",
+    )?;
+    let mut ids: Vec<i64> = st
+        .query_map(params![channel_id, before_ms, limit as i64], |r| r.get(0))?
+        .collect::<Result<_>>()?;
+    ids.reverse();
+    Ok(ids)
 }
 
 pub fn mark_media_missing(conn: &Connection, media_id: i64) -> Result<()> {
@@ -603,6 +682,8 @@ mod tests {
             cursor_key: Some("show:a".into()),
             cursor_pos: Some(pos),
             label: Some("Prime".into()),
+            in_ms: 0,
+            bumper: None,
         }
     }
 
@@ -700,6 +781,86 @@ mod tests {
         cur.get_mut("show:x").unwrap().committed = 4;
         save_cursors(&c, "a", &cur).unwrap();
         assert_eq!(load_cursors(&c, "a").unwrap()["show:x"].committed, 4);
+    }
+
+    #[test]
+    fn breaks_survive_rescans_but_not_file_changes() {
+        let c = open_in_memory().unwrap();
+        let lib = add_library(&c, "/tv", "shows").unwrap();
+        let id = upsert_media(&c, &new_media(lib.id, "/tv/a.mp4", 1000)).unwrap();
+        assert_eq!(media_needing_analysis(&c, lib.id).unwrap().len(), 1);
+        set_breaks(&c, id, r#"{"src":"black","points":[5]}"#).unwrap();
+        assert!(media_needing_analysis(&c, lib.id).unwrap().is_empty());
+        // a rescan of the same file keeps the analysis
+        upsert_media(&c, &new_media(lib.id, "/tv/a.mp4", 1000)).unwrap();
+        assert!(get_media(&c, id).unwrap().unwrap().breaks_json.is_some());
+        // a different length means a different file: analysis starts over
+        upsert_media(&c, &new_media(lib.id, "/tv/a.mp4", 2000)).unwrap();
+        assert!(get_media(&c, id).unwrap().unwrap().breaks_json.is_none());
+        // chapter-derived breaks supplied at scan time are stored
+        let mut m = new_media(lib.id, "/tv/a.mp4", 2000);
+        m.breaks_json = Some(r#"{"src":"chapters","points":[9]}"#.into());
+        m.year = Some(1987);
+        upsert_media(&c, &m).unwrap();
+        let row = get_media(&c, id).unwrap().unwrap();
+        assert_eq!(row.year, Some(1987));
+        assert!(row.breaks_json.unwrap().contains("chapters"));
+    }
+
+    #[test]
+    fn kinds_are_listed_separately() {
+        let c = open_in_memory().unwrap();
+        let shows = add_library(&c, "/tv", "shows").unwrap();
+        let ads = add_library(&c, "/ads", "commercials").unwrap();
+        upsert_media(&c, &new_media(shows.id, "/tv/a.mp4", 1000)).unwrap();
+        upsert_media(&c, &new_media(ads.id, "/ads/x.mp4", 30_000)).unwrap();
+        let both = [shows.id, ads.id];
+        assert_eq!(
+            list_media_of_kind(&c, &both, "commercials").unwrap().len(),
+            1
+        );
+        assert_eq!(list_media_of_kind(&c, &both, "shows").unwrap().len(), 1);
+        assert!(list_media_of_kind(&c, &both, "bumpers").unwrap().is_empty());
+    }
+
+    #[test]
+    fn bumpers_and_acts_roundtrip_and_recent_commercials_are_ordered() {
+        let c = open_in_memory().unwrap();
+        upsert_channel(&c, &chan("ch1", 5, vec![])).unwrap();
+        let lib = add_library(&c, "/tv", "shows").unwrap();
+        let ids: Vec<i64> = (1..=4)
+            .map(|i| upsert_media(&c, &new_media(lib.id, &format!("/tv/{i}.mp4"), 10)).unwrap())
+            .collect();
+        let mk = |kind, start, media: i64, bumper, in_ms| ScheduledItem {
+            kind,
+            media_id: Some(media),
+            start_ms: start,
+            end_ms: start + 10,
+            cursor_key: None,
+            cursor_pos: None,
+            label: None,
+            in_ms,
+            bumper,
+        };
+        let items = vec![
+            mk(ItemKind::Show, 0, ids[0], None, 0),
+            mk(ItemKind::Bumper, 10, ids[0], Some(BumperKind::Brb), 0),
+            mk(ItemKind::Commercial, 20, ids[1], None, 0),
+            mk(ItemKind::Commercial, 30, ids[2], None, 0),
+            mk(ItemKind::Show, 40, ids[0], None, 12_345),
+            mk(ItemKind::Bumper, 50, ids[3], None, 0), // a user's clip
+        ];
+        insert_schedule(&c, "ch1", &items).unwrap();
+        assert_eq!(schedule_between(&c, "ch1", 0, 100).unwrap(), items);
+        assert_eq!(
+            recent_commercials(&c, "ch1", 100, 10).unwrap(),
+            vec![ids[1], ids[2]]
+        );
+        assert_eq!(recent_commercials(&c, "ch1", 100, 1).unwrap(), vec![ids[2]]);
+        assert_eq!(recent_commercials(&c, "ch1", 25, 10).unwrap(), vec![ids[1]]);
+        let row = play_row_at_or_after(&c, "ch1", 12).unwrap().unwrap();
+        assert_eq!(row.item.bumper, Some(BumperKind::Brb));
+        assert_eq!(row.show, None);
     }
 
     #[test]

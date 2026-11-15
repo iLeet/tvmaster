@@ -22,9 +22,10 @@ Errors are `{"error": "message"}` with a suitable status code.
 |---|---|---|
 | GET | `/api/v1/libraries` | List with item counts. |
 | POST | `/api/v1/libraries` | `{"path": "/media/tv", "kind": "shows"}`. Kinds: `shows`, `commercials`, `bumpers`, `music`. The path must exist on the server. |
+| POST | `/api/v1/libraries/{id}/analyze` | Find ad-break points (black-frame scan) for a `shows` library's files that have none. Runs in the background; returns `202 {"queued": n}`. Starts automatically after a scan. Progress appears in the library list as `analysis: {total, done, running}`. |
 | POST | `/api/v1/libraries/{id}/scan` | Probes every video. Returns `{found, indexed, skipped}`. Files that vanished are flagged missing, not deleted (a restored file comes back on the next scan). Autopilot channels using the library re-roll. |
 
-Only `shows` libraries feed channels today; commercials and bumpers are stored for later milestones.
+Only `shows` libraries feed channels directly. `commercials` and `bumpers` libraries are named in a lineup's `ads` section: see [ADS.md](ADS.md).
 
 ## Channels, lineups and the schedule
 
@@ -39,7 +40,7 @@ See [SCHEDULING.md](SCHEDULING.md) for what these mean.
 | GET | `/api/v1/channels/{id}/lineup` | The lineup. |
 | PUT | `/api/v1/channels/{id}/lineup` | Replace the lineup. On an autopilot channel the future is re-rolled. |
 | POST | `/api/v1/channels/{id}/reroll` | Regenerate the not-yet-aired schedule now (works on manual-lock channels). Returns `{"items": n}`. |
-| GET | `/api/v1/channels/{id}/schedule?hours=6` | Programmes (max 72 h). `end_ms` is the slot end (includes grid padding), `runtime_end_ms` is when the show ends, `label` is the block or event. |
+| GET | `/api/v1/channels/{id}/schedule?hours=6` | Programmes (max 72 h). `end_ms` is the slot end (includes ad breaks and padding), `runtime_end_ms` is when the show's last act ends, `label` is the block or event. Add `&detail=items` for the raw timeline: every show act (`in_ms` is where in the file it starts), commercial, bumper (`bumper`: `brb`, `back_to`, `up_next`, `later_today`, `station_id`; none for your own clips) and filler. |
 | GET | `/api/v1/channels/{id}/cursors` | Episode cursors: `committed` have aired, `reserved` are on the schedule. |
 
 ## Virtual TVs and remote
