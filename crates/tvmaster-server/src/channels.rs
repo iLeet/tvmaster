@@ -44,16 +44,54 @@ fn view(s: &AppState, channel: Channel) -> ApiResult<ChannelView> {
 /// The server's own time zone, so "8pm" in a new channel's lineup means 8pm
 /// where the TVs are. Falls back to UTC if it can't be determined.
 pub(crate) fn system_timezone() -> String {
-    iana_time_zone::get_timezone()
-        .ok()
-        .filter(|tz| Zone::parse(tz).is_some())
+    // The TZ environment variable wins, as it does for every other program: it is how a
+    // container (or a service) is told its zone, while /etc/localtime there is usually UTC.
+    pick_timezone(
+        std::env::var("TZ").ok(),
+        iana_time_zone::get_timezone().ok(),
+    )
+}
+
+/// The first of the two that names a real zone, else UTC. (A leading ":" in `TZ` is allowed.)
+fn pick_timezone(env: Option<String>, system: Option<String>) -> String {
+    let env = env.map(|t| t.trim().trim_start_matches(':').to_string());
+    [env, system]
+        .into_iter()
+        .flatten()
+        .find(|tz| !tz.is_empty() && Zone::parse(tz).is_some())
         .unwrap_or_else(|| "UTC".to_string())
 }
 
+#[cfg(test)]
+mod timezone_tests {
+    use super::pick_timezone;
+
+    #[test]
+    fn the_tz_variable_beats_the_machines_own_zone() {
+        let s = |x: &str| Some(x.to_string());
+        assert_eq!(
+            pick_timezone(s("America/Toronto"), s("Etc/UTC")),
+            "America/Toronto"
+        );
+        assert_eq!(
+            pick_timezone(s(":Europe/Paris"), s("Etc/UTC")),
+            "Europe/Paris"
+        );
+        assert_eq!(pick_timezone(None, s("Asia/Tokyo")), "Asia/Tokyo");
+        assert_eq!(
+            pick_timezone(s("Not/AZone"), s("Asia/Tokyo")),
+            "Asia/Tokyo",
+            "a bad TZ is ignored"
+        );
+        assert_eq!(pick_timezone(s(""), None), "UTC");
+        assert_eq!(pick_timezone(None, None), "UTC");
+    }
+}
+
 /// Give a lineup the server's time zone if it did not name one.
-fn with_timezone(mut lineup: Lineup) -> Lineup {
+fn with_timezone(mut lineup: Lineup, zone: &str) -> Lineup {
     if lineup.timezone.is_empty() {
-        lineup.timezone = system_timezone();
+        lineup.timezone = zone.to_string();
     }
     lineup
 }
@@ -346,6 +384,7 @@ pub async fn upsert(
                 body.lineup
                     .or(existing.as_ref().map(|e| e.lineup.clone()))
                     .unwrap_or_default(),
+                &crate::station::effective_timezone(&db),
             ),
             kind: body
                 .kind
@@ -419,7 +458,7 @@ pub async fn put_lineup(
 ) -> ApiResult<Json<Lineup>> {
     lineup.validate().map_err(bad_lineup)?;
     check_ad_libraries(&s.db(), &lineup)?;
-    let lineup = with_timezone(lineup);
+    let lineup = with_timezone(lineup, &crate::station::effective_timezone(&s.db()));
     let mut channel = load(&s, &id)?;
     let changed = channel.lineup != lineup;
     let signoff_changed = channel.lineup.signoff != lineup.signoff;

@@ -295,7 +295,19 @@ public struct Asset: Codable, Sendable, Hashable, Identifiable {
 }
 
 /// The server's access-token setting (`/api/v1/security`).
+/// The station's time zone and where it came from (`/api/v1/timezone`).
+public struct TimezoneState: Codable, Sendable, Hashable {
+    public struct Elsewhere: Codable, Sendable, Hashable { public var id: String; public var name: String; public var zone: String }
+    public var zone: String
+    /// `setting`, `environment` or `machine`.
+    public var source: String
+    public var setting: String?
+    public var channelsElsewhere: [Elsewhere]
+}
+
 public struct SecurityStatus: Codable, Sendable, Hashable {
+    /// Anyone may watch without the token; managing still needs it. Absent on older servers.
+    public var openViewing: Bool?
     public var enabled: Bool
     /// Set with `--token` on the server's command line, so it cannot be changed from here.
     public var locked: Bool

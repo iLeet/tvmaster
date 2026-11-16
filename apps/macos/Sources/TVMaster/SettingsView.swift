@@ -6,6 +6,7 @@ struct SettingsView: View {
     @State private var log = ""
     @State private var tokenText = ""
     @State private var customToken = ""
+    @State private var tzApplyAll = true
     @State private var webhookText = ""
     @State private var confirmRotate = false
 
@@ -15,6 +16,21 @@ struct SettingsView: View {
             Form {
                 Section("Server") {
                     TextField("Address", text: $model.serverText, prompt: Text("http://127.0.0.1:8787"))
+                    DisclosureGroup("Servers on my network") {
+                        if model.scanning { ProgressView().controlSize(.small) }
+                        if model.discovered.isEmpty && !model.scanning { Text("None found.").font(.caption).foregroundStyle(.secondary) }
+                        ForEach(model.discovered) { s in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 0) {
+                                    Text(s.title).fontWeight(.semibold)
+                                    Text("\(s.host)\(s.version.map { " · TVMaster \($0)" } ?? "")").font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Button("Use") { Task { await model.use(s) } }.glassButton()
+                            }
+                        }
+                        Button(model.scanning ? "Looking…" : "Look for servers") { model.findServers() }.glassButton().disabled(model.scanning)
+                    }
                     SecureField("Access token", text: $tokenText, prompt: Text(model.token.isEmpty ? "None" : "Saved in your Keychain"))
                     HStack {
                         Button("Connect") { Task { if !tokenText.isEmpty { model.token = tokenText; tokenText = "" }; await model.connect() } }.glassButton(prominent: true)
@@ -29,6 +45,7 @@ struct SettingsView: View {
                             Text("The token was set with --token when the server started, so it is managed there.")
                                 .font(.caption).foregroundStyle(.secondary)
                         } else {
+                            Toggle("Let anyone tune in without the token (changing anything still needs it)", isOn: Binding(get: { sec.openViewing ?? false }, set: { v in Task { _ = await model.run { try await model.client!.setOpenViewing(v) }; await model.refreshSecurity() } }))
                             Toggle("Require an access token", isOn: Binding(get: { sec.enabled }, set: { v in Task { await model.changeSecurity(enabled: v) } }))
                             Text(sec.enabled
                                  ? "Every app, TV and browser must present the token. Share links can include it."
@@ -56,6 +73,23 @@ struct SettingsView: View {
                     } else {
                         Text("Connect to a server to manage its access token.").font(.caption).foregroundStyle(.secondary)
                     }
+                }
+                Section("Time zone") {
+                    if let tz = model.timezone {
+                        LabeledContent("Station time zone", value: tz.zone)
+                        Text(tz.source == "setting" ? "Chosen by you." : tz.source == "environment" ? "From the server's TZ setting." : "Automatic: the server machine's own zone. A server in a container is often on UTC.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Toggle("Move every channel's schedule into the zone I choose", isOn: $tzApplyAll)
+                        HStack {
+                            if tz.zone != TimeZone.current.identifier {
+                                Button("Use this Mac's: \(TimeZone.current.identifier)") { Task { await model.setTimezone(TimeZone.current.identifier, applyToChannels: tzApplyAll) } }.glassButton(prominent: true)
+                            }
+                            if tz.source == "setting" { Button("Back to automatic") { Task { await model.setTimezone(nil, applyToChannels: tzApplyAll) } }.glassButton() }
+                        }
+                        if !tz.channelsElsewhere.isEmpty {
+                            Label(tz.channelsElsewhere.map { "\($0.name) (\($0.zone))" }.joined(separator: ", ") + " in another zone", systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange)
+                        }
+                    } else { Text("Connect to a server to set its time zone.").font(.caption).foregroundStyle(.secondary) }
                 }
                 Section("Watching and alerts") {
                     if let m = model.monitor {

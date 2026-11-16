@@ -385,3 +385,64 @@ struct PictureSoundTests {
         #expect(m.typeface == "pixel" && m.scanlines)
     }
 }
+
+@Suite struct DiscoveryTests {
+    private func ip(_ a: UInt32, _ b: UInt32, _ c: UInt32, _ d: UInt32) -> UInt32 { a << 24 | b << 16 | c << 8 | d }
+
+    @Test func aHomeNetworkIsItsOtherTwoHundredFiftyThreeAddresses() {
+        let c = ServerDiscovery.candidates(ip: ip(10, 0, 0, 154), mask: ip(255, 255, 255, 0))
+        #expect(c.count == 253)
+        #expect(!c.contains(ip(10, 0, 0, 154)) && !c.contains(ip(10, 0, 0, 0)) && !c.contains(ip(10, 0, 0, 255)))
+        #expect(c.contains(ip(10, 0, 0, 152)))
+    }
+
+    @Test func aBiggerNetworkIsCutToTheSubnetTheMacIsIn() {
+        let c = ServerDiscovery.candidates(ip: ip(10, 1, 7, 20), mask: ip(255, 255, 0, 0))
+        #expect(c.count == 253 && c.allSatisfy { $0 >> 8 == ip(10, 1, 7, 0) >> 8 })
+    }
+
+    @Test func aSmallerNetworkIsOnlyItsOwnAddresses() {
+        let c = ServerDiscovery.candidates(ip: ip(192, 168, 1, 70), mask: ip(255, 255, 255, 192))
+        #expect(c.allSatisfy { $0 >= ip(192, 168, 1, 65) && $0 <= ip(192, 168, 1, 126) })
+        #expect(c.count == 61, "62 usable addresses, minus this Mac")
+    }
+
+    @Test func publicAndLinkLocalAddressesAreNeverScanned() {
+        #expect(ServerDiscovery.candidates(ip: ip(8, 8, 8, 8), mask: ip(255, 255, 255, 0)).isEmpty)
+        #expect(ServerDiscovery.candidates(ip: ip(169, 254, 3, 4), mask: ip(255, 255, 0, 0)).isEmpty)
+        #expect(ServerDiscovery.candidates(ip: ip(172, 32, 0, 1), mask: ip(255, 255, 255, 0)).isEmpty, "172.32 is public")
+        #expect(!ServerDiscovery.candidates(ip: ip(172, 20, 0, 1), mask: ip(255, 255, 255, 0)).isEmpty)
+    }
+
+    @Test func onlyATVMastersHealthPageCounts() {
+        let good = Data(#"{"status":"ok","service":"tvmaster","name":"THETOWER","version":"1.0.0","ffmpeg":{"version":"5.1"},"on_air":["a"]}"#.utf8)
+        let s = ServerDiscovery.parse(health: good, host: "10.0.0.152")
+        #expect(s?.url.absoluteString == "http://10.0.0.152:8787" && s?.title == "THETOWER" && s?.version == "1.0.0")
+        #expect(ServerDiscovery.parse(health: Data(#"{"status":"ok"}"#.utf8), host: "10.0.0.9") == nil, "some other service that says ok")
+        #expect(ServerDiscovery.parse(health: Data("<html>router</html>".utf8), host: "10.0.0.1") == nil)
+        let old = Data(#"{"status":"ok","version":"0.0.1","ffmpeg":null,"on_air":[]}"#.utf8)
+        #expect(ServerDiscovery.parse(health: old, host: "10.0.0.5")?.title == "10.0.0.5", "an older server has no name: its address is shown")
+    }
+
+    @Test func thisMacHasANetworkToScanOrNone() {
+        // No assertion on the machine's network: it only must not crash.
+        _ = ServerDiscovery.localInterfaces()
+    }
+}
+
+@Suite struct StationControlTests {
+    @Test func theTimeZoneStateDecodes() throws {
+        let d = JSONDecoder(); d.keyDecodingStrategy = .convertFromSnakeCase
+        let t = try d.decode(TimezoneState.self, from: Data(#"{"zone":"Etc/UTC","source":"machine","setting":null,"environment":null,"machine":"Etc/UTC","channels_elsewhere":[{"id":"disney-jr","name":"Disney Jr","zone":"America/Toronto"}]}"#.utf8))
+        #expect(t.zone == "Etc/UTC" && t.source == "machine" && t.setting == nil)
+        #expect(t.channelsElsewhere.first?.name == "Disney Jr")
+    }
+
+    @Test func theSecurityStateSaysWhetherWatchingIsOpen() throws {
+        let d = JSONDecoder(); d.keyDecodingStrategy = .convertFromSnakeCase
+        let s = try d.decode(SecurityStatus.self, from: Data(#"{"enabled":true,"locked":false,"token":"abcdef0123456789","open_viewing":true}"#.utf8))
+        #expect(s.openViewing == true)
+        let old = try d.decode(SecurityStatus.self, from: Data(#"{"enabled":true,"locked":false,"token":null}"#.utf8))
+        #expect(old.openViewing == nil, "an older server does not say")
+    }
+}

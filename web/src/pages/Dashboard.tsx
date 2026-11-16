@@ -1,8 +1,9 @@
+import { useState } from 'react';
 import { api } from '../api';
 import { formatClock, formatDuration } from '../lib';
 import { useLiveEvent, useLiveStatus, useQuery } from '../live';
 import { href } from '../router';
-import type { ChannelView, Library, MonitorState, System, Tv } from '../types';
+import type { ChannelView, Library, MonitorState, System, Tv, TimezoneState } from '../types';
 import { Badge, Card, Empty, Icon, Spinner } from '../ui';
 
 export function Dashboard() {
@@ -11,6 +12,9 @@ export function Dashboard() {
   const libs = useQuery(() => api.get<Library[]>('/libraries'));
   const sys = useQuery(() => api.get<System>('/system'));
   const monitor = useQuery(() => api.get<MonitorState>('/monitor'));
+  const tz = useQuery(() => api.get<TimezoneState>('/timezone'));
+  const device = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const [tzDismissed, setTzDismissed] = useState(() => { try { return localStorage.getItem('tvmaster.tzDismissed') === device; } catch { return false; } });
   const live = useLiveStatus();
 
   useLiveEvent(['channel.now', 'schedule.changed'], () => channels.reload());
@@ -31,6 +35,13 @@ export function Dashboard() {
         </span>
       </div>
 
+      {tz.data && tz.data.source !== 'setting' && tz.data.zone !== device && !tzDismissed && (
+        <div className="err-banner" style={{ borderColor: 'var(--accent)', color: 'inherit' }}>
+          <strong>Is this your time zone?</strong> The station is on <span className="mono">{tz.data.zone}</span>, but this device is in <span className="mono">{device}</span>. Schedules and the guide follow the station's zone, so programmes could air at the wrong hour.{' '}
+          <button className="btn small primary" onClick={() => api.put('/timezone', { zone: device, apply_to_channels: true }).then(() => { tz.reload(); channels.reload(); })}>Use {device} for everything</button>{' '}
+          <button className="btn small" onClick={() => { try { localStorage.setItem('tvmaster.tzDismissed', device); } catch { /* ignore */ } setTzDismissed(true); }}>It is right as it is</button>
+        </div>
+      )}
       {(monitor.data?.alerts ?? []).map((a) => (
         <div key={a.id} className="err-banner" style={a.severity === 'warning' ? { borderColor: 'var(--warn)', color: 'var(--warn)' } : undefined}>
           <strong>{a.title}.</strong> {a.detail}

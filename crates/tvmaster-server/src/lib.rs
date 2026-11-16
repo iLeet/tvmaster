@@ -15,6 +15,7 @@ mod pip;
 mod plan;
 #[cfg(test)]
 mod soak;
+mod station;
 mod stream;
 pub mod tls;
 mod tvs;
@@ -53,6 +54,8 @@ pub struct AppState {
     pub(crate) token: Arc<std::sync::RwLock<Option<String>>>,
     /// True when the token came from the command line, so the UI may not change it.
     pub(crate) token_locked: bool,
+    /// With a token on, anyone may still watch (streams, playlists, the player); only managing needs the token.
+    pub(crate) open_viewing: Arc<std::sync::atomic::AtomicBool>,
     /// JSON events pushed to WebSocket clients.
     pub(crate) events: broadcast::Sender<String>,
     /// How many connected players each TV has (online while > 0).
@@ -118,6 +121,7 @@ impl AppState {
             analysis: Arc::new(Mutex::new(HashMap::new())),
             token: Arc::new(std::sync::RwLock::new(None)),
             token_locked: false,
+            open_viewing: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             events: broadcast::channel(256).0,
             presence: Arc::new(Mutex::new(HashMap::new())),
             network: Arc::new(NetworkInfo::default()),
@@ -159,6 +163,12 @@ impl AppState {
             None
         };
         *self.token.write().unwrap_or_else(|p| p.into_inner()) = token.or(saved);
+        let open = tvmaster_db::meta_get(&self.db(), auth::OPEN_VIEWING_KEY)
+            .ok()
+            .flatten()
+            .is_some_and(|v| v == "1");
+        self.open_viewing
+            .store(open, std::sync::atomic::Ordering::Relaxed);
         self
     }
 
@@ -353,7 +363,9 @@ impl AppState {
     /// with unplayable files. Runs one pass immediately. Needs a Tokio runtime.
     pub fn spawn_autopilot(&self) -> tokio::task::JoinHandle<()> {
         let state = self.clone();
-        autopilot::fill_blank_timezones(&state.db(), &channels::system_timezone());
+        // (Two database guards in one expression would wait on each other forever.)
+        let zone = station::effective_timezone(&state.db());
+        autopilot::fill_blank_timezones(&state.db(), &zone);
         tokio::spawn(async move {
             let mut last_revive = std::time::Instant::now();
             loop {
@@ -496,6 +508,12 @@ fn build_router(state: AppState, https: bool) -> Router {
                 .delete(libraries::delete_file)
                 .layer(axum::extract::DefaultBodyLimit::disable()),
         )
+        .route(
+            "/api/v1/timezone",
+            get(station::get_timezone).put(station::put_timezone),
+        )
+        .route("/api/v1/channels/:id/reset", post(station::reset))
+        .route("/api/v1/channels/:id/stream", post(station::stream_control))
         .route("/api/v1/monitor", get(monitor::get).put(monitor::put))
         .route("/api/v1/monitor/test", post(monitor::test))
         .route("/api/v1/monitor/rescan", post(monitor::rescan_now))
@@ -559,6 +577,9 @@ async fn health(axum::extract::State(s): axum::extract::State<AppState>) -> Json
     let on_air = s.playout.as_ref().map(|p| p.running()).unwrap_or_default();
     Json(json!({
         "status": "ok",
+        // So apps scanning the network can tell a TVMaster server from anything else on port 8787.
+        "service": "tvmaster",
+        "name": gethostname::gethostname().to_string_lossy(),
         "version": env!("CARGO_PKG_VERSION"),
         "ffmpeg": ffmpeg,
         "on_air": on_air,

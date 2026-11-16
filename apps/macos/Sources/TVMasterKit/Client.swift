@@ -181,6 +181,32 @@ public struct TVMasterClient: Sendable {
     public func auth() async throws -> AuthStatus { try await get("/auth") }
     public func security() async throws -> SecurityStatus { try await get("/security") }
 
+    // MARK: time zone and channel controls
+
+    public func timezone() async throws -> TimezoneState { try await get("/timezone") }
+
+    /// Set the station's time zone (`nil` = automatic), optionally moving every channel's schedule into it.
+    @discardableResult
+    public func setTimezone(_ zone: String?, applyToChannels: Bool) async throws -> TimezoneState {
+        let body: JSONValue = .object(["zone": zone.map { .string($0) } ?? .null, "apply_to_channels": .bool(applyToChannels)])
+        let data = try await send("PUT", "/timezone", body: body)
+        do { return try Self.decoder.decode(TimezoneState.self, from: data) } catch { throw TVMasterError.invalidResponse }
+    }
+
+    /// `schedule`: re-plan from now. `progress`: every show starts again at its first episode.
+    public func reset(channel id: String, what: String) async throws {
+        try await send("POST", "/channels/\(id)/reset", body: .object(["what": .string(what)]))
+    }
+
+    /// `start`, `stop` or `restart` a channel's stream.
+    public func stream(channel id: String, action: String) async throws {
+        try await send("POST", "/channels/\(id)/stream", body: .object(["action": .string(action)]))
+    }
+
+    public func setOpenViewing(_ open: Bool) async throws {
+        try await send("PUT", "/security", body: .object(["open_viewing": .bool(open)]))
+    }
+
     // MARK: monitoring
 
     public func monitor() async throws -> MonitorState { try await get("/monitor") }

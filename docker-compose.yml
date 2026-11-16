@@ -6,6 +6,7 @@ services:
     build: .
     image: tvmaster:latest
     container_name: tvmaster
+    hostname: tvmaster       # how the server names itself to apps that look for it on the network
     restart: unless-stopped
     ports:
       - "8787:8787"          # the web admin, the player, the IPTV playlist and the API

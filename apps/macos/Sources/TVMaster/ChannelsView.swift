@@ -86,6 +86,7 @@ struct ChannelEditorSheet: View {
     @State private var libraryIDs: Set<Int> = []
     @State private var saving = false
     @State private var confirmDelete = false
+    @State private var confirmProgressReset = false
     @State private var loaded = false
     @State private var tab: Tab = {
         switch ProcessInfo.processInfo.environment["TVM_EDIT_TAB"] { case "picture": .picture; case "guide": .guide; default: .general }
@@ -149,6 +150,26 @@ struct ChannelEditorSheet: View {
                         Picker("Strategy", selection: $strategy) { ForEach(Strategy.allCases) { Text($0.label).tag($0) } }
                         LabeledContent("Chaos \(Int(chaos))%") { Slider(value: $chaos, in: 0...100, step: 1) }
                         Picker("When a show runs out", selection: $runOut) { ForEach(RunOut.allCases) { Text($0.label).tag($0) } }
+                    }
+                }
+                if !isGuide && !isTest && !isNew {
+                    Section("Controls") {
+                        Text("Act on this channel right now. None of these change your settings.").font(.caption).foregroundStyle(.secondary)
+                        HStack {
+                            Button("Restart the stream") { Task { _ = await model.run { try await model.client!.stream(channel: id, action: "restart") } } }.glassButton()
+                            Button("Take off air") { Task { _ = await model.run { try await model.client!.stream(channel: id, action: "stop") } } }.glassButton()
+                            Button("Re-plan the schedule") { Task { _ = await model.run { try await model.client!.reset(channel: id, what: "schedule") } } }.glassButton()
+                        }
+                        Button("Start every show from episode 1…", role: .destructive) { confirmProgressReset = true }.glassButton()
+                            .confirmationDialog("Start every show from episode 1?", isPresented: $confirmProgressReset) {
+                                Button("Start over", role: .destructive) { Task { _ = await model.run { try await model.client!.reset(channel: id, what: "progress") } } }
+                            } message: { Text("Every show on this channel starts again at its first episode, and the schedule is re-planned from now.") }
+                    }
+                    Section("When nothing is scheduled") {
+                        Picker("Screen", selection: $ps.offAirScreen) { ForEach(PictureSoundSettings.screens, id: \.value) { Text($0.label).tag($0.value) } }
+                        Toggle("Test tone", isOn: $ps.offAirTone)
+                        Text("What shows in the gaps between your time slots, when a show has run out, or when its files are not available. Colour bars with a tone is the classic test pattern.")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
                 }
                 Section("Running it") {
@@ -268,6 +289,10 @@ struct PictureSoundForm: View {
                     Label("This server doesn't know about picture and sound settings yet. Update the TVMaster server (the bundled one comes with the app update).", systemImage: "exclamationmark.triangle.fill")
                         .font(.callout).foregroundStyle(.orange)
                 }
+            }
+            Section {
+                Button("Reset picture and sound to defaults", role: .destructive) { ps = PictureSoundSettings() }.glassButton()
+                Text("Audio, subtitles, picture, graphics and the off-air screen go back to their defaults when you save. Per-show settings are kept.").font(.caption).foregroundStyle(.secondary)
             }
             Section("When nothing is on air") {
                 Picker("Screen", selection: $ps.offAirScreen) { ForEach(PictureSoundSettings.screens, id: \.value) { Text($0.label).tag($0.value) } }

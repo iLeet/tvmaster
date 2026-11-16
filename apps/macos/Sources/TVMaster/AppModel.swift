@@ -118,7 +118,7 @@ final class AppModel {
         }
         if reach != .up {
             guard client.isLocal, startLocalServer else {
-                phase = .needsServer("Cannot reach \(url.host ?? "the server"). Is TVMaster running?")
+                phase = .needsServer("Cannot reach \(url.host ?? "the server") (\(url.absoluteString)). Check that TVMaster is running there. If macOS asked to let TVMaster find devices on your local network, it has to be allowed in System Settings → Privacy & Security → Local Network.")
                 return
             }
             guard let binary = DaemonLocator.find() else {
@@ -156,6 +156,7 @@ final class AppModel {
             if !token.isEmpty { tokens.set(token, for: url.absoluteString) }
             await refreshSecurity()
             await refreshMonitor()
+            await refreshTimezone()
             await refreshAll()
             startEvents()
             await applyTVRegistration()
@@ -208,8 +209,54 @@ final class AppModel {
         phase = .needsServer(nil)
     }
 
+    /// TVMaster servers found on the local network.
+    var discovered: [FoundServer] = []
+    var scanning = false
+    private var scanTask: Task<Void, Never>?
+
+    /// Look for servers on this Mac's networks (a few seconds). Results appear as they are found.
+    func findServers() {
+        guard !scanning else { return }
+        scanning = true
+        discovered = []
+        scanTask = Task {
+            let all = await ServerDiscovery.scan { found in
+                Task { @MainActor in if !self.discovered.contains(found) { self.discovered.append(found) } }
+            }
+            discovered = all
+            scanning = false
+        }
+    }
+
+    /// Use a server that was found: put its address in and connect.
+    func use(_ server: FoundServer) async {
+        serverText = server.url.absoluteString
+        token = ""
+        await connect()
+    }
+
     /// The server's access-token setting, for Settings.
     var security: SecurityStatus?
+    /// The station's time zone, for Settings and the "is this your time zone?" nudge.
+    var timezone: TimezoneState?
+    var timezoneNudgeDismissed = UserDefaults.standard.string(forKey: "tzDismissed") == TimeZone.current.identifier
+
+    func refreshTimezone() async { timezone = try? await client?.timezone() }
+
+    func setTimezone(_ zone: String?, applyToChannels: Bool) async {
+        guard let client else { return }
+        if let t = await run({ try await client.setTimezone(zone, applyToChannels: applyToChannels) }) {
+            timezone = t
+            await refreshChannels()
+            system = try? await client.system()
+        }
+    }
+
+    func dismissTimezoneNudge() {
+        UserDefaults.standard.set(TimeZone.current.identifier, forKey: "tzDismissed")
+        timezoneNudgeDismissed = true
+    }
+
     /// What the server is keeping an eye on: its settings and any problems right now.
     var monitor: MonitorState?
 

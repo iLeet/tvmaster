@@ -3,7 +3,7 @@ import { api, errorMessage } from '../api';
 import { emptyLineup, lineupSummary, nextFreeNumber, slugify, validateId } from '../lib';
 import { useQuery } from '../live';
 import { emptyGuide, guideProblem, withGuideDefaults } from '../guide';
-import { emptyOptions, langName, withDefaults } from '../options';
+import { SCREENS, emptyOptions, langName, withDefaults } from '../options';
 import { href, navigate } from '../router';
 import type { Channel, ChannelOptions, ChannelView, GuideConfig, Library, RunOut, ShowSummary, Strategy, System } from '../types';
 import { Badge, Btn, Card, Chips, ConfirmBtn, Field, Segmented, Spinner, Toggle, useToast } from '../ui';
@@ -58,7 +58,7 @@ const fromChannel = (c: Channel): Draft => ({
 
 export function ChannelEditor({ id, tab }: { id: string; tab: string }) {
   const isNew = id === 'new';
-  const { say } = useToast();
+  const { say, attempt } = useToast();
   const channel = useQuery(() => (isNew ? Promise.resolve(null) : api.get<ChannelView>(`/channels/${id}`)), [id]);
   const all = useQuery(() => api.get<ChannelView[]>('/channels'));
   const libs = useQuery(() => api.get<Library[]>('/libraries'));
@@ -190,6 +190,21 @@ export function ChannelEditor({ id, tab }: { id: string; tab: string }) {
             )}
           </Card>
 
+          {!isNew && draft.kind === 'programming' && (
+            <Card className="stack">
+              <h2>Controls</h2>
+              <p className="small dim">Act on this channel right now. None of these change your settings.</p>
+              <div className="row wrap">
+                <Btn onClick={() => attempt(() => api.post(`/channels/${draft.id}/stream`, { action: 'restart' }), 'Stream restarted').then(() => all.reload())}>Restart the stream</Btn>
+                {all.data?.find((c) => c.id === draft.id)?.on_air
+                  ? <Btn onClick={() => attempt(() => api.post(`/channels/${draft.id}/stream`, { action: 'stop' }), 'Taken off air').then(() => all.reload())}>Take off air</Btn>
+                  : <Btn onClick={() => attempt(() => api.post(`/channels/${draft.id}/stream`, { action: 'start' }), 'On air').then(() => all.reload())}>Put on air</Btn>}
+                <Btn onClick={() => attempt(() => api.post(`/channels/${draft.id}/reset`, { what: 'schedule' }), 'Schedule re-planned from now')}>Re-plan the schedule</Btn>
+                <ConfirmBtn kind="danger" label="Start every show from episode 1" confirm="Every show on this channel starts again at its first episode, and the schedule is re-planned from now." onConfirm={() => attempt(() => api.post(`/channels/${draft.id}/reset`, { what: 'progress' }), 'Progress reset')} />
+              </div>
+            </Card>
+          )}
+
           {draft.kind === 'programming' && (
             <>
               <Card className="stack">
@@ -241,7 +256,18 @@ export function ChannelEditor({ id, tab }: { id: string; tab: string }) {
       )}
 
       {shownTab === 'programming' && draft.kind === 'programming' && (
-        <LineupEditor lineup={draft.lineup} shows={shownShows} onChange={(lineup) => set({ lineup, ...(draft.strategy !== 'block_grid' && lineup.blocks.length > 0 ? { strategy: 'block_grid' as Strategy } : {}) })} />
+        <>
+          <LineupEditor lineup={draft.lineup} shows={shownShows} onChange={(lineup) => set({ lineup, ...(draft.strategy !== 'block_grid' && lineup.blocks.length > 0 ? { strategy: 'block_grid' as Strategy } : {}) })} />
+          <Card className="stack">
+            <h2>When nothing is scheduled</h2>
+            <p className="small dim">What the channel shows in the gaps between your time slots, when a show has run out, or when its files are not available (a drive that is unplugged).</p>
+            <Field label="Screen" hint={SCREENS.find((x) => x.value === draft.options.off_air.screen)?.help}>
+              <Segmented value={draft.options.off_air.screen} options={SCREENS} onChange={(screen) => set({ options: { ...draft.options, off_air: { ...draft.options.off_air, screen, tone: screen === 'bars' ? true : draft.options.off_air.tone } } })} />
+            </Field>
+            <Toggle checked={draft.options.off_air.tone} onChange={(tone) => set({ options: { ...draft.options, off_air: { ...draft.options.off_air, tone } } })} label={<span>Test tone <span className="dim small">a steady 1 kHz tone, like a real test pattern</span></span>} />
+            <p className="small dim">The station card message, your own picture and the rest are on the Sound & picture tab.</p>
+          </Card>
+        </>
       )}
 
       {shownTab === 'picture' && draft.kind === 'test' && (

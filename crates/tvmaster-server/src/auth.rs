@@ -23,6 +23,8 @@ use std::time::Duration;
 const COOKIE: &str = "tvmaster_token";
 /// Where a token set from the admin UI is kept.
 pub const META_KEY: &str = "access_token";
+/// Whether watching needs no token even when managing does.
+pub const OPEN_VIEWING_KEY: &str = "open_viewing";
 
 /// Tokens go into cookies and URLs, so only unreserved characters are allowed.
 pub fn valid_token(t: &str) -> bool {
@@ -88,11 +90,36 @@ fn is_public(path: &str) -> bool {
         || path == "/api/v1/auth/logout"
 }
 
+/// What someone who only wants to watch needs: the streams, the playlists and
+/// tuner pages, the channel list and the live events. Nothing here changes anything.
+fn is_viewing(method: &axum::http::Method, path: &str) -> bool {
+    let read = method == axum::http::Method::GET || method == axum::http::Method::HEAD;
+    read && (path.starts_with("/stream/")
+        || path.starts_with("/iptv/")
+        || matches!(
+            path,
+            "/discover.json"
+                | "/lineup.json"
+                | "/lineup_status.json"
+                | "/lineup.post"
+                | "/device.xml"
+        )
+        || path == "/api/v1/channels"
+        || path == "/api/v1/ws"
+        || path == "/api/v1/tvs"
+        || path.starts_with("/api/v1/tvs/"))
+}
+
 pub async fn guard(State(s): State<AppState>, req: Request, next: Next) -> Response {
     let Some(token) = s.token() else {
         return next.run(req).await;
     };
     if is_public(req.uri().path()) {
+        return next.run(req).await;
+    }
+    if s.open_viewing.load(std::sync::atomic::Ordering::Relaxed)
+        && is_viewing(req.method(), req.uri().path())
+    {
         return next.run(req).await;
     }
     let ok =
@@ -113,6 +140,10 @@ pub async fn guard(State(s): State<AppState>, req: Request, next: Next) -> Respo
 /// `?token=...` to append to URLs handed to clients that cannot send headers
 /// (empty when authentication is off).
 pub fn url_suffix(s: &AppState) -> String {
+    // Links for watching carry no token when watching is open: it would only leak the one that manages.
+    if s.open_viewing.load(std::sync::atomic::Ordering::Relaxed) {
+        return String::new();
+    }
     s.token().map(|t| format!("?token={t}")).unwrap_or_default()
 }
 
@@ -178,12 +209,18 @@ pub async fn security(State(s): State<AppState>) -> Json<serde_json::Value> {
         "enabled": token.is_some(),
         "locked": s.token_locked,
         "token": token,
+        "open_viewing": s.open_viewing.load(std::sync::atomic::Ordering::Relaxed),
     }))
 }
 
 #[derive(Deserialize)]
 pub struct SecurityBody {
-    enabled: bool,
+    /// Turn the token on or off; leave out to keep it as it is.
+    #[serde(default)]
+    enabled: Option<bool>,
+    /// Let anyone watch without the token (managing still needs it).
+    #[serde(default)]
+    open_viewing: Option<bool>,
     /// Use this token instead of a generated one (when enabling or replacing).
     #[serde(default)]
     token: Option<String>,
@@ -200,6 +237,16 @@ pub async fn put_security(
     Json(body): Json<SecurityBody>,
 ) -> Result<Response, crate::ApiError> {
     use crate::ApiError;
+    // Who may watch is a separate choice from what the token is, so it can be changed even
+    // when the token itself was fixed on the command line.
+    if let Some(open) = body.open_viewing {
+        tvmaster_db::meta_set(&s.db(), OPEN_VIEWING_KEY, if open { "1" } else { "0" })?;
+        s.open_viewing
+            .store(open, std::sync::atomic::Ordering::Relaxed);
+    }
+    if body.enabled.is_none() && body.token.is_none() && !body.rotate {
+        return Ok(security(State(s)).await.into_response());
+    }
     if s.token_locked {
         return Err(ApiError::new(
             StatusCode::CONFLICT,
@@ -207,7 +254,8 @@ pub async fn put_security(
         ));
     }
     let current = s.token();
-    let new = if !body.enabled {
+    let enabled = body.enabled.unwrap_or(current.is_some());
+    let new = if !enabled {
         None
     } else if let Some(t) = body.token.filter(|t| !t.is_empty()) {
         if !valid_token(&t) {
@@ -230,8 +278,13 @@ pub async fn put_security(
         }?;
     }
     *s.token.write().unwrap_or_else(|p| p.into_inner()) = new.clone();
-    let mut res =
-        Json(json!({ "enabled": new.is_some(), "locked": false, "token": new })).into_response();
+    let mut res = Json(json!({
+        "enabled": new.is_some(),
+        "locked": false,
+        "token": new,
+        "open_viewing": s.open_viewing.load(std::sync::atomic::Ordering::Relaxed),
+    }))
+    .into_response();
     match &new {
         Some(t) => set_cookie(&mut res, &headers, t),
         None => {
@@ -490,6 +543,113 @@ mod tests {
             .unwrap();
         let res = tower::ServiceExt::oneshot(app, req).await.unwrap();
         assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn watching_can_be_open_while_managing_keeps_its_token() {
+        use crate::test_util::call;
+        let state = AppState::in_memory().with_token(Some("cli-token-12345".into()));
+        let app = router(state.clone());
+        let bearer = [("authorization", "Bearer cli-token-12345")];
+        // Closed to start with.
+        assert_eq!(
+            get(&app, "/api/v1/channels", &[]).await,
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            get(&app, "/iptv/playlist.m3u", &[]).await,
+            StatusCode::UNAUTHORIZED
+        );
+
+        // Open it (allowed even though the token itself is fixed on the command line).
+        let req = axum::http::Request::builder()
+            .method("PUT")
+            .uri("/api/v1/security")
+            .header("content-type", "application/json")
+            .header("authorization", "Bearer cli-token-12345")
+            .body(axum::body::Body::from(r#"{"open_viewing":true}"#))
+            .unwrap();
+        let res = tower::ServiceExt::oneshot(app.clone(), req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(
+            tvmaster_db::meta_get(&state.db(), OPEN_VIEWING_KEY)
+                .unwrap()
+                .as_deref(),
+            Some("1"),
+            "kept across restarts"
+        );
+
+        // Watching needs nothing...
+        for uri in [
+            "/api/v1/channels",
+            "/iptv/playlist.m3u",
+            "/iptv/guide.xml",
+            "/discover.json",
+            "/lineup.json",
+            "/api/v1/tvs",
+        ] {
+            assert_eq!(get(&app, uri, &[]).await, StatusCode::OK, "{uri}");
+        }
+        // ...and the playlist does not hand out the token that manages.
+        let (_, m3u) = crate::test_util::call_raw(&app, "GET", "/iptv/playlist.m3u", "").await;
+        assert!(
+            !m3u.contains("cli-token-12345") && !m3u.contains("token="),
+            "{m3u}"
+        );
+        // Managing still does.
+        for uri in [
+            "/api/v1/libraries",
+            "/api/v1/system",
+            "/api/v1/monitor",
+            "/api/v1/security",
+            "/api/v1/shows",
+        ] {
+            assert_eq!(get(&app, uri, &[]).await, StatusCode::UNAUTHORIZED, "{uri}");
+        }
+        let (st, _) = call(
+            &app,
+            "POST",
+            "/api/v1/channels",
+            r#"{"id":"x","number":9,"name":"X"}"#,
+        )
+        .await;
+        assert_eq!(
+            st,
+            StatusCode::UNAUTHORIZED,
+            "changing things needs the token"
+        );
+        let (st, _) = call(&app, "POST", "/api/v1/tvs/living/power", r#"{"on":true}"#).await;
+        assert_eq!(st, StatusCode::UNAUTHORIZED, "so does controlling a TV");
+        assert_eq!(
+            get(&app, "/api/v1/libraries", &bearer).await,
+            StatusCode::OK
+        );
+
+        // Close it again.
+        let req = axum::http::Request::builder()
+            .method("PUT")
+            .uri("/api/v1/security")
+            .header("content-type", "application/json")
+            .header("authorization", "Bearer cli-token-12345")
+            .body(axum::body::Body::from(r#"{"open_viewing":false}"#))
+            .unwrap();
+        tower::ServiceExt::oneshot(app.clone(), req).await.unwrap();
+        assert_eq!(
+            get(&app, "/api/v1/channels", &[]).await,
+            StatusCode::UNAUTHORIZED
+        );
+    }
+
+    #[tokio::test]
+    async fn the_open_viewing_choice_is_read_back_at_startup() {
+        let state = AppState::in_memory();
+        tvmaster_db::meta_set(&state.db(), OPEN_VIEWING_KEY, "1").unwrap();
+        let state = state.with_token(Some("cli-token-12345".into()));
+        assert!(state
+            .open_viewing
+            .load(std::sync::atomic::Ordering::Relaxed));
+        let app = router(state);
+        assert_eq!(get(&app, "/api/v1/channels", &[]).await, StatusCode::OK);
     }
 
     #[test]

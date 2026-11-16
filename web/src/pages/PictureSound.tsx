@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { SCREENS, setShowOption, showOverride } from '../options';
+import { SCREENS, emptyOptions, setShowOption, showOverride } from '../options';
 import type { ChannelOptions, Corner, Lineup, ShowSummary, SignOff, System } from '../types';
-import { Badge, Card, Field, Segmented, Toggle } from '../ui';
+import { Badge, Card, ConfirmBtn, Field, Segmented, Toggle } from '../ui';
 import { PictureField } from '../PictureField';
 import { ASPECTS, LanguageList, LOOKS, ShowSettingsRow, SUB_MODES } from './ShowSettings';
 
@@ -55,6 +55,8 @@ export function PictureSound({
 
   return (
     <div className="stack gap-lg">
+      <div className="row"><span className="small dim grow">Everything on this tab applies to this channel; per-show settings override it.</span>
+        <ConfirmBtn small label="Reset to defaults" confirm="Audio, subtitles, picture, graphics and the off-air screen go back to their defaults. Per-show settings and sign-off hours are kept." onConfirm={() => onChange({ ...emptyOptions(), shows: o.shows })} /></div>
       <Card className="stack">
         <div><h2>Audio</h2><p className="small dim">Many files carry several audio tracks (original and dubbed languages, commentary). The channel picks one for every programme.</p></div>
         <Field label="Preferred languages" hint="In order. The first one a file has is used; if none match, the file's own default track plays. Commentary and audio-description tracks are skipped unless they are all there is.">

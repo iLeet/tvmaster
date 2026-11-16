@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { api } from '../api';
 import { isLoopback, shareHosts, shareLinks, shareSchemes, type Scheme } from '../share';
 import { useQuery } from '../live';
-import type { AuthStatus, MonitorSettings, MonitorState, SecurityStatus, System } from '../types';
+import type { AuthStatus, MonitorSettings, MonitorState, SecurityStatus, System, TimezoneState } from '../types';
 import { Badge, Btn, Card, ConfirmBtn, CopyField, Field, Segmented, Spinner, Toggle, useToast } from '../ui';
 
 export function Settings() {
@@ -10,6 +10,17 @@ export function Settings() {
   const auth = useQuery(() => api.get<AuthStatus>('/auth'));
   const sec = useQuery(() => api.get<SecurityStatus>('/security'));
   const monitor = useQuery(() => api.get<MonitorState>('/monitor'));
+  const tz = useQuery(() => api.get<TimezoneState>('/timezone'));
+  const deviceZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const [zoneText, setZoneText] = useState<string | null>(null);
+  const [applyAll, setApplyAll] = useState(true);
+  const setZone = (zone: string | null) =>
+    attempt(async () => {
+      await api.put<TimezoneState>('/timezone', { zone, apply_to_channels: applyAll });
+      setZoneText(null);
+      tz.reload();
+      sys.reload();
+    }, 'Time zone saved');
   const { attempt } = useToast();
   const [custom, setCustom] = useState('');
   const setSecurity = (body: { enabled: boolean; token?: string; rotate?: boolean }) =>
@@ -91,6 +102,26 @@ export function Settings() {
       </Card>
 
       <Card className="stack">
+        <h2>Time zone</h2>
+        <p className="small dim">Every schedule, the guide and the clock on screen use this. It starts as the server's own zone; if that is not where you are (a server in a container is often on UTC), set it here.</p>
+        {!tz.data ? <Spinner /> : (
+          <>
+            <div className="row wrap" style={{ alignItems: 'flex-end' }}>
+              <Field label="Station time zone" hint={tz.data.source === 'setting' ? 'Chosen by you.' : tz.data.source === 'environment' ? 'From the server’s TZ setting.' : 'Automatic: the server machine’s own zone.'}>
+                <input className="input mono" list="settings-zone-list" style={{ width: 240 }} value={zoneText ?? tz.data.zone} onChange={(e) => setZoneText(e.target.value)} />
+                <datalist id="settings-zone-list">{(Intl as unknown as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf?.('timeZone')?.map((z) => <option key={z} value={z} />)}</datalist>
+              </Field>
+              <Btn kind="primary" disabled={zoneText === null || zoneText === tz.data.zone} onClick={() => setZone((zoneText ?? '').trim() || null)}>Save</Btn>
+              {deviceZone !== tz.data.zone && <Btn onClick={() => setZone(deviceZone)}>Use this device’s: {deviceZone}</Btn>}
+              {tz.data.source === 'setting' && <Btn onClick={() => setZone(null)}>Back to automatic</Btn>}
+            </div>
+            <Toggle checked={applyAll} onChange={setApplyAll} label={<span>Move every channel's schedule into this zone <span className="dim small">time slots keep their clock times (3:30 PM stays 3:30 PM) and schedules are re-planned</span></span>} />
+            {tz.data.channels_elsewhere.length > 0 && <p className="small" style={{ color: 'var(--warn)' }}>{tz.data.channels_elsewhere.map((c) => `${c.name} (${c.zone})`).join(', ')} {tz.data.channels_elsewhere.length === 1 ? 'is' : 'are'} in another zone.</p>}
+          </>
+        )}
+      </Card>
+
+      <Card className="stack">
         <h2>Watching and alerts</h2>
         {!monitor.data ? <Spinner /> : (
           <>
@@ -125,7 +156,14 @@ export function Settings() {
         <h2>Access token</h2>
         <p className="small dim">Optional. With a token on, every app, TV and browser must present it; with it off, anyone on your network can use and change this server.</p>
         {!sec.data ? <Spinner /> : sec.data.locked ? (
-          <p className="small">The token was set with <span className="mono">--token</span> when the server started, so it is managed there. Restart without it to manage it here.</p>
+          <>
+            <p className="small">The token was set with <span className="mono">--token</span> when the server started, so it is managed there. Restart without it to manage it here.</p>
+            <Toggle
+              checked={!!sec.data.open_viewing}
+              onChange={(v) => attempt(async () => { await api.put('/security', { open_viewing: v }); sec.reload(); }, v ? 'Anyone can watch without the token' : 'Watching needs the token again')}
+              label={<span>Let anyone tune in without the token <span className="dim small">changing anything still needs it</span></span>}
+            />
+          </>
         ) : (
           <>
             <Toggle
@@ -149,6 +187,11 @@ export function Settings() {
                 </div>
               </>
             )}
+            <Toggle
+              checked={!!sec.data.open_viewing}
+              onChange={(v) => attempt(async () => { await api.put('/security', { open_viewing: v }); sec.reload(); }, v ? 'Anyone can watch without the token' : 'Watching needs the token again')}
+              label={<span>Let anyone tune in without the token <span className="dim small">streams, the playlist and the web player stay open; changing anything still needs the token</span></span>}
+            />
             {sec.data.enabled && net && !net.tls.enabled && <p className="small" style={{ color: 'var(--warn)' }}>HTTPS is off, so the token crosses your network unencrypted.</p>}
           </>
         )}

@@ -12,6 +12,18 @@ struct HomeView: View {
                 if let system = model.system, system.ffmpeg == nil {
                     FFmpegBanner()
                 }
+                if let tz = model.timezone, tz.source != "setting", tz.zone != TimeZone.current.identifier, !model.timezoneNudgeDismissed {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Is this your time zone?", systemImage: "clock.badge.questionmark").font(.headline)
+                        Text("The station is on \(tz.zone), but this Mac is in \(TimeZone.current.identifier). Schedules and the guide follow the station's zone, so programmes could air at the wrong hour.")
+                            .foregroundStyle(.secondary)
+                        HStack {
+                            Button("Use \(TimeZone.current.identifier) for everything") { Task { await model.setTimezone(TimeZone.current.identifier, applyToChannels: true) } }.glassButton(prominent: true)
+                            Button("It's right as it is") { model.dismissTimezoneNudge() }.glassButton()
+                        }
+                    }
+                    .padding(16).frame(maxWidth: .infinity, alignment: .leading).glassCard()
+                }
                 ForEach(model.monitor?.alerts.filter { $0.id != "system:ffmpeg" } ?? []) { alert in
                     VStack(alignment: .leading, spacing: 4) {
                         Label(alert.title, systemImage: alert.isError ? "exclamationmark.octagon.fill" : "exclamationmark.triangle.fill")

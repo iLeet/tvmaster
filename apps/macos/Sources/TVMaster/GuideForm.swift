@@ -58,6 +58,11 @@ struct GuideForm: View {
 
     private var presets: some View {
         Section("Start from a look") {
+            Button("Reset the look to the original", role: .destructive) {
+                var fresh = GuideSettings()
+                fresh.title = gs.title; fresh.ticker = gs.ticker; fresh.channels = gs.channels; fresh.musicLibraryIds = gs.musicLibraryIds
+                gs = fresh
+            }.glassButton()
             Text("One click sets the colours and style together; everything below still works afterwards.").font(.caption).foregroundStyle(.secondary)
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8)], spacing: 8) {
                 ForEach(GuideSettings.presets) { p in

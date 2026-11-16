@@ -45,7 +45,7 @@ pub async fn preview(State(s): State<AppState>, Json(body): Json<Body>) -> ApiRe
         };
         let data = {
             let db = s.db();
-            let tz = crate::channels::system_timezone();
+            let tz = crate::station::effective_timezone(&db);
             plan::build_guide_with(&db, name, &tz, &body.guide, plan::now_ms())?
         };
         let look = match &s.ffmpeg {

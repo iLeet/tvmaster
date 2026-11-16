@@ -216,7 +216,7 @@ pub async fn system(State(s): State<AppState>) -> Json<Value> {
         "version": env!("CARGO_PKG_VERSION"),
         "os": std::env::consts::OS,
         "arch": std::env::consts::ARCH,
-        "timezone": crate::channels::system_timezone(),
+        "timezone": crate::station::effective_timezone(&s.db()),
         "ffmpeg": ffmpeg,
         "on_air": s.playout.as_ref().map(|p| p.running()).unwrap_or_default(),
         "auth_required": s.token().is_some(),

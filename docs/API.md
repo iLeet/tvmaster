@@ -16,11 +16,22 @@ By default the server is open on the network. The access token is optional and c
 | POST | `/api/v1/auth/login` | `{"token": "…"}`: sets the cookie. Wrong tokens get 401 after a short delay. |
 | POST | `/api/v1/auth/logout` | Clears the cookie. |
 | GET | `/api/v1/security` | `{enabled, locked, token}`. `locked` means the token was given on the command line (`--token`, `--token-file`), so it cannot be changed here. Needs the token itself when one is on. |
-| PUT | `/api/v1/security` | `{"enabled": true}` makes a random token, `{"enabled": true, "token": "…"}` sets yours, `{"enabled": true, "rotate": true}` replaces it, `{"enabled": false}` switches it off. Returns the new state and sets (or clears) the caller's cookie. 409 when locked, 400 for a token that is not 8-128 characters of `A-Za-z0-9-_.~`. The choice is kept in the database across restarts. `tvmaster serve --initial-token-file F` starts with the token in `F` the first time only (what the packages do), after which the saved choice wins. |
+| PUT | `/api/v1/security` | `{"open_viewing": true}` lets anyone **watch** without the token while changing anything still needs it: with it on, `GET` of `/stream/*`, `/iptv/*`, the tuner pages (`/discover.json`, `/lineup.json`, `/device.xml`), `/api/v1/channels`, `/api/v1/tvs*` and `/api/v1/ws` need no token, and the playlist hands out links with no token in them. It can be changed even when the token itself is fixed with `--token`. `{"enabled": true}` makes a random token, `{"enabled": true, "token": "…"}` sets yours, `{"enabled": true, "rotate": true}` replaces it, `{"enabled": false}` switches it off. Returns the new state and sets (or clears) the caller's cookie. 409 when locked, 400 for a token that is not 8-128 characters of `A-Za-z0-9-_.~`. The choice is kept in the database across restarts. `tvmaster serve --initial-token-file F` starts with the token in `F` the first time only (what the packages do), after which the saved choice wins. |
 
 Tokens are 8-128 characters of letters, digits, `-`, `_`, `.`, `~`. Use HTTPS (a reverse proxy, or Tailscale) before exposing the server beyond your home network.
 
 Errors are `{"error": "message"}` with a suitable status code.
+
+### Time zone, resets and stream controls
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/api/v1/timezone` | `{zone, source, setting, environment, machine, channels_elsewhere}`. `zone` is what new schedules use: the one you chose (`source: "setting"`), else the server's `TZ` environment variable, else the machine's own zone. `channels_elsewhere` lists programming channels whose schedule is in a different zone. |
+| PUT | `/api/v1/timezone` | `{"zone": "America/Toronto", "apply_to_channels": true}`. `zone: null` goes back to automatic. With `apply_to_channels` every channel's schedule moves into the zone (time slots keep their clock times), schedules are re-planned and streams restarted. 400 for a name that is not a zone. |
+| POST | `/api/v1/channels/{id}/reset` | `{"what": "schedule"}` re-plans from now; `{"what": "progress"}` makes every show start again at its first episode, then re-plans. |
+| POST | `/api/v1/channels/{id}/stream` | `{"action": "start" | "stop" | "restart"}`: put the channel's stream on or off air. Returns `{on_air}`. |
+
+The admin UIs compare the station's zone with the device's and offer to use the device's, since a server in a container is usually on UTC.
 
 ### Pictures
 

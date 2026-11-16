@@ -216,6 +216,16 @@ for _ in $(seq 1 40); do curl -s "http://127.0.0.1:$HP2/api/v1/health" >/dev/nul
 [[ "$(curl -s -o /dev/null -w '%{http_code}' "$H2/api/v1/channels")" == 200 ]] && ok "and a token switched off stays off after a restart (the seed is used once)" || bad "seed token came back"
 kill -INT "$PID2"; wait "$PID2" 2>/dev/null
 
+# the station's time zone is a setting, and watching can be open while managing needs the token
+[[ "$(api -XPUT "$H/api/v1/timezone" -d '{"zone":"America/Toronto","apply_to_channels":true}' | json "d['zone']")" == America/Toronto ]] && ok "the station time zone can be set" || bad "set time zone"
+[[ "$(api "$H/api/v1/channels/retro" | json "d['lineup']['timezone']")" == America/Toronto ]] && ok "and every channel's schedule follows it" || bad "channel time zone"
+api -XPUT "$H/api/v1/timezone" -d '{"zone":null}' >/dev/null
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -XPOST "${auth[@]}" -H 'content-type: application/json' -d '{"what":"progress"}' "$H/api/v1/channels/retro/reset")" == 200 ]] && ok "a channel can start every show from episode 1" || bad "reset progress"
+api -XPUT "$H/api/v1/security" -d '{"open_viewing":true}' >/dev/null
+[[ "$(curl -s -o /dev/null -w '%{http_code}' "$H/api/v1/channels")" == 200 && "$(curl -s -o /dev/null -w '%{http_code}' "$H/iptv/playlist.m3u")" == 200 ]] && ok "with watching open, the channel list and playlist need no token" || bad "open viewing"
+[[ "$(curl -s -o /dev/null -w '%{http_code}' "$H/api/v1/libraries")" == 401 && "$(curl -s -o /dev/null -w '%{http_code}' -XPOST -H 'content-type: application/json' -d '{"id":"x","number":99,"name":"X"}' "$H/api/v1/channels")" == 401 ]] && ok "but managing still needs it" || bad "managing was left open"
+api -XPUT "$H/api/v1/security" -d '{"open_viewing":false}' >/dev/null
+
 # docker stop and systemd send SIGTERM: it must stop cleanly, like Ctrl-C does
 "$BIN" serve --bind "127.0.0.1:$HP2" --data-dir "$W/data3" >"$W/server4.log" 2>&1 &
 PID2=$!

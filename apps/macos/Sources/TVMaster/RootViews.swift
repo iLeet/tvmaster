@@ -48,6 +48,7 @@ struct ConnectView: View {
                 TextField("Server address", text: $model.serverText, prompt: Text("http://127.0.0.1:8787"))
                     .textFieldStyle(.roundedBorder).onSubmit { Task { await model.connect() } }
                 Toggle("Start a server on this Mac if none is running", isOn: $model.startLocalServer)
+                servers
                 HStack {
                     Spacer()
                     Button("Connect") { Task { await model.connect() } }.glassButton(prominent: true).keyboardShortcut(.defaultAction)
@@ -64,6 +65,43 @@ struct ConnectView: View {
             }
         }
         .padding(26).frame(width: 440).glassCard(cornerRadius: 28)
+    }
+}
+
+extension ConnectView {
+    /// TVMaster servers found on the network, one click to use.
+    @ViewBuilder var servers: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("On your network").font(.caption.weight(.semibold)).foregroundStyle(.secondary).tracking(1)
+                if model.scanning { ProgressView().controlSize(.small) }
+                Spacer()
+                Button(model.scanning ? "Looking…" : "Look again") { model.findServers() }.buttonStyle(.link).disabled(model.scanning)
+            }
+            if model.discovered.isEmpty && !model.scanning {
+                Text("No TVMaster server found. Servers on the same network as this Mac appear here; otherwise type the address above.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            ForEach(model.discovered) { s in
+                Button { Task { await model.use(s) } } label: {
+                    HStack {
+                        Image(systemName: "server.rack").foregroundStyle(.tint)
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(s.title).fontWeight(.semibold)
+                            Text("\(s.host)\(s.version.map { " · TVMaster \($0)" } ?? "")").font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text("Connect").font(.caption.bold()).foregroundStyle(.tint)
+                    }
+                    .padding(10).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
+            }
+            if let url = model.serverURL, !(url.host == "127.0.0.1" || url.host == "localhost") {
+                Button("Open \(url.host ?? "it") in the web admin instead") { NSWorkspace.shared.open(url.appendingPathComponent("admin/")) }.buttonStyle(.link).font(.caption)
+            }
+        }
+        .onAppear { if model.discovered.isEmpty && !model.scanning { model.findServers() } }
     }
 }
 

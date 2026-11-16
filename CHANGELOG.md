@@ -7,7 +7,10 @@ The first stable release.
 - **Guide channel:** many more options. Smooth modern lettering at 1280x720 next to the retro pixel look, rounded or square cells, text size, a picture or striped or solid background, a minimal heading, a ticker at the top or bottom, times on programmes, six more colour themes and a custom background colour, one-click looks, a live video window (one channel or flipping through several), and a live preview in the web admin and the Mac app.
 - **Upload videos to the server** (bumpers, commercials, shows, music) from the web admin or the Mac app, with progress, into a library folder, streamed to disk and added to the schedule at once. Make the library's folder from the app too, so a remote server needs no shell access.
 - **Docker:** a real image and compose file with FFmpeg, a non-root user that matches yours, a first-run access token, health checks and clean shutdown; see `docs/DOCKER.md`.
-- **Optional access token,** switched on, off or replaced while the server runs.
+- **Optional access token,** switched on, off or replaced while the server runs, with a separate choice to let anyone tune in without it (watching open, managing protected).
+- **Time zone is a setting** with automatic detection: the server honours `TZ`, the admin UIs notice when the device is in another zone and offer one click to move the whole station (schedules keep their clock times). This fixes schedules running hours off on a server in a container.
+- **Station controls:** restart, stop or start a channel's stream, re-plan its schedule, start every show from episode 1, and reset picture/sound or the guide's look to defaults; the screen shown in gaps and when a show runs out (colour bars and tone included) is on the channel's Programming tab.
+- **Servers are found on the network:** the Mac app scans for TVMaster servers and connects with one click.
 - **Picture uploads** for off-air screens, channel logos and guide backgrounds.
 - **Smart TV player** with remote-control keys; IPTV and tuner routes documented.
 - **Watched folders** and health alerts, with webhooks.

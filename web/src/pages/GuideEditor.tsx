@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { GUIDE_PRESETS, GUIDE_THEMES, PIP_PLACEMENTS, cleanColor, toggleId } from '../guide';
+import { emptyGuide, GUIDE_PRESETS, GUIDE_THEMES, PIP_PLACEMENTS, cleanColor, toggleId } from '../guide';
 import { PictureField } from '../PictureField';
 import type { ChannelView, GuideConfig, Library } from '../types';
-import { Card, Chips, Field, Segmented, Toggle } from '../ui';
+import { Card, Chips, ConfirmBtn, Field, Segmented, Toggle } from '../ui';
 
 /** A picture of the guide as it would look with these settings, redrawn a moment after each change. */
 function useGuidePreview(id: string, name: string, guide: GuideConfig) {
@@ -88,6 +88,7 @@ export function GuideEditor({
       <Card className="stack">
         <h2>Start from a look</h2>
         <p className="small dim">One click sets the colours and style together; everything below still works afterwards.</p>
+        <div><ConfirmBtn small label="Reset the look to the original" confirm="Colours, style, layout, heading and the video window go back to the original retro guide. Your heading text, ticker lines, channel list and music are kept." onConfirm={() => onChange({ ...emptyGuide(), title: g.title, ticker: g.ticker, channels: g.channels, music_library_ids: g.music_library_ids })} /></div>
         <div className="row wrap" style={{ gap: 10 }}>
           {GUIDE_PRESETS.map((p) => (
             <button key={p.id} type="button" className="btn" title={p.help} onClick={() => onChange(p.apply(g))} style={{ display: 'grid', gap: 2, textAlign: 'left', padding: '8px 14px' }}>

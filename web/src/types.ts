@@ -307,7 +307,19 @@ export interface MonitorState {
   curl: boolean;
 }
 
+export interface TimezoneState {
+  /** The zone new schedules are made in. */
+  zone: string;
+  source: 'setting' | 'environment' | 'machine';
+  setting: string | null;
+  environment: string | null;
+  machine: string | null;
+  channels_elsewhere: { id: string; name: string; zone: string }[];
+}
+
 export interface SecurityStatus {
+  /** Anyone may watch (streams, playlists, the player) without the token. */
+  open_viewing?: boolean;
   enabled: boolean;
   /** Set with --token on the command line, so it cannot be changed here. */
   locked: boolean;
