@@ -48,6 +48,7 @@ const RUN_OUT: { value: RunOut; label: string; help: string }[] = [
   { value: 'keep_going', label: 'Keep going', help: 'After the last episode, wrap to the first and carry on.' },
   { value: 'next_in_rotation', label: 'Next in rotation', help: 'Rotations hand over to the next show at each finale.' },
   { value: 'chaos_fill', label: 'Chaos fill', help: 'When a show is finished, air random content in its slot.' },
+  { value: 'off_air', label: 'Test screen', help: 'Each episode airs once. When a show has run out its slot shows the channel’s off-air screen (colour bars and a tone, if you chose that under “When nothing is scheduled”).' },
   { value: 'hybrid', label: 'Hybrid', help: 'Chaos fill, and unscheduled time airs chaos too.' },
 ];
 

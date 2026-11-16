@@ -167,7 +167,7 @@ export interface GuideConfig {
 }
 
 export type Strategy = 'sequential' | 'shuffle' | 'chaos' | 'block_grid';
-export type RunOut = 'keep_going' | 'next_in_rotation' | 'chaos_fill' | 'hybrid';
+export type RunOut = 'keep_going' | 'next_in_rotation' | 'chaos_fill' | 'hybrid' | 'off_air';
 
 export interface Channel {
   id: string;

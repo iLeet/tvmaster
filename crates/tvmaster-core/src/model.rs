@@ -29,6 +29,10 @@ pub enum RunOutPolicy {
     ChaosFill,
     /// Sequential where possible, chaos for gaps and overflow.
     Hybrid,
+    /// Each episode airs once; when a show has run out its slot shows the
+    /// channel's off-air screen (the test pattern, if that is what you chose)
+    /// instead of repeating or filling with something else.
+    OffAir,
 }
 
 impl Strategy {
@@ -59,6 +63,7 @@ impl RunOutPolicy {
             RunOutPolicy::NextInRotation => "next_in_rotation",
             RunOutPolicy::ChaosFill => "chaos_fill",
             RunOutPolicy::Hybrid => "hybrid",
+            RunOutPolicy::OffAir => "off_air",
         }
     }
 
@@ -68,6 +73,7 @@ impl RunOutPolicy {
             "next_in_rotation" => RunOutPolicy::NextInRotation,
             "chaos_fill" => RunOutPolicy::ChaosFill,
             "hybrid" => RunOutPolicy::Hybrid,
+            "off_air" => RunOutPolicy::OffAir,
             _ => return None,
         })
     }

@@ -100,3 +100,8 @@ Saving a channel with different options restarts that channel's encode so the ne
 ## What is verified
 
 Unit tests cover track choice (languages, commentary, defaults, every subtitle mode, picture versus text), language normalisation, the FFmpeg arguments and filter graphs, sidecar file discovery and the sign-off schedule. Tests against real FFmpeg and real multi-track files measure the result on the stream: the chosen audio's pitch (Japanese 880 Hz versus English 440 Hz versus a commentary track), brightness of burned-in subtitles (embedded and beside-the-video), the logo and title card appearing and the card disappearing, a black-and-white picture having no colour, 480p/24 fps output, the sign-off bars and tone, and the fall-back when a subtitle filter is missing. Not tested: picture subtitles (no way to build a bitmap subtitle track here; the FFmpeg arguments are unit tested), hardware encoders with these filters, the clock (no drawtext on the macOS build used).
+
+## When a show runs out
+
+`run_out` decides what a time slot does once its show has aired every episode: `keep_going` (wrap to the first), `next_in_rotation`, `chaos_fill` (random content), `hybrid`, or **`off_air` ("Test screen")**. With `off_air` each episode airs once; when a show has run out, and for time outside your time slots (unless you set a `lineup.fill` yourself), the channel shows its off-air screen: the colour bars and tone, snow, black, a station card or your picture, whichever you chose under "When nothing is scheduled". "Start every show from episode 1" (Controls) makes the shows air again.
+

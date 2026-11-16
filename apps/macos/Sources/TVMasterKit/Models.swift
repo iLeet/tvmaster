@@ -110,6 +110,7 @@ public enum RunOut: String, Codable, Sendable, CaseIterable, Identifiable {
     case nextInRotation = "next_in_rotation"
     case chaosFill = "chaos_fill"
     case hybrid
+    case offAir = "off_air"
     public var id: String { rawValue }
     public var label: String {
         switch self {
@@ -117,6 +118,7 @@ public enum RunOut: String, Codable, Sendable, CaseIterable, Identifiable {
         case .nextInRotation: "Next in rotation"
         case .chaosFill: "Chaos fill"
         case .hybrid: "Hybrid"
+        case .offAir: "Test screen"
         }
     }
 }

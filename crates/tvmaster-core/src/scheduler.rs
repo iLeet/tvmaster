@@ -273,6 +273,13 @@ impl Gen<'_> {
         if let Some(p) = self.pick(src, scope, t_ms) {
             return Some(p);
         }
+        if self.cfg.run_out == RunOutPolicy::OffAir {
+            // Only a fill you set yourself; otherwise the slot is left to the off-air screen.
+            if let Some(f) = self.cfg.lineup.fill.as_ref().filter(|f| *f != src) {
+                return self.pick(f, None, t_ms);
+            }
+            return None;
+        }
         let chaos_first = matches!(
             self.cfg.run_out,
             RunOutPolicy::ChaosFill | RunOutPolicy::Hybrid
@@ -377,13 +384,20 @@ pub fn generate(
         };
 
         let mut pick = None;
-        if scope.is_none() && cfg.chaos > 0 {
+        // "Test screen" policy: time outside your time slots is the off-air screen, not more programmes.
+        let leave_empty = active.is_none()
+            && cfg.run_out == RunOutPolicy::OffAir
+            && cfg.lineup.fill.is_none()
+            && !cfg.lineup.blocks.is_empty();
+        if leave_empty {
+            // nothing to pick: falls through to the filler below
+        } else if scope.is_none() && cfg.chaos > 0 {
             let mut s = cfg.seed ^ (t as u64).wrapping_mul(GOLDEN) ^ 0xC4A0_5000;
             if splitmix64(&mut s) % 100 < cfg.chaos as u64 {
                 pick = gen.pick(&Source::Chaos, None, t);
             }
         }
-        if pick.is_none() {
+        if pick.is_none() && !leave_empty {
             pick = gen.pick_with_fallback(src, &fill, scope.as_deref(), t);
         }
 
@@ -754,6 +768,71 @@ mod tests {
         assert!(got[2..].iter().any(|id| *id >= 101), "{got:?}");
         assert_ne!(&got[..4], &[1, 2, 1, 2], "{got:?}");
         assert!(got.len() > 4);
+    }
+
+    #[test]
+    fn the_test_screen_policy_leaves_gaps_and_finished_shows_to_the_off_air_screen() {
+        // Alpha has 2 episodes and is scheduled 20:00-23:00 (about six slots' worth); Beta exists
+        // but is not in the lineup. Outside the slot, and once Alpha has run out, nothing else airs.
+        let l = lineup(
+            r#"{"blocks":[{"start":"20:00","end":"23:00","source":{"type":"show","show":"Alpha"}}]}"#,
+        );
+        let mut s = Setup::new(catalog(&[("Alpha", 2), ("Beta", 20)]), l);
+        s.run_out = RunOutPolicy::OffAir;
+        let items = s.gen(
+            &mut Cursors::new(),
+            at("UTC", "2026-11-16 18:00"),
+            at("UTC", "2026-11-17 01:00"),
+        );
+        let aired: Vec<i64> = shows(&items).iter().filter_map(|i| i.media_id).collect();
+        assert_eq!(
+            aired.len(),
+            2,
+            "each Alpha episode once, nothing else: {aired:?}"
+        );
+        assert!(aired.iter().all(|id| *id < 100), "no Beta, no chaos");
+        // everything else is filler with no media: the off-air screen
+        assert!(items
+            .iter()
+            .filter(|i| i.kind != ItemKind::Show)
+            .all(|i| i.media_id.is_none()));
+        let covered: i64 = items.iter().map(|i| i.end_ms - i.start_ms).sum();
+        assert!(
+            covered >= at("UTC", "2026-11-17 01:00") - at("UTC", "2026-11-16 18:00"),
+            "the whole time is covered"
+        );
+        // The same channel with the default policy fills the gaps with programmes.
+        let mut d = Setup::new(
+            catalog(&[("Alpha", 2), ("Beta", 20)]),
+            lineup(
+                r#"{"blocks":[{"start":"20:00","end":"23:00","source":{"type":"show","show":"Alpha"}}]}"#,
+            ),
+        );
+        d.run_out = RunOutPolicy::KeepGoing;
+        let kept = d.gen(
+            &mut Cursors::new(),
+            at("UTC", "2026-11-16 18:00"),
+            at("UTC", "2026-11-17 01:00"),
+        );
+        assert!(shows(&kept).len() > aired.len());
+    }
+
+    #[test]
+    fn a_fill_you_set_yourself_still_airs_under_the_test_screen_policy() {
+        let l = lineup(
+            r#"{"blocks":[{"start":"20:00","end":"21:00","source":{"type":"show","show":"Alpha"}}],"fill":{"type":"show","show":"Beta"}}"#,
+        );
+        let mut s = Setup::new(catalog(&[("Alpha", 20), ("Beta", 20)]), l);
+        s.run_out = RunOutPolicy::OffAir;
+        let items = s.gen(
+            &mut Cursors::new(),
+            at("UTC", "2026-11-16 18:00"),
+            at("UTC", "2026-11-16 23:00"),
+        );
+        assert!(
+            shows(&items).iter().any(|i| i.media_id.unwrap() >= 100),
+            "Beta fills the gaps you asked it to"
+        );
     }
 
     #[test]

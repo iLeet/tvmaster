@@ -10,6 +10,7 @@ The first stable release.
 - **Optional access token,** switched on, off or replaced while the server runs, with a separate choice to let anyone tune in without it (watching open, managing protected).
 - **Time zone is a setting** with automatic detection: the server honours `TZ`, the admin UIs notice when the device is in another zone and offer one click to move the whole station (schedules keep their clock times). This fixes schedules running hours off on a server in a container.
 - **Station controls:** restart, stop or start a channel's stream, re-plan its schedule, start every show from episode 1, and reset picture/sound or the guide's look to defaults; the screen shown in gaps and when a show runs out (colour bars and tone included) is on the channel's Programming tab.
+- **"Test screen" when a show runs out:** a new run-out choice. Each episode airs once, then the slot (and any time outside your time slots) shows the channel's off-air screen, colour bars and tone included.
 - **Servers are found on the network:** the Mac app scans for TVMaster servers and connects with one click.
 - **Picture uploads** for off-air screens, channel logos and guide backgrounds.
 - **Smart TV player** with remote-control keys; IPTV and tuner routes documented.
