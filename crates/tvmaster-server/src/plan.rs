@@ -93,7 +93,11 @@ pub fn programs(
             // before them, as a printed guide would show it.
             // Off-air time (a finished show, an empty slot, sign-off) is not part of the show before it.
             (_, _, _) if is_off_air(&it) => {}
-            (is_show, _, Some(last)) if last.end_ms == it.start_ms => {
+            // Filler belongs to the show only when it carries the same slot label (the padding does; a gap does not).
+            (is_show, _, Some(last))
+                if last.end_ms == it.start_ms
+                    && (it.kind != ItemKind::Filler || it.label == last.label) =>
+            {
                 last.end_ms = it.end_ms;
                 if is_show {
                     last.runtime_end_ms = it.end_ms;
@@ -513,7 +517,14 @@ mod tests {
                 // padding to the half hour stays with the show...
                 item(ItemKind::Filler, 23 * 60_000, 30 * 60_000, Some("Mickey")),
                 // ...but the time after it, spent on the off-air screen, does not
-                item(ItemKind::Filler, 30 * 60_000, h, Some(OFF_AIR_LABEL)),
+                item(
+                    ItemKind::Filler,
+                    30 * 60_000,
+                    45 * 60_000,
+                    Some(OFF_AIR_LABEL),
+                ),
+                // gaps planned by an earlier version carried no label at all
+                item(ItemKind::Filler, 45 * 60_000, h, None),
             ],
         )
         .unwrap();
