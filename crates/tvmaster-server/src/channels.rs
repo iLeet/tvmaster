@@ -98,6 +98,8 @@ pub struct ChannelInput {
     kind: Option<ChannelKind>,
     group: Option<String>,
     guide: Option<GuideConfig>,
+    /// Audio tracks, subtitles, picture and on-screen graphics. Replaces the old settings as a whole.
+    options: Option<tvmaster_core::ChannelOptions>,
 }
 
 fn valid_id(id: &str) -> bool {
@@ -119,6 +121,13 @@ fn programming_differs(a: &Channel, b: &Channel) -> bool {
         || a.seed != b.seed
         || a.library_ids != b.library_ids
         || a.lineup != b.lineup
+}
+
+/// Does a running channel have to be restarted to pick up this change?
+fn restart_needed(old: &Channel, new: &Channel) -> bool {
+    old.options != new.options
+        || old.lineup.signoff != new.lineup.signoff
+        || (new.options.overlay.bug.enabled && (old.name != new.name || old.number != new.number))
 }
 
 /// The libraries named in a lineup's `ads` must exist and be of the right kind.
@@ -202,6 +211,10 @@ pub async fn upsert(
     if let Some(l) = &body.lineup {
         l.validate().map_err(bad_lineup)?;
         check_ad_libraries(&s.db(), l)?;
+    }
+    if let Some(o) = &body.options {
+        o.validate()
+            .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, format!("invalid options: {e}")))?;
     }
     if let Some(g) = &body.guide {
         g.validate()
@@ -299,6 +312,10 @@ pub async fn upsert(
                 .guide
                 .or(existing.as_ref().map(|e| e.guide.clone()))
                 .unwrap_or_default(),
+            options: body
+                .options
+                .or(existing.as_ref().map(|e| e.options.clone()))
+                .unwrap_or_default(),
         };
         tvmaster_db::upsert_channel(&db, &channel)?;
         (channel, existing)
@@ -310,6 +327,16 @@ pub async fn upsert(
         .unwrap_or(true);
     if changed {
         apply_programming_change(&s, &channel, existing.is_some())?;
+    }
+    // A running channel took its picture and sound settings when it went on air:
+    // take it off so the next viewer (or the always-on start below) uses the new ones.
+    if existing
+        .as_ref()
+        .is_some_and(|e| restart_needed(e, &channel))
+    {
+        if let Some(p) = &s.playout {
+            p.stop(&channel.id);
+        }
     }
     if channel.always_on {
         s.start_always_on();
@@ -351,8 +378,17 @@ pub async fn put_lineup(
     let lineup = with_timezone(lineup);
     let mut channel = load(&s, &id)?;
     let changed = channel.lineup != lineup;
+    let signoff_changed = channel.lineup.signoff != lineup.signoff;
     channel.lineup = lineup;
     tvmaster_db::upsert_channel(&s.db(), &channel)?;
+    if signoff_changed {
+        if let Some(p) = &s.playout {
+            p.stop(&channel.id);
+        }
+        if channel.always_on {
+            s.start_always_on();
+        }
+    }
     if changed {
         apply_programming_change(&s, &channel, true)?;
     }
@@ -1029,6 +1065,144 @@ mod tests {
         assert_eq!(
             call(&app, "GET", "/api/v1/channels/a", "").await.0,
             StatusCode::NOT_FOUND
+        );
+    }
+
+    #[tokio::test]
+    async fn picture_and_sound_options_are_saved_validated_and_kept_across_edits() {
+        let (app, lib) = app_with_media();
+        let create = format!(
+            r#"{{"id":"anime","number":7,"name":"Anime","library_ids":[{lib}],"options":{{
+                "audio":{{"languages":["jpn","eng"],"loudness":"broadcast"}},
+                "subtitles":{{"mode":"foreign","languages":["eng"],"style":"box"}},
+                "video":{{"aspect":"fill","quality":"1080","look":"crt"}},
+                "overlay":{{"bug":{{"enabled":true,"text":"ANIME 7"}}}},
+                "shows":{{"Alpha":{{"audio_languages":["eng"],"subtitles":"off"}}}}}}}}"#
+        );
+        let (st, c) = call(&app, "POST", "/api/v1/channels", &create).await;
+        assert_eq!(st, StatusCode::CREATED, "{c}");
+        assert_eq!(c["options"]["audio"]["languages"][0], "jpn");
+        assert_eq!(c["options"]["video"]["quality"], "1080");
+
+        // saved
+        let (_, got) = call(&app, "GET", "/api/v1/channels/anime", "").await;
+        assert_eq!(got["options"]["subtitles"]["mode"], "foreign");
+        assert_eq!(got["options"]["shows"]["Alpha"]["subtitles"], "off");
+
+        // an edit that does not mention options keeps them
+        let rename =
+            format!(r#"{{"id":"anime","number":7,"name":"Anime Night","library_ids":[{lib}]}}"#);
+        let (st, c) = call(&app, "POST", "/api/v1/channels", &rename).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(c["options"]["video"]["look"], "crt");
+
+        // nonsense is refused with a reason
+        for bad in [
+            r#""options":{"audio":{"languages":["en;rm -rf /"]}}"#,
+            r#""options":{"video":{"fps":900}}"#,
+            r#""options":{"overlay":{"bug":{"opacity":3}}}"#,
+            r#""options":{"video":{"aspect":"sideways"}}"#,
+        ] {
+            let body = format!(r#"{{"id":"anime","number":7,"name":"Anime",{bad}}}"#);
+            let (st, _) = call(&app, "POST", "/api/v1/channels", &body).await;
+            // out-of-range values are 400 with a reason; an unknown word is refused while parsing (422)
+            assert!(
+                st == StatusCode::BAD_REQUEST || st == StatusCode::UNPROCESSABLE_ENTITY,
+                "{bad}: {st}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn sign_off_hours_are_part_of_the_lineup_and_validated() {
+        let (app, lib) = app_with_media();
+        let ok = format!(
+            r#"{{"id":"night","number":8,"name":"Night","library_ids":[{lib}],"lineup":{{"timezone":"UTC","signoff":{{"from":"02:00","to":"05:00","style":"static"}}}}}}"#
+        );
+        let (st, c) = call(&app, "POST", "/api/v1/channels", &ok).await;
+        assert_eq!(st, StatusCode::CREATED, "{c}");
+        assert_eq!(c["lineup"]["signoff"]["style"], "static");
+        let bad = ok
+            .replace(r#""to":"05:00""#, r#""to":"02:00""#)
+            .replace("night", "night2")
+            .replace("8,", "9,");
+        let (st, _) = call(&app, "POST", "/api/v1/channels", &bad).await;
+        assert_eq!(
+            st,
+            StatusCode::BAD_REQUEST,
+            "a window with no length is refused"
+        );
+    }
+
+    #[tokio::test]
+    async fn shows_report_the_languages_found_in_their_files() {
+        let state = AppState::in_memory();
+        {
+            let db = state.db();
+            let lib = add_library(&db, "/tv", "shows").unwrap();
+            let tracks = tvmaster_core::Tracks {
+                audio: vec![
+                    tvmaster_core::audio_track(1, "jpn", "aac", 2, "", true, false, false),
+                    tvmaster_core::audio_track(2, "eng", "aac", 2, "", false, false, false),
+                ],
+                subs: vec![tvmaster_core::sub_track(
+                    3, "eng", "subrip", "", false, false, false,
+                )],
+                external: vec![tvmaster_core::ExternalSub {
+                    path: "/tv/x.fr.srt".into(),
+                    lang: "fr".into(),
+                    forced: false,
+                    sdh: false,
+                }],
+                ..Default::default()
+            };
+            upsert_media(
+                &db,
+                &NewMedia {
+                    library_id: lib.id,
+                    path: "/tv/x.mkv".into(),
+                    show: Some("Bebop".into()),
+                    duration_ms: 1_200_000,
+                    tracks_json: Some(tracks.to_json()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            upsert_media(
+                &db,
+                &NewMedia {
+                    library_id: lib.id,
+                    path: "/tv/y.mkv".into(),
+                    show: Some("Old Show".into()),
+                    duration_ms: 1_200_000,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        }
+        let app = router(state);
+        let (_, shows) = call(&app, "GET", "/api/v1/shows", "").await;
+        let bebop = shows
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["name"] == "Bebop")
+            .unwrap();
+        assert_eq!(bebop["audio_languages"], serde_json::json!(["eng", "jpn"]));
+        assert_eq!(
+            bebop["subtitle_languages"],
+            serde_json::json!(["eng", "fra"])
+        );
+        assert_eq!(bebop["files_with_tracks"], 1);
+        let old = shows
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["name"] == "Old Show")
+            .unwrap();
+        assert_eq!(
+            old["files_with_tracks"], 0,
+            "a file scanned before tracks were read says so"
         );
     }
 }

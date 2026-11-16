@@ -6,6 +6,9 @@
 //! output appears on every platform. Colours come from a per-channel theme so
 //! each channel looks like its own station.
 
+pub mod overlay;
+pub mod png;
+
 use font8x8::{UnicodeFonts, BASIC_FONTS, LATIN_FONTS};
 
 pub const WIDTH: usize = 640;

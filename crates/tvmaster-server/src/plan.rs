@@ -205,6 +205,22 @@ pub fn build_guide(db: &Connection, guide_id: &str, now_ms: i64) -> Option<Guide
     })
 }
 
+/// "S01E02 - Title" for the on-screen programme card.
+fn episode_label(season: Option<i64>, episode: Option<i64>, title: Option<&str>) -> Option<String> {
+    let code = match (season, episode) {
+        (Some(s), Some(e)) => Some(format!("S{s:02}E{e:02}")),
+        (None, Some(e)) => Some(format!("E{e:02}")),
+        _ => None,
+    };
+    let title = title.map(str::trim).filter(|t| !t.is_empty());
+    match (code, title) {
+        (Some(c), Some(t)) if !t.eq_ignore_ascii_case(&c) => Some(format!("{c} - {t}")),
+        (Some(c), _) => Some(c),
+        (None, Some(t)) => Some(t.to_string()),
+        _ => None,
+    }
+}
+
 impl DbSchedule {
     fn zone_for(&self, db: &Connection, channel: &str) -> Zone {
         tvmaster_db::get_channel(db, channel)
@@ -223,6 +239,9 @@ impl ScheduleSource for DbSchedule {
             .ok()??;
         let it = &row.item;
         let kind = match (it.kind, it.bumper) {
+            (ItemKind::Filler, _) if it.label.as_deref() == Some(tvmaster_core::SIGNOFF_LABEL) => {
+                PlayKind::SignOff
+            }
             (ItemKind::Filler, _) => PlayKind::Slate,
             (ItemKind::Bumper, Some(b)) => PlayKind::Bumper(b),
             _ => PlayKind::Media,
@@ -236,6 +255,13 @@ impl ScheduleSource for DbSchedule {
             subject: row.show,
             start_ms: it.start_ms,
             end_ms: it.end_ms,
+            is_show: it.kind == ItemKind::Show,
+            show: row.show_name.clone(),
+            subtitle: episode_label(row.season, row.episode, row.title.as_deref()),
+            tracks: row
+                .tracks_json
+                .as_deref()
+                .and_then(tvmaster_core::Tracks::from_json),
         })
     }
 

@@ -123,7 +123,36 @@ pub struct Lineup {
     /// Commercial breaks and bumpers. Absent = shows run clean with plain padding.
     #[serde(default)]
     pub ads: Option<AdConfig>,
+    /// Hours the station goes off the air (bars and a tone, or snow).
+    #[serde(default)]
+    pub signoff: Option<SignOff>,
 }
+
+/// What airs while the station is signed off.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SignOffStyle {
+    /// SMPTE colour bars with a steady tone.
+    #[default]
+    Bars,
+    /// Static and hiss.
+    Static,
+    /// The plain station card.
+    Card,
+}
+
+/// Off the air from `from` to `to` every day (local time); a `to` before `from`
+/// runs overnight.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SignOff {
+    pub from: String,
+    pub to: String,
+    #[serde(default)]
+    pub style: SignOffStyle,
+}
+
+/// The label sign-off items carry in the schedule.
+pub const SIGNOFF_LABEL: &str = "Sign-off";
 
 impl Default for Lineup {
     fn default() -> Self {
@@ -136,6 +165,7 @@ impl Default for Lineup {
             fill: None,
             catch_up: CatchUp::Resume,
             ads: None,
+            signoff: None,
         }
     }
 }
@@ -215,6 +245,25 @@ pub(crate) struct Compiled<'a> {
     pub blocks: Vec<CBlock<'a>>,
     pub seasons: Vec<CSeason<'a>>,
     pub events: Vec<CEvent<'a>>,
+    /// Sign-off window as minutes of the local day: (from, to).
+    pub signoff: Option<(u32, u32)>,
+}
+
+impl Compiled<'_> {
+    /// Milliseconds left of the sign-off window at `t_ms`, if it is on.
+    pub fn signoff_left_ms(&self, t_ms: i64) -> Option<i64> {
+        use chrono::Timelike;
+        let (from, to) = self.signoff?;
+        let local = self.zone.local(t_ms);
+        let secs = local.time().num_seconds_from_midnight() as i64;
+        let (from_s, to_s) = (from as i64 * 60, to as i64 * 60);
+        let on = if from_s < to_s {
+            secs >= from_s && secs < to_s
+        } else {
+            secs >= from_s || secs < to_s
+        };
+        on.then(|| (to_s - secs).rem_euclid(86_400) * 1000)
+    }
 }
 
 fn parse_hm(s: &str, allow_24: bool) -> Result<u32, String> {
@@ -346,6 +395,16 @@ impl<'a> Compiled<'a> {
         if let Some(a) = &l.ads {
             a.validate()?;
         }
+        let signoff = match &l.signoff {
+            Some(so) => {
+                let (f, t) = (parse_hm(&so.from, false)?, parse_hm(&so.to, true)?);
+                if f == t % 1440 {
+                    return Err("sign-off must start and end at different times".into());
+                }
+                Some((f, t % 1440))
+            }
+            None => None,
+        };
         let has_blocks = !blocks.is_empty() || seasons.iter().any(|s| !s.blocks.is_empty());
         let grid_ms = l
             .grid_minutes
@@ -357,6 +416,7 @@ impl<'a> Compiled<'a> {
             blocks,
             seasons,
             events,
+            signoff,
         })
     }
 }

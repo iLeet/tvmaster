@@ -2,7 +2,7 @@
 
 Self-hosted retro TV station and IPTV engine. Add your TV collections, and TVMaster runs real-feeling channels: complete chaos or scheduled time slots, retro commercials placed at natural breaks, "Up Next / Later Today" bumpers, a guide channel, and a phone/web remote. Runs headless or with a GUI on Windows, macOS and Linux (x64 and arm64).
 
-**Status:** milestone 11 complete (HTTPS, in-app share links, system test on top of M1-M10). See [docs/PLAN.md](docs/PLAN.md) for the full design and roadmap, and [docs/API.md](docs/API.md) for the API.
+**Status:** milestone 12 complete (audio tracks, subtitles and full TV-style channel options, on top of M1-M11). See [docs/PLAN.md](docs/PLAN.md) for the full design and roadmap, and [docs/API.md](docs/API.md) for the API.
 
 ## What works today
 
@@ -12,6 +12,8 @@ Self-hosted retro TV station and IPTV engine. Add your TV collections, and TVMas
 - Commercials and bumpers: shows are split at natural breaks (chapters or detected black frames), and each break is filled exactly with retro commercials plus "we'll be right back", "back to", "up next", "later today" and station-ID bumpers drawn by TVMaster itself. Filter commercials by year. See [docs/ADS.md](docs/ADS.md).
 - Normalized HLS output (1280x720, H.264/AAC) from mismatched sources, gapless across items, about 0.7 s tune-in.
 - A modern admin UI at `/admin/` (compiled into the binary, works headless from any browser): add libraries with a folder picker, build channels and lineups visually (lay out the week by dragging blocks on a Monday-to-Sunday grid), set up ads and bumpers, design the guide channel, view schedules, manage TVs. Installable as a phone remote app. Glass styling that follows the platform.
+- Multiple audio tracks and subtitles: every channel chooses a language order (Japanese audio for anime, English for sitcoms, per show if you like), skips commentary tracks, and burns subtitles in (from the file or a `.srt` beside it) always, only when the audio is foreign, forced-only, or for the hard of hearing. See [docs/CHANNEL-OPTIONS.md](docs/CHANNEL-OPTIONS.md).
+- TV-style channel options: volume levelling and night mode, 480p/720p/1080p, screen shape, deinterlacing, retro looks (CRT, VHS, film, black and white, sepia), a channel logo, a now-playing card, a clock, and signing off for the night with colour bars and a tone.
 - Optional access token for the whole server.
 - Channel 3, the guide channel: a live Prevue-style scrolling grid of every channel with a clock, a "now on" ticker and background music. Always accurate because it reads the same schedule as everything else.
 - Many TVs can watch different channels at once; one encode per channel is shared by all viewers. Register each TV, and control it from a phone: the remote updates live over a WebSocket (channel, volume, mute, power, and whether the TV's player is connected).

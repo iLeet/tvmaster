@@ -248,6 +248,7 @@ mod tests {
             kind: ChannelKind::Guide,
             group: None,
             guide: Default::default(),
+            options: Default::default(),
         };
         tvmaster_db::upsert_channel(&state.db(), &guide).unwrap();
 

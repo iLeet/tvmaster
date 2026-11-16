@@ -53,6 +53,61 @@ fn clean(s: &str) -> String {
         .join(" ")
 }
 
+const SUB_EXTS: &[&str] = &["srt", "ass", "ssa", "vtt"];
+
+/// Subtitle files that sit next to `video` and belong to it: `Name.srt`,
+/// `Name.en.srt`, `Name.eng.forced.srt`, `Name.English.sdh.srt`. A file that
+/// starts with the video's name (without extension) qualifies; the words after
+/// it say the language and whether it is forced or for the hard of hearing.
+pub fn find_sidecar_subs(video: &Path) -> Vec<tvmaster_core::ExternalSub> {
+    let (Some(dir), Some(stem)) = (video.parent(), video.file_stem().and_then(|s| s.to_str()))
+    else {
+        return Vec::new();
+    };
+    let Ok(read) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut out: Vec<tvmaster_core::ExternalSub> = read
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .filter(|p| {
+            p.extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| SUB_EXTS.contains(&e.to_lowercase().as_str()))
+        })
+        .filter_map(|p| {
+            let name = p.file_stem()?.to_str()?.to_string();
+            let rest = name.strip_prefix(stem)?;
+            // "Name.en" must not match "Name 2.en": the next character has to be a separator or the end.
+            if !rest.is_empty() && !rest.starts_with(['.', '_', '-', ' ']) {
+                return None;
+            }
+            let (mut lang, mut forced, mut sdh) = (String::new(), false, false);
+            for word in rest.split(['.', '_', '-', ' ']).filter(|w| !w.is_empty()) {
+                match word.to_lowercase().as_str() {
+                    "forced" => forced = true,
+                    "sdh" | "cc" | "hi" => sdh = true,
+                    w => {
+                        let n = tvmaster_core::norm_lang(w);
+                        // Only words that normalise to a known three-letter language count.
+                        if lang.is_empty() && n.len() == 3 && (n != w || w.len() == 3) {
+                            lang = n;
+                        }
+                    }
+                }
+            }
+            Some(tvmaster_core::ExternalSub {
+                path: p.to_string_lossy().to_string(),
+                lang,
+                forced,
+                sdh,
+            })
+        })
+        .collect();
+    out.sort_by(|a, b| a.path.cmp(&b.path));
+    out
+}
+
 fn find_with_exts(root: &Path, exts: &[&str]) -> Vec<PathBuf> {
     let mut v: Vec<PathBuf> = WalkDir::new(root)
         .follow_links(true)
@@ -254,5 +309,73 @@ mod tests {
         let n = p("/tv", "/tv/Movie.mp4");
         assert_eq!(n.show, None);
         assert_eq!(n.title, "Movie");
+    }
+
+    #[test]
+    fn sidecar_subtitles_are_found_by_name_and_their_words_are_read() {
+        let d = std::env::temp_dir().join(format!("tvm-sidecar-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        for f in [
+            "Show S01E01.mkv",
+            "Show S01E01.en.srt",
+            "Show S01E01.eng.forced.srt",
+            "Show S01E01.English.sdh.srt",
+            "Show S01E01.srt",
+            "Show S01E011.en.srt",
+            "Show S01E02.en.srt",
+            "Show S01E01.nfo",
+            "Show S01E01.fr.ass",
+        ] {
+            std::fs::write(d.join(f), b"x").unwrap();
+        }
+        let subs = find_sidecar_subs(&d.join("Show S01E01.mkv"));
+        let names: Vec<(String, String, bool, bool)> = subs
+            .iter()
+            .map(|s| {
+                (
+                    Path::new(&s.path)
+                        .file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                        .to_string(),
+                    s.lang.clone(),
+                    s.forced,
+                    s.sdh,
+                )
+            })
+            .collect();
+        assert_eq!(
+            names,
+            vec![
+                (
+                    "Show S01E01.English.sdh.srt".to_string(),
+                    "eng".to_string(),
+                    false,
+                    true
+                ),
+                (
+                    "Show S01E01.en.srt".to_string(),
+                    "eng".to_string(),
+                    false,
+                    false
+                ),
+                (
+                    "Show S01E01.eng.forced.srt".to_string(),
+                    "eng".to_string(),
+                    true,
+                    false
+                ),
+                (
+                    "Show S01E01.fr.ass".to_string(),
+                    "fra".to_string(),
+                    false,
+                    false
+                ),
+                ("Show S01E01.srt".to_string(), String::new(), false, false),
+            ],
+            "other episodes (including E011) and non-subtitle files are ignored"
+        );
+        let _ = std::fs::remove_dir_all(&d);
     }
 }

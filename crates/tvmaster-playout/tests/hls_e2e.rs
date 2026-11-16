@@ -174,6 +174,10 @@ async fn mixed_clips_slate_and_missing_file_become_one_continuous_stream() {
                 subject: Some("Test Show".into()),
                 start_ms: t,
                 end_ms: t + secs * 1000,
+                is_show: false,
+                show: None,
+                subtitle: None,
+                tracks: None,
             });
             t += secs * 1000;
         }
@@ -192,6 +196,10 @@ async fn mixed_clips_slate_and_missing_file_become_one_continuous_stream() {
         always_on: true,
         source: schedule.clone(),
         guide: None,
+        options: Default::default(),
+        number: 0,
+        can_burn_text: false,
+        signoff: Default::default(),
     };
     // A previous run's playlist must never be served after a (re)start.
     let stale_dir = manager.hls_dir("test");

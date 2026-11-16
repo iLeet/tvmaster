@@ -159,6 +159,7 @@ pub async fn system(State(s): State<AppState>) -> Json<Value> {
             "has_videotoolbox": f.has_videotoolbox,
             "has_nvenc": f.has_nvenc,
             "has_drawtext": f.has_drawtext,
+            "has_subtitles": f.has_subtitles,
         })
     });
     Json(json!({

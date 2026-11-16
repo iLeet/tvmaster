@@ -1,7 +1,11 @@
 //! FFmpeg command construction: the per-item encoder and the HLS segmenter.
 //! Kept free of process spawning so the argument lists are unit-testable.
 
+use crate::looks::{
+    audio_chain, clock_filter, look_chain, scale_chain, subtitle_filter, Burn, ItemPlan,
+};
 use std::path::Path;
+use tvmaster_core::VideoOptions;
 use tvmaster_media::Encoder;
 
 /// The normalized output every item is converted to, so mixed sources
@@ -30,6 +34,21 @@ impl Default for OutputProfile {
     }
 }
 
+impl OutputProfile {
+    /// This channel's picture size, frame rate and bitrate.
+    pub fn for_channel(&self, v: &VideoOptions) -> OutputProfile {
+        let (width, height, kbps) = v.quality.size();
+        OutputProfile {
+            width,
+            height,
+            fps: v.fps.unwrap_or(self.fps),
+            video_kbps: v.kbps.unwrap_or(kbps),
+            audio_kbps: self.audio_kbps,
+            gop_secs: self.gop_secs,
+        }
+    }
+}
+
 /// One item (or the remaining part of one) to encode.
 #[derive(Debug, Clone)]
 pub struct ItemJob<'a> {
@@ -41,6 +60,8 @@ pub struct ItemJob<'a> {
     /// Output timestamp offset so consecutive items form one continuous stream.
     pub ts_offset_ms: u64,
     pub has_audio: bool,
+    /// Which tracks, subtitles, look and graphics this item gets.
+    pub plan: ItemPlan,
 }
 
 fn secs(ms: u64) -> String {
@@ -155,21 +176,85 @@ pub fn item_args(job: &ItemJob, p: &OutputProfile, enc: Encoder) -> Vec<String> 
             "anullsrc=r=48000:cl=stereo".into(),
         ]);
     }
+    // Extra inputs after the media (and the silent track, when there is one).
+    let first_overlay_input = if job.has_audio { 1 } else { 2 };
+    let mut overlay_inputs: Vec<(usize, &crate::looks::OverlayInput)> = Vec::new();
+    for (next_input, o) in (first_overlay_input..).zip(job.plan.overlays.iter()) {
+        a.extend([
+            "-loop".into(),
+            "1".into(),
+            "-framerate".into(),
+            p.fps.to_string(),
+            "-i".into(),
+            o.png.to_string_lossy().to_string(),
+        ]);
+        overlay_inputs.push((next_input, o));
+    }
     a.extend(["-t".into(), secs(job.duration_ms)]);
-    a.extend(["-map".into(), "0:v:0".into()]);
+
+    // The picture: image subtitles go on at the source's own size, then the
+    // frame is shaped, then text subtitles, the look and the clock, then the
+    // overlays (logo, programme title).
+    let plan = &job.plan;
+    let mut chain: Vec<String> = Vec::new();
+    if plan.deinterlace {
+        chain.push("yadif=0:-1:1".into());
+    }
+    chain.push(scale_chain(plan.aspect, p.width, p.height));
+    chain.push(format!("fps={}", p.fps));
+    if let Some(Burn::Text { path, size, style }) = &plan.burn {
+        chain.push(subtitle_filter(path, *size, *style, p.height));
+    }
+    if let Some(l) = look_chain(plan.look) {
+        chain.push(l.to_string());
+    }
+    if let Some(c) = &plan.clock {
+        chain.push(clock_filter(c, p.height));
+    }
+    let image_sub = match &plan.burn {
+        Some(Burn::Image { index }) => Some(*index),
+        _ => None,
+    };
+    if image_sub.is_none() && overlay_inputs.is_empty() {
+        chain.push(pix_tail(enc).into());
+        a.extend(["-map".into(), "0:v:0".into()]);
+        a.extend(["-vf".into(), chain.join(",")]);
+    } else {
+        let mut g = String::new();
+        let mut label = "[0:v]".to_string();
+        if let Some(i) = image_sub {
+            g.push_str(&format!(
+                "[0:v][0:{i}]overlay=eof_action=pass:repeatlast=0[sv];"
+            ));
+            label = "[sv]".into();
+        }
+        g.push_str(&format!("{label}{}[b0]", chain.join(",")));
+        let mut last = "b0".to_string();
+        for (n, (idx, o)) in overlay_inputs.iter().enumerate() {
+            let next = format!("b{}", n + 1);
+            let enable = o
+                .enable
+                .as_ref()
+                .map(|e| format!(":enable='{e}'"))
+                .unwrap_or_default();
+            g.push_str(&format!(
+                ";[{last}][{idx}:v]overlay={}:{}:format=auto{enable}[{next}]",
+                o.x, o.y
+            ));
+            last = next;
+        }
+        g.push_str(&format!(";[{last}]{}[vout]", pix_tail(enc)));
+        a.extend(["-filter_complex".into(), g, "-map".into(), "[vout]".into()]);
+    }
     a.extend([
         "-map".into(),
-        if job.has_audio { "0:a:0" } else { "1:a:0" }.into(),
-    ]);
-    a.extend([
-        "-vf".into(),
-        format!(
-            "scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={fps},{tail}",
-            w = p.width,
-            h = p.height,
-            fps = p.fps,
-            tail = pix_tail(enc)
-        ),
+        if !job.has_audio {
+            "1:a:0".to_string()
+        } else if let Some(i) = plan.audio_index {
+            format!("0:{i}")
+        } else {
+            "0:a:0".to_string()
+        },
     ]);
     a.extend(video_args(enc, p));
     a.extend([
@@ -183,7 +268,7 @@ pub fn item_args(job: &ItemJob, p: &OutputProfile, enc: Encoder) -> Vec<String> 
         "2".into(),
     ]);
     if job.has_audio {
-        a.extend(["-af".into(), "aresample=async=1".into()]);
+        a.extend(["-af".into(), audio_chain(&plan.audio)]);
     }
     a.extend([
         "-output_ts_offset".into(),
@@ -256,6 +341,81 @@ pub fn slate_args(
         "1:a:0".into(),
         "-vf".into(),
         vf,
+    ]);
+    a.extend(video_args(enc, p));
+    a.extend([
+        "-c:a".into(),
+        "aac".into(),
+        "-b:a".into(),
+        format!("{}k", p.audio_kbps),
+        "-ar".into(),
+        "48000".into(),
+        "-ac".into(),
+        "2".into(),
+        "-output_ts_offset".into(),
+        secs(ts_offset_ms),
+        "-muxdelay".into(),
+        "0".into(),
+        "-muxpreload".into(),
+        "0".into(),
+        "-f".into(),
+        "mpegts".into(),
+        "pipe:1".into(),
+    ]);
+    a
+}
+
+/// Arguments for the off-the-air hours: colour bars with a steady tone, or
+/// snow and hiss. (The "card" style is the plain station slate.)
+pub fn signoff_args(
+    style: tvmaster_core::SignOffStyle,
+    duration_ms: u64,
+    ts_offset_ms: u64,
+    p: &OutputProfile,
+    enc: Encoder,
+) -> Vec<String> {
+    let dur = secs(duration_ms);
+    let (video, audio) = match style {
+        tvmaster_core::SignOffStyle::Static => (
+            format!(
+                "color=c=gray:s=320x180:r={},noise=alls=100:allf=t+u,scale={}:{}:flags=neighbor",
+                p.fps, p.width, p.height
+            ),
+            "anoisesrc=color=white:sample_rate=48000:amplitude=0.12".to_string(),
+        ),
+        _ => (
+            format!("smptebars=size={}x{}:rate={}", p.width, p.height, p.fps),
+            "sine=frequency=1000:sample_rate=48000,volume=0.25".to_string(),
+        ),
+    };
+    let mut a: Vec<String> = ["-hide_banner", "-loglevel", "error", "-nostdin"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    a.extend(hw_init_args(enc));
+    a.extend([
+        "-f".into(),
+        "lavfi".into(),
+        "-t".into(),
+        dur.clone(),
+        "-i".into(),
+        video,
+    ]);
+    a.extend([
+        "-f".into(),
+        "lavfi".into(),
+        "-t".into(),
+        dur,
+        "-i".into(),
+        audio,
+    ]);
+    a.extend([
+        "-map".into(),
+        "0:v:0".into(),
+        "-map".into(),
+        "1:a:0".into(),
+        "-vf".into(),
+        pix_tail(enc).into(),
     ]);
     a.extend(video_args(enc, p));
     a.extend([
@@ -486,6 +646,7 @@ mod tests {
                 duration_ms: dur,
                 ts_offset_ms: 5_000,
                 has_audio: audio,
+                plan: Default::default(),
             },
             &OutputProfile::default(),
             Encoder::Software,
@@ -636,6 +797,7 @@ mod tests {
             duration_ms: 1000,
             ts_offset_ms: 0,
             has_audio: true,
+            plan: Default::default(),
         };
         let va = item_args(&job, &p, Encoder::Vaapi);
         let dev = va.iter().position(|a| a == "-vaapi_device").unwrap();
@@ -652,5 +814,221 @@ mod tests {
         let amf = slate_args("x", 1000, 0, &p, Encoder::Amf, None);
         assert!(amf.contains(&"h264_amf".to_string()));
         assert!(amf.contains(&"format=yuv420p".to_string()));
+    }
+
+    fn job_with(plan: ItemPlan, has_audio: bool) -> Vec<String> {
+        let job = ItemJob {
+            file: Path::new("/media/Show S01E01.mkv"),
+            offset_ms: 0,
+            duration_ms: 60_000,
+            ts_offset_ms: 0,
+            has_audio,
+            plan,
+        };
+        item_args(&job, &OutputProfile::default(), Encoder::Software)
+    }
+
+    fn arg_after<'a>(a: &'a [String], flag: &str) -> &'a str {
+        let i = a
+            .iter()
+            .position(|x| x == flag)
+            .unwrap_or_else(|| panic!("{flag} missing in {a:?}"));
+        &a[i + 1]
+    }
+
+    #[test]
+    fn the_chosen_audio_track_is_mapped_by_its_stream_index() {
+        let plain = job_with(ItemPlan::default(), true);
+        assert!(plain.windows(2).any(|w| w[0] == "-map" && w[1] == "0:a:0"));
+        let chosen = job_with(
+            ItemPlan {
+                audio_index: Some(3),
+                ..Default::default()
+            },
+            true,
+        );
+        assert!(chosen.windows(2).any(|w| w[0] == "-map" && w[1] == "0:3"));
+        assert!(!chosen.iter().any(|a| a == "0:a:0"));
+        // a silent file still gets the generated silent track, whatever was chosen
+        let silent = job_with(
+            ItemPlan {
+                audio_index: Some(3),
+                ..Default::default()
+            },
+            false,
+        );
+        assert!(silent.windows(2).any(|w| w[0] == "-map" && w[1] == "1:a:0"));
+    }
+
+    #[test]
+    fn the_picture_chain_runs_in_a_sensible_order() {
+        use crate::looks::Burn;
+        use tvmaster_core::{Aspect, Look, SubSize, SubStyle};
+        let plan = ItemPlan {
+            deinterlace: true,
+            aspect: Aspect::Fill,
+            look: Look::Crt,
+            burn: Some(Burn::Text {
+                path: "/c/subs/1.srt".into(),
+                size: SubSize::Medium,
+                style: SubStyle::Outline,
+            }),
+            ..Default::default()
+        };
+        let a = job_with(plan, true);
+        let vf = arg_after(&a, "-vf");
+        let at = |k: &str| vf.find(k).unwrap_or_else(|| panic!("{k} not in {vf}"));
+        let order = [
+            at("yadif"),
+            at("crop="),
+            at("fps=30"),
+            at("subtitles=filename="),
+            at("drawgrid"),
+            at("format=yuv420p"),
+        ];
+        assert!(order.windows(2).all(|w| w[0] < w[1]), "{vf}");
+        assert!(
+            !a.iter().any(|x| x == "-filter_complex"),
+            "no extra inputs: a plain -vf chain"
+        );
+    }
+
+    #[test]
+    fn overlays_become_looped_inputs_with_the_right_stream_numbers() {
+        use crate::looks::OverlayInput;
+        let overlays = vec![
+            OverlayInput {
+                png: "/c/bug.png".into(),
+                x: "main_w-overlay_w-24".into(),
+                y: "24".into(),
+                enable: None,
+            },
+            OverlayInput {
+                png: "/c/title.png".into(),
+                x: "40".into(),
+                y: "main_h-overlay_h-48".into(),
+                enable: Some("between(t,0.5,8)".into()),
+            },
+        ];
+        // with audio in the file: media is input 0, overlays 1 and 2
+        let a = job_with(
+            ItemPlan {
+                overlays: overlays.clone(),
+                ..Default::default()
+            },
+            true,
+        );
+        let g = arg_after(&a, "-filter_complex");
+        assert!(g.contains("[b0][1:v]overlay=main_w-overlay_w-24:24"), "{g}");
+        assert!(
+            g.contains(
+                "[b1][2:v]overlay=40:main_h-overlay_h-48:format=auto:enable='between(t,0.5,8)'[b2]"
+            ),
+            "{g}"
+        );
+        assert!(g.ends_with("[b2]format=yuv420p[vout]"), "{g}");
+        assert_eq!(arg_after(&a, "-map"), "[vout]");
+        assert_eq!(a.iter().filter(|x| *x == "-loop").count(), 2);
+        // the looped inputs come before -t, so -t limits the output
+        let (loop_at, t_at) = (
+            a.iter().position(|x| x == "-loop").unwrap(),
+            a.iter().position(|x| x == "-t").unwrap(),
+        );
+        assert!(loop_at < t_at);
+        // without audio the silent generator is input 1, so overlays start at 2
+        let silent = job_with(
+            ItemPlan {
+                overlays,
+                ..Default::default()
+            },
+            false,
+        );
+        let g = arg_after(&silent, "-filter_complex");
+        assert!(
+            g.contains("[b0][2:v]overlay") && g.contains("[b1][3:v]overlay"),
+            "{g}"
+        );
+    }
+
+    #[test]
+    fn picture_subtitles_are_overlaid_at_the_sources_size_before_scaling() {
+        use crate::looks::Burn;
+        let a = job_with(
+            ItemPlan {
+                burn: Some(Burn::Image { index: 5 }),
+                ..Default::default()
+            },
+            true,
+        );
+        let g = arg_after(&a, "-filter_complex");
+        assert!(g.starts_with("[0:v][0:5]overlay="), "{g}");
+        let overlay_at = g.find("overlay=").unwrap();
+        let scale_at = g.find("scale=").unwrap();
+        assert!(
+            overlay_at < scale_at,
+            "the bitmap matches the original frame, so it goes on first: {g}"
+        );
+        assert!(g.ends_with("[vout]"));
+    }
+
+    #[test]
+    fn audio_effects_reach_the_audio_filter() {
+        use crate::looks::AudioFx;
+        use tvmaster_core::Loudness;
+        let plan = ItemPlan {
+            audio: AudioFx {
+                loudness: Loudness::Broadcast,
+                night: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let a = job_with(plan, true);
+        let af = arg_after(&a, "-af");
+        assert!(
+            af.starts_with("aresample=async=1")
+                && af.contains("loudnorm=I=-23")
+                && af.contains("acompressor")
+        );
+        // no audio filter at all for the generated silent track
+        assert!(!job_with(ItemPlan::default(), false)
+            .iter()
+            .any(|x| x == "-af"));
+    }
+
+    #[test]
+    fn a_channels_quality_and_rate_set_its_output_profile() {
+        use tvmaster_core::{Quality, VideoOptions};
+        let base = OutputProfile::default();
+        let p = base.for_channel(&VideoOptions {
+            quality: Quality::P1080,
+            fps: Some(24),
+            kbps: None,
+            ..Default::default()
+        });
+        assert_eq!(
+            (p.width, p.height, p.fps, p.video_kbps),
+            (1920, 1080, 24, 6000)
+        );
+        let p = base.for_channel(&VideoOptions {
+            quality: Quality::P480,
+            kbps: Some(900),
+            ..Default::default()
+        });
+        assert_eq!(
+            (p.width, p.height, p.fps, p.video_kbps),
+            (854, 480, 30, 900)
+        );
+        assert_eq!(base.for_channel(&VideoOptions::default()).width, 1280);
+    }
+
+    #[test]
+    fn signoff_is_bars_and_a_tone_or_snow() {
+        use tvmaster_core::SignOffStyle;
+        let p = OutputProfile::default();
+        let bars = signoff_args(SignOffStyle::Bars, 30_000, 0, &p, Encoder::Software).join(" ");
+        assert!(bars.contains("smptebars=size=1280x720") && bars.contains("sine=frequency=1000"));
+        let snow = signoff_args(SignOffStyle::Static, 30_000, 0, &p, Encoder::Software).join(" ");
+        assert!(snow.contains("noise=alls=100") && snow.contains("anoisesrc"));
     }
 }

@@ -83,6 +83,8 @@ pub struct FfmpegInfo {
     pub has_readrate_burst: bool,
     /// The `drawtext` filter is built in (needed for text on the station slate).
     pub has_drawtext: bool,
+    /// The `subtitles` filter is built in (libass): text subtitles can be burned in.
+    pub has_subtitles: bool,
 }
 
 fn run(bin: &Path, args: &[&str]) -> Result<String> {
@@ -136,6 +138,7 @@ impl FfmpegInfo {
             has_nvenc: encoders.contains("h264_nvenc"),
             has_readrate_burst: help.contains("readrate_initial_burst"),
             has_drawtext: filters.contains(" drawtext "),
+            has_subtitles: filters.contains(" subtitles "),
             ffmpeg,
             ffprobe,
         })

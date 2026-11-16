@@ -239,6 +239,15 @@ impl AppState {
             guide,
             id: channel.id.clone(),
             name: channel.name.clone(),
+            number: channel.number,
+            options: channel.options.clone(),
+            can_burn_text: self.ffmpeg.as_ref().is_some_and(|f| f.has_subtitles),
+            signoff: channel
+                .lineup
+                .signoff
+                .as_ref()
+                .map(|s| s.style)
+                .unwrap_or_default(),
             always_on: channel.always_on,
             source: Arc::new(plan::DbSchedule {
                 db: self.db.clone(),

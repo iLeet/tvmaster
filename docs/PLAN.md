@@ -120,7 +120,7 @@ docs/                 plan, API, design
 
 ## 12. Milestones
 
-Status: **M1-M11 done** (see notes below). Still to come: Apple notarization and a trusted Windows certificate (need your accounts), native Windows and Linux shells, HTTPS.
+Status: **M1-M12 done** (see notes below). Still to come: Apple notarization and a trusted Windows certificate (need your accounts), native Windows and Linux shells, HTTPS.
 
 1. **Foundation:** repo, workspace, CI matrix, FFmpeg manager, library scanner, SQLite schema, API skeleton.
 2. **One channel on air:** playout runner, HLS/M3U/XMLTV, shuffle + sequential, web player, watchdog, service installers, state recovery.
@@ -230,3 +230,13 @@ Golden-file schedule tests (same seed → same schedule), fake-FFmpeg harness fo
 - **Web admin:** Settings now has the same Share card, the certificate fingerprint, and says when HTTPS is off.
 - **Testing:** `scripts/system-test.sh` is a 44-check end-to-end test of a real daemon and also runs in CI on Linux and macOS.
 - **Known limits:** the Windows setup option, Windows/Linux packaging of HTTPS and the real-certificate reload were not run; IPv6 is left out of the address lists and certificate; HTTP is still on by default (HTTPS is opt-in); the relay buffers whole responses (fine for HLS, not for an endless TS stream); FFmpeg's HLS client cannot use a self-signed certificate.
+
+## 25. M12 notes (audio tracks, subtitles, TV-style channel options)
+
+- **Reading tracks:** `tvmaster-media` parses every audio and subtitle stream from ffprobe (language, codec, channels, default/forced/hearing-impaired/commentary flags, titles, interlacing) and finds subtitle files beside the video; the scan stores them as `tracks_json` (migrated column). Languages are normalised to three letters (`en`, `English`, `fre`/`fra` all agree).
+- **Choosing:** `tvmaster-core::tracks` (pure): first preferred language wins, commentary/description skipped unless alone, default then more channels; five subtitle modes including "foreign" (full subtitles only when the audio is not in a language you chose); text subtitles are only offered when FFmpeg can draw them.
+- **Options:** `tvmaster-core::options::ChannelOptions` (audio, subtitles, video, overlays, per-show overrides) stored as `options_json`, validated, and applied by playout per item: `-map` by stream index, libass subtitles (cut out of the video once and cached under a safe file name, so no quoting hazards), picture subtitles overlaid before scaling, loudness and night-mode filters, aspect/deinterlace/look chains, logo and title card as PNGs written by a tiny PNG encoder in the render crate and overlaid, per-channel output profile (the whole channel switches size, not just items). Sign-off is a scheduler feature: filler items labelled "Sign-off" that play as bars and a tone.
+- **Hardening:** if an item fails to encode with its extras (subtitle filter, overlays, clock), it is retried without them before the file can be reported unplayable. Verified on a Mac whose FFmpeg has no libass: the programme airs, the file is not blamed.
+- **UI:** web channel editor tab **Picture & sound** (language lists, every option, sign-off, per-show overrides with the languages found in each show's files and a re-scan hint); the Mac channel editor has the main settings, reading and writing the server's raw JSON so unseen settings (per-show overrides) survive an edit.
+- **Verified:** see the end of [CHANNEL-OPTIONS.md](CHANNEL-OPTIONS.md): measurements on real streams from real multi-track files (pitch of the chosen audio, burned subtitle brightness, logo/card timing, no colour in black and white, 480p/24fps, sign-off bars and tone).
+- **Known limits:** picture (bitmap) subtitles could not be generated here, so only their FFmpeg arguments are tested; the clock needs FFmpeg's drawtext (absent from Homebrew's build); text-subtitle encodings other than UTF-8 are not converted; per-show settings are edited in the web admin only; no per-file track override; a channel restart is needed for option changes (it happens automatically on save).

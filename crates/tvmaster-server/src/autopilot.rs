@@ -347,6 +347,7 @@ mod tests {
             kind: Default::default(),
             group: None,
             guide: Default::default(),
+            options: Default::default(),
         };
         upsert_channel(&conn, &ch).unwrap();
         (conn, ch)

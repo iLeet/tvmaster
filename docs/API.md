@@ -68,6 +68,10 @@ See [SCHEDULING.md](SCHEDULING.md) for what these mean.
 | GET | `/api/v1/channels/{id}/schedule?hours=6` | Programmes (max 72 h). `end_ms` is the slot end (includes ad breaks and padding), `runtime_end_ms` is when the show's last act ends, `label` is the block or event. Add `&detail=items` for the raw timeline: every show act (`in_ms` is where in the file it starts), commercial, bumper (`bumper`: `brb`, `back_to`, `up_next`, `later_today`, `station_id`; none for your own clips) and filler. |
 | GET | `/api/v1/channels/{id}/cursors` | Episode cursors: `committed` have aired, `reserved` are on the schedule. |
 
+### Picture, sound and sign-off
+
+A channel's `options` object holds audio-track, subtitle, picture and on-screen-graphics settings, and `lineup.signoff` the off-the-air hours; both are described in [CHANNEL-OPTIONS.md](CHANNEL-OPTIONS.md). `POST /api/v1/channels` replaces `options` as a whole when it is sent and keeps it when it is not (invalid values give 400 with a reason). `GET /api/v1/shows` includes `audio_languages`, `subtitle_languages` (three-letter codes found in the show's files) and `files_with_tracks` (files whose tracks have been read; fewer than `episodes` means a re-scan is due). `GET /api/v1/system` reports `ffmpeg.has_subtitles` (text subtitles can be drawn) next to `has_drawtext`.
+
 ## Groups and the guide channel
 
 - `group` (up to 40 characters) organises channels ("Kids", "Movies"). It becomes the playlist `group-title` and a heading in the web player and remote.

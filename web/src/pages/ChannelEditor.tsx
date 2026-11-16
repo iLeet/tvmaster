@@ -2,11 +2,13 @@ import { useEffect, useMemo, useState } from 'react';
 import { api, errorMessage } from '../api';
 import { emptyLineup, lineupSummary, nextFreeNumber, slugify, validateId } from '../lib';
 import { useQuery } from '../live';
+import { emptyOptions, withDefaults } from '../options';
 import { href, navigate } from '../router';
-import type { Channel, ChannelView, GuideConfig, Library, RunOut, ShowSummary, Strategy, System } from '../types';
+import type { Channel, ChannelOptions, ChannelView, GuideConfig, Library, RunOut, ShowSummary, Strategy, System } from '../types';
 import { Badge, Btn, Card, Chips, ConfirmBtn, Field, Segmented, Spinner, Toggle, useToast } from '../ui';
 import { AdsEditor } from './AdsEditor';
 import { LineupEditor } from './LineupEditor';
+import { PictureSound } from './PictureSound';
 
 interface Draft {
   id: string;
@@ -22,6 +24,7 @@ interface Draft {
   library_ids: number[];
   lineup: Channel['lineup'];
   guide: GuideConfig;
+  options: ChannelOptions;
 }
 
 const STRATEGIES: { value: Strategy; label: string; help: string }[] = [
@@ -40,7 +43,7 @@ const RUN_OUT: { value: RunOut; label: string; help: string }[] = [
 
 const fromChannel = (c: Channel): Draft => ({
   id: c.id, number: c.number, name: c.name, group: c.group ?? '', kind: c.kind, strategy: c.strategy, run_out: c.run_out,
-  chaos: c.chaos, autopilot: c.autopilot, always_on: c.always_on, library_ids: c.library_ids, lineup: c.lineup, guide: c.guide,
+  chaos: c.chaos, autopilot: c.autopilot, always_on: c.always_on, library_ids: c.library_ids, lineup: { ...c.lineup, signoff: c.lineup.signoff ?? null }, guide: c.guide, options: withDefaults(c.options),
 });
 
 export function ChannelEditor({ id, tab }: { id: string; tab: string }) {
@@ -65,7 +68,7 @@ export function ChannelEditor({ id, tab }: { id: string; tab: string }) {
       const d: Draft = {
         id: '', number: nextFreeNumber(all.data.map((c) => c.number)), name: '', group: '', kind: 'programming', strategy: 'sequential',
         run_out: 'keep_going', chaos: 0, autopilot: true, always_on: false, library_ids: [], lineup: emptyLineup(sys.data.timezone),
-        guide: { hours: 3, title: null, ticker: [], music_library_ids: [] },
+        guide: { hours: 3, title: null, ticker: [], music_library_ids: [] }, options: emptyOptions(),
       };
       setDraft(d);
       setSaved(JSON.stringify(d));
@@ -105,7 +108,7 @@ export function ChannelEditor({ id, tab }: { id: string; tab: string }) {
         autopilot: draft.autopilot, always_on: draft.always_on,
       };
       if (draft.kind === 'programming') {
-        Object.assign(body, { strategy: draft.strategy, run_out: draft.run_out, chaos: draft.chaos, library_ids: draft.library_ids, lineup: draft.lineup });
+        Object.assign(body, { strategy: draft.strategy, run_out: draft.run_out, chaos: draft.chaos, library_ids: draft.library_ids, lineup: draft.lineup, options: draft.options });
       } else {
         body.guide = draft.guide;
       }
@@ -123,7 +126,7 @@ export function ChannelEditor({ id, tab }: { id: string; tab: string }) {
 
   const tabs = draft.kind === 'guide'
     ? [['general', 'General'], ['guide', 'Guide']]
-    : [['general', 'General'], ['programming', 'Programming'], ['ads', 'Ads & bumpers']];
+    : [['general', 'General'], ['programming', 'Programming'], ['picture', 'Picture & sound'], ['ads', 'Ads & bumpers']];
   const goTab = (t: string) => navigate(`channels/${id}${t === 'general' ? '' : `?tab=${t}`}`);
 
   return (
@@ -211,6 +214,10 @@ export function ChannelEditor({ id, tab }: { id: string; tab: string }) {
 
       {shownTab === 'programming' && draft.kind === 'programming' && (
         <LineupEditor lineup={draft.lineup} shows={shownShows} onChange={(lineup) => set({ lineup, ...(draft.strategy !== 'block_grid' && lineup.blocks.length > 0 ? { strategy: 'block_grid' as Strategy } : {}) })} />
+      )}
+
+      {shownTab === 'picture' && draft.kind === 'programming' && (
+        <PictureSound options={draft.options} onChange={(options) => set({ options })} lineup={draft.lineup} onLineup={(lineup) => set({ lineup })} shows={shownShows} sys={sys.data ?? undefined} />
       )}
 
       {shownTab === 'ads' && draft.kind === 'programming' && (

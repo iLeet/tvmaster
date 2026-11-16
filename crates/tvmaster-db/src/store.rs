@@ -72,6 +72,8 @@ pub struct MediaRow {
     pub year: Option<i64>,
     /// JSON from `tvmaster_media::BreakInfo`, once analysed.
     pub breaks_json: Option<String>,
+    /// JSON `tvmaster_core::Tracks`: its audio and subtitle streams (None until scanned by a version that reads them).
+    pub tracks_json: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -90,9 +92,10 @@ pub struct NewMedia {
     pub year: Option<i64>,
     /// Break points found while scanning (chapters). Later analysis may add more.
     pub breaks_json: Option<String>,
+    pub tracks_json: Option<String>,
 }
 
-const MEDIA_COLS: &str = "id, library_id, path, show, season, episode, title, duration_ms, width, height, vcodec, acodec, year, breaks_json";
+const MEDIA_COLS: &str = "id, library_id, path, show, season, episode, title, duration_ms, width, height, vcodec, acodec, year, breaks_json, tracks_json";
 
 fn media_from(r: &Row) -> Result<MediaRow> {
     Ok(MediaRow {
@@ -110,6 +113,7 @@ fn media_from(r: &Row) -> Result<MediaRow> {
         acodec: r.get(11)?,
         year: r.get(12)?,
         breaks_json: r.get(13)?,
+        tracks_json: r.get(14)?,
     })
 }
 
@@ -127,13 +131,14 @@ pub fn mark_library_missing(conn: &Connection, library_id: i64) -> Result<()> {
 pub fn upsert_media(conn: &Connection, m: &NewMedia) -> Result<i64> {
     conn.query_row(
         "INSERT INTO media_items
-            (library_id, path, show, season, episode, title, duration_ms, width, height, vcodec, acodec, year, breaks_json, missing)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 0)
+            (library_id, path, show, season, episode, title, duration_ms, width, height, vcodec, acodec, year, breaks_json, tracks_json, missing)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, 0)
          ON CONFLICT(path) DO UPDATE SET
             library_id = excluded.library_id, show = excluded.show, season = excluded.season,
             episode = excluded.episode, title = excluded.title,
             width = excluded.width, height = excluded.height, vcodec = excluded.vcodec,
             acodec = excluded.acodec, year = excluded.year, missing = 0,
+            tracks_json = COALESCE(excluded.tracks_json, tracks_json),
             -- keep earlier analysis unless the file changed
             breaks_json = CASE WHEN excluded.duration_ms != duration_ms THEN excluded.breaks_json
                                ELSE COALESCE(excluded.breaks_json, breaks_json) END,
@@ -152,7 +157,8 @@ pub fn upsert_media(conn: &Connection, m: &NewMedia) -> Result<i64> {
             m.vcodec,
             m.acodec,
             m.year,
-            m.breaks_json
+            m.breaks_json,
+            m.tracks_json
         ],
         |r| r.get(0),
     )
@@ -206,11 +212,17 @@ pub fn list_media_in_libraries(conn: &Connection, library_ids: &[i64]) -> Result
 }
 
 /// A show in the libraries: how many episodes and how much airtime.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
 pub struct ShowSummary {
     pub name: String,
     pub episodes: i64,
     pub total_ms: i64,
+    /// Audio languages found in this show's files (canonical three-letter codes).
+    pub audio_languages: Vec<String>,
+    /// Subtitle languages found, embedded or in files beside the video.
+    pub subtitle_languages: Vec<String>,
+    /// Files in this show whose tracks have been read (scanned by a version that does).
+    pub files_with_tracks: i64,
 }
 
 /// The distinct shows in `shows` libraries (all of them if `library_ids` is
@@ -234,8 +246,13 @@ pub fn list_shows(conn: &Connection, library_ids: &[i64]) -> Result<Vec<ShowSumm
                 name,
                 episodes,
                 total_ms,
+                ..Default::default()
             })
-            .collect());
+            .collect::<Vec<_>>())
+        .map(|mut v| {
+            fill_languages(conn, &mut v);
+            v
+        });
     }
     let mut out = Vec::new();
     let mut by_lib = conn.prepare(
@@ -251,6 +268,7 @@ pub fn list_shows(conn: &Connection, library_ids: &[i64]) -> Result<Vec<ShowSumm
                 name: r.get(0)?,
                 episodes: r.get(1)?,
                 total_ms: r.get(2)?,
+                ..Default::default()
             })
         })? {
             let row = row?;
@@ -264,7 +282,50 @@ pub fn list_shows(conn: &Connection, library_ids: &[i64]) -> Result<Vec<ShowSumm
         }
     }
     out.extend(merged.into_values());
+    fill_languages(conn, &mut out);
     Ok(out)
+}
+
+/// Add the audio and subtitle languages found in each show's files.
+fn fill_languages(conn: &Connection, shows: &mut [ShowSummary]) {
+    use std::collections::{BTreeMap, BTreeSet};
+    let Ok(mut st) = conn.prepare(
+        "SELECT LOWER(COALESCE(show, '')), tracks_json FROM media_items WHERE missing = 0 AND tracks_json IS NOT NULL",
+    ) else {
+        return;
+    };
+    let Ok(rows) = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+    else {
+        return;
+    };
+    let mut found: BTreeMap<String, (BTreeSet<String>, BTreeSet<String>, i64)> = BTreeMap::new();
+    for (show, json) in rows.flatten() {
+        let Some(t) = tvmaster_core::Tracks::from_json(&json) else {
+            continue;
+        };
+        let e = found.entry(show).or_default();
+        e.0.extend(
+            t.audio
+                .iter()
+                .map(|a| a.lang.clone())
+                .filter(|l| !l.is_empty()),
+        );
+        e.1.extend(
+            t.subs
+                .iter()
+                .map(|s| s.lang.clone())
+                .chain(t.external.iter().map(|s| tvmaster_core::norm_lang(&s.lang)))
+                .filter(|l| !l.is_empty()),
+        );
+        e.2 += 1;
+    }
+    for s in shows {
+        if let Some((a, b, n)) = found.get(&s.name.to_lowercase()) {
+            s.audio_languages = a.iter().cloned().collect();
+            s.subtitle_languages = b.iter().cloned().collect();
+            s.files_with_tracks = *n;
+        }
+    }
 }
 
 /// Delete a library and its files. Schedule items that reference those files
@@ -333,11 +394,15 @@ fn channel_from(r: &Row) -> Result<Channel> {
             .get::<_, Option<String>>(13)?
             .and_then(|j| serde_json::from_str(&j).ok())
             .unwrap_or_default(),
+        options: r
+            .get::<_, Option<String>>(14)?
+            .and_then(|j| serde_json::from_str(&j).ok())
+            .unwrap_or_default(),
     })
 }
 
 const CHANNEL_COLS: &str =
-    "id, number, name, strategy, run_out, autopilot, chaos, seed, epoch_ms, always_on, lineup_json, kind, grp, guide_json";
+    "id, number, name, strategy, run_out, autopilot, chaos, seed, epoch_ms, always_on, lineup_json, kind, grp, guide_json, options_json";
 
 fn channel_library_ids(conn: &Connection, channel_id: &str) -> Result<Vec<i64>> {
     let mut st = conn.prepare(
@@ -349,14 +414,14 @@ fn channel_library_ids(conn: &Connection, channel_id: &str) -> Result<Vec<i64>> 
 
 pub fn upsert_channel(conn: &Connection, c: &Channel) -> Result<()> {
     conn.execute(
-        "INSERT INTO channels (id, number, name, strategy, run_out, autopilot, chaos, seed, epoch_ms, always_on, lineup_json, kind, grp, guide_json)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+        "INSERT INTO channels (id, number, name, strategy, run_out, autopilot, chaos, seed, epoch_ms, always_on, lineup_json, kind, grp, guide_json, options_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
          ON CONFLICT(id) DO UPDATE SET
             number = excluded.number, name = excluded.name, strategy = excluded.strategy,
             run_out = excluded.run_out, autopilot = excluded.autopilot, chaos = excluded.chaos,
             seed = excluded.seed, epoch_ms = excluded.epoch_ms, always_on = excluded.always_on,
             lineup_json = excluded.lineup_json, kind = excluded.kind, grp = excluded.grp,
-            guide_json = excluded.guide_json",
+            guide_json = excluded.guide_json, options_json = excluded.options_json",
         params![
             c.id,
             c.number as i64,
@@ -371,7 +436,8 @@ pub fn upsert_channel(conn: &Connection, c: &Channel) -> Result<()> {
             serde_json::to_string(&c.lineup).unwrap_or_else(|_| "{}".into()),
             c.kind.as_str(),
             c.group,
-            serde_json::to_string(&c.guide).unwrap_or_else(|_| "{}".into())
+            serde_json::to_string(&c.guide).unwrap_or_else(|_| "{}".into()),
+            serde_json::to_string(&c.options).unwrap_or_else(|_| "{}".into())
         ],
     )?;
     conn.execute(
@@ -531,6 +597,13 @@ pub struct PlayRow {
     pub has_audio: bool,
     /// The show's name (for bumpers "about" a show).
     pub show: Option<String>,
+    /// The file's own show name (None for files without one), for per-show settings.
+    pub show_name: Option<String>,
+    pub season: Option<i64>,
+    pub episode: Option<i64>,
+    pub title: Option<String>,
+    /// JSON `tvmaster_core::Tracks`, when the file has been scanned for them.
+    pub tracks_json: Option<String>,
 }
 
 /// The item on air at `at_ms`, or the next one to start after it.
@@ -541,7 +614,7 @@ pub fn play_row_at_or_after(
 ) -> Result<Option<PlayRow>> {
     conn.query_row(
         "SELECT s.kind, s.media_id, s.start_ms, s.end_ms, s.cursor_key, s.cursor_pos, s.label, s.in_ms, s.bumper,
-                m.path, m.acodec, COALESCE(m.show, m.title)
+                m.path, m.acodec, COALESCE(m.show, m.title), m.show, m.season, m.episode, m.title, m.tracks_json
          FROM schedule_items s LEFT JOIN media_items m ON m.id = s.media_id
          WHERE s.channel_id = ?1 AND s.end_ms > ?2 ORDER BY s.start_ms LIMIT 1",
         params![channel_id, at_ms],
@@ -551,6 +624,11 @@ pub fn play_row_at_or_after(
                 path: r.get(9)?,
                 has_audio: r.get::<_, Option<String>>(10)?.is_some(),
                 show: r.get(11)?,
+                show_name: r.get(12)?,
+                season: r.get(13)?,
+                episode: r.get(14)?,
+                title: r.get(15)?,
+                tracks_json: r.get(16)?,
             })
         },
     )
@@ -725,6 +803,7 @@ mod tests {
             kind: ChannelKind::Programming,
             group: None,
             guide: Default::default(),
+            options: Default::default(),
         }
     }
 

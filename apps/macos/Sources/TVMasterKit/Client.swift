@@ -170,6 +170,14 @@ public struct TVMasterClient: Sendable {
         return (response as? HTTPURLResponse)?.statusCode == 200
     }
 
+    /// A channel exactly as the server wrote it (no key rewriting), for editing the
+    /// parts of it the typed model does not carry and sending them back unchanged.
+    public func channelRaw(_ id: String) async throws -> JSONValue {
+        let data = try await send("GET", "/channels/\(id)")
+        guard let any = try? JSONSerialization.jsonObject(with: data) else { throw TVMasterError.invalidResponse }
+        return JSONValue(any: any)
+    }
+
     public func auth() async throws -> AuthStatus { try await get("/auth") }
     public func system() async throws -> SystemInfo { try await get("/system") }
 

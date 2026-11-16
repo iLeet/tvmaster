@@ -61,6 +61,10 @@ If two blocks overlap, the one earlier in the `blocks` list wins for the overlap
 
 A block decides what *starts* inside it. A show that starts near the end of a block finishes even if it runs past the end; the next block's first show starts on the next grid time.
 
+### Sign-off
+
+`"signoff": {"from": "02:00", "to": "05:00", "style": "bars"}` takes the channel off the air for those local hours: bars and a tone, snow, or the station card. It uses no episodes and moves no cursors. See [CHANNEL-OPTIONS.md](CHANNEL-OPTIONS.md).
+
 ### Seasons
 
 ```json

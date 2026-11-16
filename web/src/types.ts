@@ -76,6 +76,42 @@ export interface Lineup {
   fill: Source | null;
   catch_up: CatchUp;
   ads: AdConfig | null;
+  signoff: SignOff | null;
+}
+
+export type SignOffStyle = 'bars' | 'static' | 'card';
+
+/** Off the air from `from` to `to` every day (local time). */
+export interface SignOff {
+  from: string;
+  to: string;
+  style: SignOffStyle;
+}
+
+export type Loudness = 'off' | 'light' | 'broadcast';
+export type SubMode = 'off' | 'always' | 'forced' | 'foreign' | 'sdh';
+export type Aspect = 'fit' | 'fill' | 'stretch';
+export type Look = 'none' | 'vhs' | 'crt' | 'black_white' | 'sepia' | 'film';
+export type Corner = 'top_left' | 'top_right' | 'bottom_left' | 'bottom_right';
+
+export interface ShowOptions {
+  audio_languages?: string[] | null;
+  subtitles?: SubMode | null;
+  subtitle_languages?: string[] | null;
+  look?: Look | null;
+  aspect?: Aspect | null;
+}
+
+export interface ChannelOptions {
+  audio: { languages: string[]; avoid_commentary: boolean; avoid_description: boolean; loudness: Loudness; night_mode: boolean; dialogue_boost: boolean; mono: boolean };
+  subtitles: { mode: SubMode; languages: string[]; size: 'small' | 'medium' | 'large'; style: 'outline' | 'box' };
+  video: { aspect: Aspect; deinterlace: 'auto' | 'off' | 'always'; quality: '480' | '720' | '1080'; fps: number | null; kbps: number | null; look: Look };
+  overlay: {
+    bug: { enabled: boolean; text: string; position: Corner; opacity: number };
+    clock: { enabled: boolean; position: Corner; hour12: boolean };
+    show_title: { enabled: boolean; seconds: number };
+  };
+  shows: Record<string, ShowOptions>;
 }
 
 export interface GuideConfig {
@@ -104,6 +140,7 @@ export interface Channel {
   kind: 'programming' | 'guide';
   group: string | null;
   guide: GuideConfig;
+  options: ChannelOptions;
 }
 
 export interface Program {
@@ -138,6 +175,11 @@ export interface ShowSummary {
   name: string;
   episodes: number;
   total_ms: number;
+  /** Audio languages found in the show's files (three-letter codes). */
+  audio_languages: string[];
+  subtitle_languages: string[];
+  /** Files whose tracks have been read; fewer than `episodes` means a re-scan is due. */
+  files_with_tracks: number;
 }
 
 export interface System {
@@ -152,6 +194,7 @@ export interface System {
     has_videotoolbox: boolean;
     has_nvenc: boolean;
     has_drawtext: boolean;
+    has_subtitles: boolean;
   };
   on_air: string[];
   auth_required: boolean;

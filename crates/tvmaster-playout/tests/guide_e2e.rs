@@ -98,6 +98,10 @@ async fn guide_channel_draws_frames_and_loops_music() {
         always_on: true,
         source: source.clone(),
         guide: Some(GuideSpec { music: vec![music] }),
+        options: Default::default(),
+        number: 0,
+        can_burn_text: false,
+        signoff: Default::default(),
     }));
 
     let playlist = manager.hls_dir("guide").join("index.m3u8");

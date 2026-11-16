@@ -363,6 +363,12 @@ fn probe_library(
                         .then(|| from_chapters(&info.chapters, info.duration_ms))
                         .flatten()
                         .map(|b| b.to_json()),
+                    // Audio and subtitle tracks, and subtitle files beside the video.
+                    tracks_json: (kind == "shows").then(|| {
+                        let mut t = info.tracks.clone();
+                        t.external = tvmaster_media::find_sidecar_subs(file);
+                        t.to_json()
+                    }),
                 };
                 results.lock().unwrap().push((i, media));
             });

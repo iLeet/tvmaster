@@ -176,6 +176,9 @@ pub struct Channel {
     /// Used when `kind` is `guide`.
     #[serde(default)]
     pub guide: GuideConfig,
+    /// Audio tracks, subtitles, picture and on-screen graphics.
+    #[serde(default)]
+    pub options: crate::options::ChannelOptions,
 }
 
 /// A registered player (a TV) that a remote can control.

@@ -65,6 +65,10 @@ fn schedule(count: i64, secs: i64, path: impl Fn(i64) -> PathBuf) -> Arc<Schedul
             subject: None,
             start_ms: start + n * secs * 1000,
             end_ms: start + (n + 1) * secs * 1000,
+            is_show: false,
+            show: None,
+            subtitle: None,
+            tracks: None,
         })
         .collect();
     Arc::new(Schedule {
@@ -104,6 +108,10 @@ impl Rig {
             always_on: true,
             source: source.clone(),
             guide: None,
+            options: Default::default(),
+            number: 0,
+            can_burn_text: false,
+            signoff: Default::default(),
         };
         assert!(self.manager.start_if_absent(spec));
         self.manager.touch("t");

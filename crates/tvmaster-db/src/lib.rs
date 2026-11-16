@@ -125,6 +125,8 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         ("channels", "kind", "TEXT NOT NULL DEFAULT 'programming'"),
         ("channels", "grp", "TEXT"),
         ("channels", "guide_json", "TEXT"),
+        ("channels", "options_json", "TEXT"),
+        ("media_items", "tracks_json", "TEXT"),
         ("schedule_items", "cursor_key", "TEXT"),
         ("schedule_items", "cursor_pos", "INTEGER"),
         ("schedule_items", "label", "TEXT"),

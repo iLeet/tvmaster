@@ -5,16 +5,20 @@
 //! unplayable files with a station slate, and resyncs to live if it falls
 //! behind, so a channel never goes dark.
 
+mod itemplan;
+mod looks;
 mod manager;
 mod probe;
 mod profile;
 mod runner;
 mod ts;
 
+pub use looks::{audio_chain, AudioFx, Burn, ClockFx, ItemPlan, OverlayInput};
 pub use manager::Manager;
 pub use probe::{probe_encoder, EncoderProbe};
 pub use profile::{
-    guide_args, item_args, rendered_args, segmenter_args, slate_args, ItemJob, OutputProfile,
+    guide_args, item_args, rendered_args, segmenter_args, signoff_args, slate_args, ItemJob,
+    OutputProfile,
 };
 pub use tvmaster_render::GuideData;
 
@@ -33,6 +37,8 @@ pub enum PlayKind {
     Bumper(BumperKind),
     /// Filler: the station slate.
     Slate,
+    /// The station is off the air for the night: colour bars and a tone, or snow.
+    SignOff,
 }
 
 /// One thing on the schedule, as playout sees it.
@@ -48,6 +54,14 @@ pub struct PlayItem {
     pub subject: Option<String>,
     pub start_ms: i64,
     pub end_ms: i64,
+    /// This is the programme itself (not a commercial or a clip).
+    pub is_show: bool,
+    /// The show's name, for per-show settings and the title card.
+    pub show: Option<String>,
+    /// "S01E02 - Title", for the title card.
+    pub subtitle: Option<String>,
+    /// The file's audio and subtitle tracks, when it has been scanned for them.
+    pub tracks: Option<tvmaster_core::Tracks>,
 }
 
 /// The programmes coming up, formatted for on-screen graphics.
@@ -95,6 +109,14 @@ pub struct ChannelSpec {
     pub source: Arc<dyn ScheduleSource>,
     /// Set for guide channels, which are rendered instead of scheduled.
     pub guide: Option<GuideSpec>,
+    /// Audio, subtitles, picture and graphics.
+    pub options: tvmaster_core::ChannelOptions,
+    /// The channel number, for the on-screen logo.
+    pub number: u32,
+    /// FFmpeg can render text subtitles (libass is built in).
+    pub can_burn_text: bool,
+    /// What airs during the sign-off hours.
+    pub signoff: tvmaster_core::SignOffStyle,
 }
 
 #[derive(Debug, Clone)]

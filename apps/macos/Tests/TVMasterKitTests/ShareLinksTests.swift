@@ -115,3 +115,77 @@ struct QRCodeTests {
         }
     }
 }
+
+@Suite("Picture and sound settings")
+struct PictureSoundTests {
+    static let server = #"""
+    {"id":"anime","options":{"audio":{"languages":["jpn","eng"],"avoid_commentary":false,"loudness":"broadcast","night_mode":true,"dialogue_boost":false,"mono":false,"avoid_description":true},
+     "subtitles":{"mode":"foreign","languages":["eng"],"size":"large","style":"box"},
+     "video":{"aspect":"fill","quality":"1080","look":"crt","fps":24,"kbps":null,"deinterlace":"auto"},
+     "overlay":{"bug":{"enabled":true,"text":"ANIME","position":"bottom_left","opacity":80},"clock":{"enabled":true,"position":"bottom_right","hour12":true},"show_title":{"enabled":true,"seconds":12}},
+     "shows":{"Cowboy_Bebop":{"audio_languages":["jpn"],"look":"vhs"}}},
+     "lineup":{"timezone":"UTC","blocks":[],"signoff":{"from":"01:00","to":"06:00","style":"static"},"ads":null}}
+    """#
+
+    private func raw() throws -> JSONValue {
+        JSONValue(any: try JSONSerialization.jsonObject(with: Data(Self.server.utf8)))
+    }
+
+    @Test func readsTheServersSettings() throws {
+        let r = try raw()
+        let s = PictureSoundSettings(options: r.get(["options"]), lineup: r.get(["lineup"]))
+        #expect(s.audioLanguages == ["jpn", "eng"])
+        #expect(!s.avoidCommentary && s.nightMode)
+        #expect(s.loudness == "broadcast" && s.subtitleMode == "foreign" && s.subtitleStyle == "box")
+        #expect(s.aspect == "fill" && s.quality == "1080" && s.look == "crt")
+        #expect(s.bugEnabled && s.bugText == "ANIME" && s.bugCorner == "bottom_left")
+        #expect(s.titleEnabled && s.titleSeconds == 12 && s.clockEnabled)
+        #expect(s.signOffEnabled && s.signOffFrom == "01:00" && s.signOffTo == "06:00" && s.signOffStyle == "static")
+    }
+
+    @Test func anOldServerWithoutOptionsGivesTheDefaults() {
+        let s = PictureSoundSettings(options: nil, lineup: nil)
+        #expect(s == PictureSoundSettings())
+        #expect(s.avoidCommentary && s.quality == "720" && !s.signOffEnabled)
+    }
+
+    @Test func editsKeepEverythingTheEditorDoesNotShowAndUseTheServersKeyNames() throws {
+        let r = try raw()
+        var s = PictureSoundSettings(options: r.get(["options"]), lineup: r.get(["lineup"]))
+        s.audioLanguages = ["eng"]
+        s.look = "vhs"
+        s.avoidCommentary = true
+        let o = s.apply(to: r.get(["options"]))
+        #expect(o.get(["audio", "languages"])?.stringArray == ["eng"])
+        #expect(o.get(["audio", "avoid_commentary"])?.boolValue == true)
+        #expect(o.get(["video", "look"])?.stringValue == "vhs")
+        // not shown in the editor, so untouched, including a show name with an underscore
+        #expect(o.get(["shows", "Cowboy_Bebop", "audio_languages"])?.stringArray == ["jpn"])
+        #expect(o.get(["video", "fps"])?.intValue == 24)
+        #expect(o.get(["overlay", "bug", "opacity"])?.intValue == 80)
+        #expect(o.get(["audio", "avoid_description"])?.boolValue == true)
+        // and the keys sent are the server's snake_case ones
+        let json = String(decoding: try JSONEncoder().encode(o), as: UTF8.self)
+        #expect(json.contains("avoid_commentary") && !json.contains("avoidCommentary"))
+        #expect(json.contains("night_mode"))
+    }
+
+    @Test func signOffIsWrittenOrRemovedFromTheLineup() throws {
+        let r = try raw()
+        var s = PictureSoundSettings(options: r.get(["options"]), lineup: r.get(["lineup"]))
+        s.signOffFrom = "03:30"
+        let on = s.apply(toLineup: r.get(["lineup"]))
+        #expect(on.get(["signoff", "from"])?.stringValue == "03:30")
+        #expect(on.get(["timezone"])?.stringValue == "UTC", "the rest of the lineup is kept")
+        s.signOffEnabled = false
+        let off = s.apply(toLineup: r.get(["lineup"]))
+        #expect(off.get(["signoff"]) == .null)
+    }
+
+    @Test func languageNamesAreFriendlyAndUnknownCodesPassThrough() {
+        #expect(Language.name("jpn") == "Japanese")
+        #expect(Language.name("tlh") == "tlh")
+        #expect(Language.name("") == "Unknown")
+        #expect(Language.all.count >= 30)
+    }
+}

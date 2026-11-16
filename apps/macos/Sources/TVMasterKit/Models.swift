@@ -133,6 +133,8 @@ public struct Channel: Codable, Sendable, Hashable, Identifiable {
     public var kind: ChannelKind
     public var group: String?
     public var guide: GuideConfig
+    /// Audio, subtitles, picture and on-screen graphics (the server's `options`; absent on old servers).
+    public var options: JSONValue?
     public var onAir: Bool?
     public var now: Program?
     public var next: Program?
@@ -215,6 +217,8 @@ public struct SystemInfo: Codable, Sendable, Hashable {
         public var hasVideotoolbox: Bool
         public var hasNvenc: Bool
         public var hasDrawtext: Bool
+        /// libass is built in: text subtitles can be drawn. Absent on older servers.
+        public var hasSubtitles: Bool?
     }
     public var version: String
     public var os: String

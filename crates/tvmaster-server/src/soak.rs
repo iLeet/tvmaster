@@ -100,6 +100,7 @@ fn world() -> World {
         kind: Default::default(),
         group: None,
         guide: Default::default(),
+        options: Default::default(),
     };
     let channels = vec![
         // A grid with ads, two dayparts and a weekend special.

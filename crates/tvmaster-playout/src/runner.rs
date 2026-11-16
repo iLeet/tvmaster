@@ -6,8 +6,10 @@
 //! the encoder, and the next item is already encoded when the current one ends
 //! (no gap at item boundaries).
 
+use crate::itemplan::plan_item;
 use crate::profile::{
-    guide_args, item_args, rendered_args, segmenter_args, slate_args, ItemJob, GUIDE_FPS,
+    guide_args, item_args, rendered_args, segmenter_args, signoff_args, slate_args, ItemJob,
+    GUIDE_FPS,
 };
 use crate::ts::ContinuityFixer;
 use crate::{ChannelSpec, EngineConfig, PlayItem, PlayKind};
@@ -107,6 +109,12 @@ async fn run_once(
 ) -> Result<()> {
     clear_dir(dir).await?;
     tracing::info!(channel = %spec.id, "starting playout");
+    // This channel's own picture size, frame rate and bitrate.
+    let channel_cfg = Arc::new(EngineConfig {
+        profile: cfg.profile.for_channel(&spec.options.video),
+        ..(**cfg).clone()
+    });
+    let cfg = &channel_cfg;
 
     let mut seg = Command::new(&cfg.ffmpeg)
         .args(segmenter_args(dir, &cfg.profile, cfg.readrate_burst))
@@ -219,6 +227,35 @@ async fn produce(
                 ts_offset_ms += remaining;
                 failures = 0;
             }
+            PlayKind::SignOff => {
+                let args = if spec.signoff == tvmaster_core::SignOffStyle::Card {
+                    slate_args(
+                        "Off the air",
+                        remaining,
+                        ts_offset_ms,
+                        &cfg.profile,
+                        cfg.encoder,
+                        cfg.slate_font.as_deref(),
+                    )
+                } else {
+                    signoff_args(
+                        spec.signoff,
+                        remaining,
+                        ts_offset_ms,
+                        &cfg.profile,
+                        cfg.encoder,
+                    )
+                };
+                let outcome = run_encoder(&cfg, args, &tx, &mut fixer).await?;
+                if outcome.ok && outcome.bytes > 0 {
+                    ts_offset_ms += remaining;
+                } else {
+                    tracing::warn!(channel = %spec.id, "sign-off failed to encode, airing the slate");
+                    slate(&cfg, &spec, remaining, ts_offset_ms, &tx, &mut fixer).await?;
+                    ts_offset_ms += remaining;
+                }
+                failures = 0;
+            }
             PlayKind::Bumper(kind) => {
                 let scene = bumper_scene(&spec, kind, &item).await;
                 let theme = Theme::for_channel(&spec.id);
@@ -246,15 +283,30 @@ async fn produce(
                 let playable = item.path.as_deref().filter(|p| p.exists());
                 match (item.media_id, playable) {
                     (Some(_), Some(path)) => {
-                        let job = ItemJob {
+                        let plan = plan_item(&cfg, &spec, &item, offset).await;
+                        let mut job = ItemJob {
                             file: path,
                             offset_ms: item.in_ms + offset,
                             duration_ms: remaining,
                             ts_offset_ms,
                             has_audio: item.has_audio,
+                            plan,
                         };
                         let args = item_args(&job, &cfg.profile, cfg.encoder);
-                        let outcome = run_encoder(&cfg, args, &tx, &mut fixer).await?;
+                        let mut outcome = run_encoder(&cfg, args, &tx, &mut fixer).await?;
+                        // Subtitles, logo or clock are extras: if the item fails to
+                        // encode with them, try again without, so a problem with an
+                        // extra never takes a good file off the air.
+                        if !outcome.ok
+                            && outcome.bytes == 0
+                            && !outcome.signaled
+                            && job.plan.has_extras()
+                        {
+                            tracing::warn!(channel = %spec.id, file = %path.display(), "item failed with its subtitles/graphics; retrying without them");
+                            job.plan = job.plan.plain();
+                            let args = item_args(&job, &cfg.profile, cfg.encoder);
+                            outcome = run_encoder(&cfg, args, &tx, &mut fixer).await?;
+                        }
                         if outcome.bytes > 0 {
                             ts_offset_ms += remaining;
                         }

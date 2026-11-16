@@ -112,6 +112,7 @@ export function emptyLineup(timezone = ''): Lineup {
     fill: null,
     catch_up: 'resume',
     ads: null,
+    signoff: null,
   };
 }
 

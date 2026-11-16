@@ -293,6 +293,9 @@ impl Gen<'_> {
 
 /// Start time to begin scheduling from: the grid slot containing `ms`
 /// (or `ms` itself when the lineup has no grid).
+/// Sign-off is scheduled in pieces this long, so edits take effect promptly.
+const SIGNOFF_CHUNK_MS: i64 = 30 * 60_000;
+
 pub fn align_start(lineup: &Lineup, ms: i64) -> i64 {
     let empty = Lineup::default();
     let c = Compiled::new(lineup).or_else(|_| Compiled::new(&empty));
@@ -339,6 +342,30 @@ pub fn generate(
     let mut out = Vec::new();
     let mut t = from_ms;
     while t < to_ms {
+        // Off the air: bars and a tone until the sign-off window ends. It uses no
+        // episode and moves no cursor, so what airs afterwards is undisturbed.
+        if let Some(left) = compiled.signoff_left_ms(t) {
+            let mut end = t + left.min(SIGNOFF_CHUNK_MS);
+            // When the window ends, the next show starts on the grid.
+            if left <= SIGNOFF_CHUNK_MS {
+                if let Some(g) = grid {
+                    end = end.max(compiled.zone.next_grid(end - 1, g));
+                }
+            }
+            out.push(ScheduledItem {
+                kind: ItemKind::Filler,
+                media_id: None,
+                start_ms: t,
+                end_ms: end,
+                cursor_key: None,
+                cursor_pos: None,
+                label: Some(crate::lineup::SIGNOFF_LABEL.to_string()),
+                in_ms: 0,
+                bumper: None,
+            });
+            t = end;
+            continue;
+        }
         let active = resolve(&compiled, t);
         let (src, scope, label) = match &active {
             Some(a) => (
@@ -460,6 +487,7 @@ pub fn rebuild_reservations(kept: &[ScheduledItem], cursors: &mut Cursors) {
 mod tests {
     use super::*;
     use crate::catalog::MediaRef;
+    use crate::lineup::SignOff;
 
     const MIN: i64 = 60_000;
     const HOUR: i64 = 60 * MIN;
@@ -1171,5 +1199,96 @@ mod tests {
         // drop everything not aired
         rebuild_reservations(&[], &mut cur);
         assert_eq!(cur["k"].reserved, 2, "never below committed");
+    }
+
+    #[test]
+    fn the_station_signs_off_for_the_night_and_the_show_after_it_is_undisturbed() {
+        let l = lineup(
+            r#"{"timezone":"America/Toronto","grid_minutes":30,"signoff":{"from":"02:00","to":"05:00","style":"bars"},
+            "blocks":[{"name":"All","start":"00:00","end":"24:00","source":{"type":"show","show":"A"}}]}"#,
+        );
+        let s = Setup::new(catalog(&[("A", 400)]), l);
+        let from = at("America/Toronto", "2026-11-16 00:00");
+        let mut cursors = Cursors::new();
+        let items = s.gen(&mut cursors, from, from + DAY);
+        assert_contiguous(&items);
+
+        let win_start = at("America/Toronto", "2026-11-16 02:00");
+        let win_end = at("America/Toronto", "2026-11-16 05:00");
+        let off: Vec<&ScheduledItem> = items
+            .iter()
+            .filter(|i| i.label.as_deref() == Some("Sign-off"))
+            .collect();
+        assert!(!off.is_empty());
+        assert!(off
+            .iter()
+            .all(|i| i.kind == ItemKind::Filler && i.media_id.is_none() && i.cursor_key.is_none()));
+        assert!(off
+            .iter()
+            .all(|i| i.end_ms - i.start_ms <= SIGNOFF_CHUNK_MS));
+        assert_eq!(
+            off.first().unwrap().start_ms,
+            win_start,
+            "the 01:30 show ends at 02:00 on the grid, then bars"
+        );
+        assert_eq!(off.last().unwrap().end_ms, win_end);
+        // nothing else airs inside the window
+        assert!(items
+            .iter()
+            .filter(|i| i.start_ms >= win_start && i.start_ms < win_end)
+            .all(|i| i.label.as_deref() == Some("Sign-off")));
+        // the first show after it starts on the grid at 05:00, and episodes continue in order across the gap
+        let after = items
+            .iter()
+            .find(|i| i.kind == ItemKind::Show && i.start_ms >= win_end)
+            .unwrap();
+        assert_eq!(after.start_ms, win_end);
+        let eps = ids(&items);
+        assert!(
+            eps.windows(2).all(|w| w[1] == w[0] + 1),
+            "no episode was burned during sign-off: {eps:?}"
+        );
+    }
+
+    #[test]
+    fn a_signoff_window_can_run_through_midnight_and_must_have_a_length() {
+        let l = lineup(r#"{"timezone":"UTC","signoff":{"from":"23:30","to":"05:00"}}"#);
+        let c = Compiled::new(&l).unwrap();
+        let t = |s| at("UTC", s);
+        assert!(c.signoff_left_ms(t("2026-11-16 23:45")).is_some());
+        assert!(c.signoff_left_ms(t("2026-11-17 01:00")).is_some());
+        assert_eq!(c.signoff_left_ms(t("2026-11-17 04:00")), Some(HOUR));
+        assert!(c.signoff_left_ms(t("2026-11-17 12:00")).is_none());
+        assert!(Lineup {
+            signoff: Some(SignOff {
+                from: "03:00".into(),
+                to: "03:00".into(),
+                style: Default::default()
+            }),
+            ..Default::default()
+        }
+        .validate()
+        .is_err());
+        assert!(Lineup {
+            signoff: Some(SignOff {
+                from: "nope".into(),
+                to: "03:00".into(),
+                style: Default::default()
+            }),
+            ..Default::default()
+        }
+        .validate()
+        .is_err());
+        // "24:00" is a fine end
+        assert!(Lineup {
+            signoff: Some(SignOff {
+                from: "23:00".into(),
+                to: "24:00".into(),
+                style: Default::default()
+            }),
+            ..Default::default()
+        }
+        .validate()
+        .is_ok());
     }
 }
