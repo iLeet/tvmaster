@@ -11,7 +11,7 @@ struct ScheduleView: View {
     @State private var loading = false
 
     private var channel: Channel? { model.channels.first { $0.id == channelID } }
-    private var programmable: [Channel] { model.channels.filter { !$0.isGuide } }
+    private var programmable: [Channel] { model.channels.filter { $0.isScheduled } }
 
     var body: some View {
         ScrollView {

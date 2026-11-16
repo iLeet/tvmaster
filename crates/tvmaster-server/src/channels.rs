@@ -168,8 +168,8 @@ fn bad_lineup(reason: String) -> ApiError {
 /// channel is on autopilot, otherwise leave the locked schedule alone (it is
 /// still topped up so the channel never runs dry).
 fn apply_programming_change(s: &AppState, channel: &Channel, existed: bool) -> ApiResult<()> {
-    if channel.kind == ChannelKind::Guide {
-        return Ok(()); // rendered live; nothing to schedule
+    if channel.kind != ChannelKind::Programming {
+        return Ok(()); // the guide is rendered live and a test channel airs its screen: nothing to schedule
     }
     {
         let db = s.db();
@@ -215,6 +215,25 @@ pub async fn upsert(
     if let Some(o) = &body.options {
         o.validate()
             .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, format!("invalid options: {e}")))?;
+        if let (tvmaster_core::Screen::Image, Some(img)) =
+            (o.off_air.screen, o.off_air.image.as_deref())
+        {
+            let ok = std::path::Path::new(img).is_file()
+                && matches!(
+                    std::path::Path::new(img)
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .map(str::to_lowercase)
+                        .as_deref(),
+                    Some("png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp")
+                );
+            if !ok {
+                return Err(ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    format!("invalid options: the off-air picture '{img}' is not a png, jpg, gif, webp or bmp file on this server"),
+                ));
+            }
+        }
     }
     if let Some(g) = &body.guide {
         g.validate()
@@ -1204,5 +1223,89 @@ mod tests {
             old["files_with_tracks"], 0,
             "a file scanned before tracks were read says so"
         );
+    }
+
+    #[tokio::test]
+    async fn a_test_pattern_channel_needs_no_library_and_off_air_options_are_checked() {
+        let (app, _lib) = app_with_media();
+        let body = r#"{"id":"testpattern","number":9,"name":"Test Pattern","kind":"test","options":{"off_air":{"screen":"bars","tone":true}}}"#;
+        let (st, c) = call(&app, "POST", "/api/v1/channels", body).await;
+        assert_eq!(st, StatusCode::CREATED, "{c}");
+        assert_eq!(c["kind"], "test");
+        assert_eq!(c["options"]["off_air"]["screen"], "bars");
+        assert_eq!(c["library_ids"], serde_json::json!([]));
+        // it is listed with the others
+        let (_, list) = call(&app, "GET", "/api/v1/channels", "").await;
+        assert!(list
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["id"] == "testpattern"));
+
+        // a picture screen needs a real picture file
+        for bad in [
+            r#""off_air":{"screen":"image"}"#,
+            r#""off_air":{"screen":"image","image":"/not/here.png"}"#,
+            r#""off_air":{"screen":"image","image":"/etc/hosts"}"#,
+            r#""off_air":{"message":"this message is far too long to put on a card, it goes on and on and on"}"#,
+        ] {
+            let body = format!(
+                r#"{{"id":"testpattern","number":9,"name":"T","kind":"test","options":{{{bad}}}}}"#
+            );
+            let (st, _) = call(&app, "POST", "/api/v1/channels", &body).await;
+            assert_eq!(st, StatusCode::BAD_REQUEST, "{bad}");
+        }
+        // a real picture is accepted
+        let pic = std::env::temp_dir().join(format!("tvm-offair-{}.png", std::process::id()));
+        std::fs::write(&pic, tvmaster_render::png::rgba_png(1, 1, &[1, 2, 3, 255])).unwrap();
+        let ok = format!(
+            r#"{{"id":"testpattern","number":9,"name":"T","kind":"test","options":{{"off_air":{{"screen":"image","image":"{}"}}}}}}"#,
+            pic.display()
+        );
+        let (st, _) = call(&app, "POST", "/api/v1/channels", &ok).await;
+        assert_eq!(st, StatusCode::OK);
+        let _ = std::fs::remove_file(pic);
+    }
+
+    #[tokio::test]
+    async fn settings_that_follow_a_show_are_saved_validated_listed_and_cleared() {
+        let (app, _lib) = app_with_media();
+        let put = |body: &str| {
+            let (app, body) = (app.clone(), body.to_string());
+            async move { call(&app, "PUT", "/api/v1/show-settings", &body).await }
+        };
+        let (st, saved) = put(r#"{"show":"Alpha","settings":{"audio_languages":["jpn"],"subtitles":"always","subtitle_languages":["eng"]}}"#).await;
+        assert_eq!(st, StatusCode::OK, "{saved}");
+
+        let (_, all) = call(&app, "GET", "/api/v1/show-settings", "").await;
+        assert_eq!(all["Alpha"]["audio_languages"][0], "jpn");
+        // the show list carries them, case-insensitively
+        let (_, shows) = call(&app, "GET", "/api/v1/shows", "").await;
+        let alpha = shows
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["name"] == "Alpha")
+            .unwrap();
+        assert_eq!(alpha["defaults"]["subtitles"], "always");
+        let beta = shows
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["name"] == "Beta")
+            .unwrap();
+        assert!(beta["defaults"].is_null());
+
+        // bad languages and a missing name are refused
+        let (st, _) = put(r#"{"show":"Alpha","settings":{"audio_languages":["x;y"]}}"#).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST);
+        let (st, _) = put(r#"{"show":"  ","settings":{}}"#).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST);
+
+        // settings with nothing in them clear the entry
+        let (st, _) = put(r#"{"show":"alpha","settings":{}}"#).await;
+        assert_eq!(st, StatusCode::OK);
+        let (_, all) = call(&app, "GET", "/api/v1/show-settings", "").await;
+        assert_eq!(all, serde_json::json!({}));
     }
 }

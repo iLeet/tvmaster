@@ -8,8 +8,8 @@
 
 use crate::itemplan::plan_item;
 use crate::profile::{
-    guide_args, item_args, rendered_args, segmenter_args, signoff_args, slate_args, ItemJob,
-    GUIDE_FPS,
+    guide_args, item_args, rendered_args, screen_args, segmenter_args, slate_args, ItemJob,
+    ScreenInput, GUIDE_FPS,
 };
 use crate::ts::ContinuityFixer;
 use crate::{ChannelSpec, EngineConfig, PlayItem, PlayKind};
@@ -228,32 +228,23 @@ async fn produce(
                 failures = 0;
             }
             PlayKind::SignOff => {
-                let args = if spec.signoff == tvmaster_core::SignOffStyle::Card {
-                    slate_args(
-                        "Off the air",
-                        remaining,
-                        ts_offset_ms,
-                        &cfg.profile,
-                        cfg.encoder,
-                        cfg.slate_font.as_deref(),
-                    )
-                } else {
-                    signoff_args(
-                        spec.signoff,
-                        remaining,
-                        ts_offset_ms,
-                        &cfg.profile,
-                        cfg.encoder,
-                    )
-                };
-                let outcome = run_encoder(&cfg, args, &tx, &mut fixer).await?;
-                if outcome.ok && outcome.bytes > 0 {
-                    ts_offset_ms += remaining;
-                } else {
-                    tracing::warn!(channel = %spec.id, "sign-off failed to encode, airing the slate");
-                    slate(&cfg, &spec, remaining, ts_offset_ms, &tx, &mut fixer).await?;
-                    ts_offset_ms += remaining;
-                }
+                // Bars and snow come with a tone and hiss, the way a station signed off.
+                let tone = matches!(
+                    spec.signoff,
+                    tvmaster_core::Screen::Bars | tvmaster_core::Screen::Static
+                );
+                off_air_screen(
+                    &cfg,
+                    &spec,
+                    spec.signoff,
+                    tone,
+                    remaining,
+                    ts_offset_ms,
+                    &tx,
+                    &mut fixer,
+                )
+                .await?;
+                ts_offset_ms += remaining;
                 failures = 0;
             }
             PlayKind::Bumper(kind) => {
@@ -623,6 +614,8 @@ async fn report_unplayable(spec: &Arc<ChannelSpec>, media_id: Option<i64>) {
     }
 }
 
+/// Hold the air with whatever the channel shows when nothing is on: its off-air
+/// screen (a station card unless the owner chose bars, snow, black or a picture).
 async fn slate(
     cfg: &EngineConfig,
     spec: &ChannelSpec,
@@ -631,6 +624,110 @@ async fn slate(
     tx: &mpsc::Sender<Vec<u8>>,
     fixer: &mut ContinuityFixer,
 ) -> Result<()> {
+    let oa = &spec.options.off_air;
+    off_air_screen(
+        cfg,
+        spec,
+        oa.screen,
+        oa.tone,
+        duration_ms,
+        ts_offset_ms,
+        tx,
+        fixer,
+    )
+    .await
+}
+
+/// The station card as a picture, made once per channel and message.
+async fn card_png(cfg: &EngineConfig, spec: &ChannelSpec) -> Option<std::path::PathBuf> {
+    let message = spec.options.off_air.message.clone();
+    let key = format!("{}|{}|{}|{}", spec.id, spec.number, spec.name, message);
+    let dir = cfg.root.join("cache").join("cards");
+    tokio::fs::create_dir_all(&dir).await.ok()?;
+    let path = dir.join(format!("{:016x}.png", tvmaster_core::fnv1a(&key)));
+    if !path.exists() {
+        let theme = Theme::for_channel(&spec.id);
+        let g = tvmaster_render::overlay::station_card(&theme, spec.number, &spec.name, &message);
+        let tmp = path.with_extension("part");
+        tokio::fs::write(&tmp, &g.png).await.ok()?;
+        tokio::fs::rename(&tmp, &path).await.ok()?;
+    }
+    Some(path)
+}
+
+/// Air one of the off-air screens for `duration_ms`. If it cannot be made (a
+/// missing picture, a failing filter), fall back to the plain slate so the
+/// channel never goes dark.
+#[allow(clippy::too_many_arguments)]
+async fn off_air_screen(
+    cfg: &EngineConfig,
+    spec: &ChannelSpec,
+    screen: tvmaster_core::Screen,
+    tone: bool,
+    duration_ms: u64,
+    ts_offset_ms: u64,
+    tx: &mpsc::Sender<Vec<u8>>,
+    fixer: &mut ContinuityFixer,
+) -> Result<()> {
+    use tvmaster_core::Screen;
+    let picture = match screen {
+        Screen::Image => spec
+            .options
+            .off_air
+            .image
+            .as_deref()
+            .map(std::path::PathBuf::from)
+            .filter(|p| p.is_file())
+            .map(|p| (p, false)),
+        Screen::Card => card_png(cfg, spec).await.map(|p| (p, true)),
+        _ => None,
+    };
+    let args = match (screen, &picture) {
+        (Screen::Bars, _) => Some(screen_args(
+            ScreenInput::Bars,
+            tone,
+            duration_ms,
+            ts_offset_ms,
+            &cfg.profile,
+            cfg.encoder,
+        )),
+        (Screen::Static, _) => Some(screen_args(
+            ScreenInput::Static,
+            tone,
+            duration_ms,
+            ts_offset_ms,
+            &cfg.profile,
+            cfg.encoder,
+        )),
+        (Screen::Black, _) => Some(screen_args(
+            ScreenInput::Black,
+            tone,
+            duration_ms,
+            ts_offset_ms,
+            &cfg.profile,
+            cfg.encoder,
+        )),
+        (Screen::Card | Screen::Image, Some((path, pixel_art))) => Some(screen_args(
+            ScreenInput::Picture {
+                path,
+                pixel_art: *pixel_art,
+            },
+            tone,
+            duration_ms,
+            ts_offset_ms,
+            &cfg.profile,
+            cfg.encoder,
+        )),
+        // A picture that is gone: the card, below.
+        (Screen::Card | Screen::Image, None) => None,
+    };
+    if let Some(args) = args {
+        let outcome = run_encoder(cfg, args, tx, fixer).await?;
+        if outcome.ok && outcome.bytes > 0 {
+            return Ok(());
+        }
+        tracing::warn!(channel = %spec.id, ?screen, "off-air screen failed to encode, using the plain slate");
+    }
     let args = slate_args(
         &spec.name,
         duration_ms,

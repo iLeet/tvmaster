@@ -151,6 +151,7 @@ struct WatchView: View {
 
     private func subtitle(_ ch: Channel) -> String {
         if ch.isGuide { return "Live guide" }
+        if ch.isTest { return "Test pattern" }
         guard let now = ch.now else { return "" }
         return now.subtitle.map { "\(now.headline) — \($0)" } ?? now.headline
     }

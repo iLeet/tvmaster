@@ -79,7 +79,10 @@ export interface Lineup {
   signoff: SignOff | null;
 }
 
-export type SignOffStyle = 'bars' | 'static' | 'card';
+export type SignOffStyle = 'bars' | 'static' | 'card' | 'black' | 'image';
+
+/** What fills the screen when nothing is on air. */
+export type Screen = 'card' | 'bars' | 'static' | 'black' | 'image';
 
 /** Off the air from `from` to `to` every day (local time). */
 export interface SignOff {
@@ -103,6 +106,7 @@ export interface ShowOptions {
 }
 
 export interface ChannelOptions {
+  off_air: { screen: Screen; message: string; image: string | null; tone: boolean };
   audio: { languages: string[]; avoid_commentary: boolean; avoid_description: boolean; loudness: Loudness; night_mode: boolean; dialogue_boost: boolean; mono: boolean };
   subtitles: { mode: SubMode; languages: string[]; size: 'small' | 'medium' | 'large'; style: 'outline' | 'box' };
   video: { aspect: Aspect; deinterlace: 'auto' | 'off' | 'always'; quality: '480' | '720' | '1080'; fps: number | null; kbps: number | null; look: Look };
@@ -137,7 +141,7 @@ export interface Channel {
   always_on: boolean;
   library_ids: number[];
   lineup: Lineup;
-  kind: 'programming' | 'guide';
+  kind: 'programming' | 'guide' | 'test';
   group: string | null;
   guide: GuideConfig;
   options: ChannelOptions;
@@ -180,6 +184,8 @@ export interface ShowSummary {
   subtitle_languages: string[];
   /** Files whose tracks have been read; fewer than `episodes` means a re-scan is due. */
   files_with_tracks: number;
+  /** Settings that follow this show onto every channel (null = none). */
+  defaults: ShowOptions | null;
 }
 
 export interface System {

@@ -1,66 +1,16 @@
 import { useState } from 'react';
-import { addLanguage, audioMatches, langName, LANGUAGES, moveLanguage, removeLanguage, setShowOption, showOverride, trackNote } from '../options';
-import type { Aspect, ChannelOptions, Corner, Lineup, Look, ShowSummary, SignOff, SignOffStyle, SubMode, System } from '../types';
-import { Badge, Btn, Card, Field, Segmented, Toggle } from '../ui';
-
-const SUB_MODES: { value: SubMode; label: string; help: string }[] = [
-  { value: 'off', label: 'Off', help: 'Never burn subtitles in.' },
-  { value: 'foreign', label: 'When foreign', help: 'Subtitles only when the audio is not in one of your languages; otherwise just the forced ones (signs, foreign phrases).' },
-  { value: 'always', label: 'Always', help: 'Always show subtitles in your language.' },
-  { value: 'forced', label: 'Forced only', help: 'Only the forced subtitles inside the programme.' },
-  { value: 'sdh', label: 'For the hard of hearing', help: 'Captions with sound cues and speaker names when the file has them.' },
-];
-
-const LOOKS: { value: Look; label: string; help: string }[] = [
-  { value: 'none', label: 'None', help: 'The picture as it is.' },
-  { value: 'crt', label: 'CRT', help: 'Scanlines and a soft vignette, like a tube TV.' },
-  { value: 'vhs', label: 'VHS', help: 'Noise, softness and washed colour, like a worn tape.' },
-  { value: 'film', label: 'Film', help: 'Grain and warmth.' },
-  { value: 'black_white', label: 'Black & white', help: 'Colour removed.' },
-  { value: 'sepia', label: 'Sepia', help: 'An old-photograph tint.' },
-];
-
-const ASPECTS: { value: Aspect; label: string; help: string }[] = [
-  { value: 'fit', label: 'Fit', help: 'The whole picture, with bars where the shapes differ.' },
-  { value: 'fill', label: 'Fill', help: 'Fill the screen, cropping the edges.' },
-  { value: 'stretch', label: 'Stretch', help: 'Fill the screen by stretching (distorts).' },
-];
+import { SCREENS, setShowOption, showOverride } from '../options';
+import type { ChannelOptions, Corner, Lineup, ShowSummary, SignOff, System } from '../types';
+import { Badge, Card, Field, Segmented, Toggle } from '../ui';
+import { ASPECTS, LanguageList, LOOKS, ShowSettingsRow, SUB_MODES } from './ShowSettings';
 
 const CORNERS: { value: Corner; label: string }[] = [
   { value: 'top_left', label: 'Top left' }, { value: 'top_right', label: 'Top right' },
   { value: 'bottom_left', label: 'Bottom left' }, { value: 'bottom_right', label: 'Bottom right' },
 ];
 
-/** An ordered list of languages with add, remove and reorder. */
-function LanguageList({ value, onChange, placeholder }: { value: string[]; onChange: (v: string[]) => void; placeholder: string }) {
-  const [pick, setPick] = useState('');
-  return (
-    <div className="stack" style={{ gap: 8 }}>
-      {value.length > 0 && (
-        <div className="stack" style={{ gap: 4 }}>
-          {value.map((l, i) => (
-            <div key={l} className="row small">
-              <span className="num-badge" style={{ minWidth: 26, height: 26 }}>{i + 1}</span>
-              <span className="grow">{langName(l)} <span className="dim mono">{l}</span></span>
-              <Btn small kind="ghost" icon="up" aria-label={`Move ${langName(l)} up`} disabled={i === 0} onClick={() => onChange(moveLanguage(value, i, -1))} />
-              <Btn small kind="ghost" icon="down" aria-label={`Move ${langName(l)} down`} disabled={i === value.length - 1} onClick={() => onChange(moveLanguage(value, i, 1))} />
-              <Btn small kind="ghost" icon="x" aria-label={`Remove ${langName(l)}`} onClick={() => onChange(removeLanguage(value, l))} />
-            </div>
-          ))}
-        </div>
-      )}
-      <div className="row">
-        <select className="select" style={{ minWidth: 200 }} value={pick} onChange={(e) => { if (e.target.value) { onChange(addLanguage(value, e.target.value)); } setPick(''); }} aria-label={placeholder}>
-          <option value="">{value.length ? 'Add another language…' : placeholder}</option>
-          {LANGUAGES.filter(([c]) => !value.includes(c)).map(([c, n]) => <option key={c} value={c}>{n}</option>)}
-        </select>
-      </div>
-    </div>
-  );
-}
-
 export function PictureSound({
-  options, onChange, lineup, onLineup, shows, sys,
+  options, onChange, lineup, onLineup, shows, sys, testOnly = false,
 }: {
   options: ChannelOptions;
   onChange: (o: ChannelOptions) => void;
@@ -68,6 +18,8 @@ export function PictureSound({
   onLineup: (l: Lineup) => void;
   shows: ShowSummary[];
   sys: System | undefined;
+  /** A test-pattern channel only has an off-air screen to choose. */
+  testOnly?: boolean;
 }) {
   const o = options;
   const patch = <K extends keyof ChannelOptions>(k: K, v: Partial<ChannelOptions[K]>) => onChange({ ...o, [k]: { ...(o[k] as object), ...(v as object) } } as ChannelOptions);
@@ -79,6 +31,26 @@ export function PictureSound({
   const [showFilter, setShowFilter] = useState('');
   const shownShows = shows.filter((s) => s.name.toLowerCase().includes(showFilter.toLowerCase()));
   const staleLibraries = shows.some((s) => s.files_with_tracks < s.episodes);
+
+  const offAir = (
+    <Card className="stack">
+      <div><h2>When nothing is on air</h2><p className="small dim">What fills the screen when there is nothing to show: an empty schedule, a gap between programmes, a file that cannot be played. Choose the classic test pattern, snow, black, a station card with your own words, or a picture of your own.</p></div>
+      <Field label="Screen" hint={SCREENS.find((x) => x.value === o.off_air.screen)?.help}>
+        <Segmented value={o.off_air.screen} options={SCREENS} onChange={(screen) => patch('off_air', { screen })} />
+      </Field>
+      {o.off_air.screen === 'card' && (
+        <Field label="Message" hint="Blank = PLEASE STAND BY."><input className="input" style={{ maxWidth: 360 }} maxLength={60} placeholder="PLEASE STAND BY" value={o.off_air.message} onChange={(e) => patch('off_air', { message: e.target.value })} /></Field>
+      )}
+      {o.off_air.screen === 'image' && (
+        <Field label="Picture file" hint="The full path of a png, jpg, gif or webp on the machine running TVMaster. It is fitted to the screen.">
+          <input className="input mono" placeholder="/path/to/picture.png" value={o.off_air.image ?? ''} onChange={(e) => patch('off_air', { image: e.target.value || null })} />
+        </Field>
+      )}
+      <Toggle checked={o.off_air.tone} onChange={(tone) => patch('off_air', { tone })} label={<span>Test tone <span className="dim small">{o.off_air.screen === 'static' ? 'hiss with the snow' : 'a steady 1 kHz tone, like a real test pattern'}</span></span>} />
+      <p className="small dim">For a channel that is nothing but a test pattern, make a <strong>Test pattern</strong> channel (Channels, New channel).</p>
+    </Card>
+  );
+  if (testOnly) return <div className="stack gap-lg">{offAir}</div>;
 
   return (
     <div className="stack gap-lg">
@@ -170,6 +142,8 @@ export function PictureSound({
         )}
       </Card>
 
+      {offAir}
+
       <Card className="stack">
         <div><h2>Sign-off</h2><p className="small dim">Like a station of old, go off the air for the night. During these hours the channel airs bars and a tone (or snow) instead of programmes, and no episodes are used up.</p></div>
         <Toggle checked={signoff !== null} onChange={(on) => setSignoff(on ? { from: '02:00', to: '05:00', style: 'bars' } : null)} label="Sign off overnight" />
@@ -177,65 +151,32 @@ export function PictureSound({
           <div className="row wrap nest" style={{ alignItems: 'flex-end' }}>
             <Field label="Off the air at"><input className="input" type="time" value={signoff.from} onChange={(e) => setSignoff({ ...signoff, from: e.target.value })} /></Field>
             <Field label="Back on at"><input className="input" type="time" value={signoff.to} onChange={(e) => setSignoff({ ...signoff, to: e.target.value })} /></Field>
-            <Field label="Shows"><Segmented value={signoff.style} options={[{ value: 'bars', label: 'Colour bars' }, { value: 'static', label: 'Snow' }, { value: 'card', label: 'Station card' }] as { value: SignOffStyle; label: string }[]} onChange={(style) => setSignoff({ ...signoff, style })} /></Field>
+            <Field label="Shows"><Segmented value={signoff.style} options={SCREENS} onChange={(style) => setSignoff({ ...signoff, style })} /></Field>
           </div>
         )}
         {signoff && <p className="small dim">Times are in the channel's time zone ({lineup.timezone || 'the server\'s'}). Save the channel and the schedule updates.</p>}
       </Card>
 
       <Card className="stack">
-        <div><h2>Per-show settings</h2><p className="small dim">Some shows want different treatment: anime in Japanese with English subtitles, a sitcom plain, a 1950s serial in black and white. A setting here replaces the channel's for that show only.</p></div>
+        <div><h2>Per-show settings</h2><p className="small dim">Some shows want different treatment: anime in Japanese with English subtitles, a sitcom plain, a 1950s serial in black and white. A setting here applies on this channel only and beats both the channel's settings and anything set for the show on the Shows page.</p></div>
         {staleLibraries && <p className="small" style={{ color: 'var(--warn)' }}>Some files were scanned before audio and subtitle tracks were read. Re-scan the libraries (Libraries page) to see their languages.</p>}
         {shows.length > 8 && <input className="input" style={{ maxWidth: 280 }} placeholder="Filter shows…" value={showFilter} onChange={(e) => setShowFilter(e.target.value)} />}
         {shows.length === 0 && <p className="small dim">No shows in the libraries yet.</p>}
         <div className="stack">
-          {shownShows.map((s) => {
-            const ov = showOverride(o, s.name);
-            const customised = Object.keys(ov).length > 0;
-            return (
-              <ShowRow key={s.name} show={s} ov={ov} channelAudio={o.audio.languages} customised={customised} onChange={(p) => onChange(setShowOption(o, s.name, p))} />
-            );
-          })}
+          {shownShows.map((sh) => (
+            <ShowSettingsRow
+              key={sh.name}
+              show={sh}
+              ov={showOverride(o, sh.name)}
+              inheritLabel="Default"
+              inheritWhat={sh.defaults ? "the show's own settings (Shows page), then this channel's" : "this channel's settings"}
+              wantedAudio={sh.defaults?.audio_languages?.length ? sh.defaults.audio_languages : o.audio.languages}
+              badge="this channel"
+              onChange={(p) => onChange(setShowOption(o, sh.name, p))}
+            />
+          ))}
         </div>
       </Card>
-    </div>
-  );
-}
-
-function ShowRow({ show, ov, channelAudio, customised, onChange }: { show: ShowSummary; ov: import('../types').ShowOptions; channelAudio: string[]; customised: boolean; onChange: (p: import('../types').ShowOptions) => void }) {
-  const [open, setOpen] = useState(customised);
-  const wanted = ov.audio_languages?.length ? ov.audio_languages : channelAudio;
-  return (
-    <div className="block-card stack" style={{ gap: 8 }}>
-      <div className="row wrap between">
-        <div>
-          <strong>{show.name || '(no name)'}</strong> {customised && <Badge tone="accent">custom</Badge>}
-          <div className="small dim">{trackNote(show)}</div>
-          {!audioMatches(show, wanted) && <div className="small" style={{ color: 'var(--warn)' }}>None of its audio is in {wanted.map(langName).join(' or ')}; the file's default will play.</div>}
-        </div>
-        <Btn small onClick={() => setOpen(!open)}>{open ? 'Done' : customised ? 'Edit' : 'Customise'}</Btn>
-      </div>
-      {open && (
-        <div className="stack nest" style={{ gap: 10 }}>
-          <Field label="Audio languages" hint="Blank = the channel's.">
-            <LanguageList value={ov.audio_languages ?? []} onChange={(audio_languages) => onChange({ audio_languages })} placeholder="Use the channel's" />
-          </Field>
-          <Field label="Subtitles">
-            <Segmented value={(ov.subtitles ?? 'inherit') as SubMode | 'inherit'} options={[{ value: 'inherit', label: "Channel's" }, ...SUB_MODES.map((m) => ({ value: m.value, label: m.label }))]} onChange={(v) => onChange({ subtitles: v === 'inherit' ? null : (v as SubMode) })} />
-          </Field>
-          {ov.subtitles && ov.subtitles !== 'off' && (
-            <Field label="Subtitle languages" hint="Blank = the channel's.">
-              <LanguageList value={ov.subtitle_languages ?? []} onChange={(subtitle_languages) => onChange({ subtitle_languages })} placeholder="Use the channel's" />
-            </Field>
-          )}
-          <Field label="Look">
-            <Segmented value={(ov.look ?? 'inherit') as Look | 'inherit'} options={[{ value: 'inherit', label: "Channel's" }, ...LOOKS.map((l) => ({ value: l.value, label: l.label }))]} onChange={(v) => onChange({ look: v === 'inherit' ? null : (v as Look) })} />
-          </Field>
-          <Field label="Screen shape">
-            <Segmented value={(ov.aspect ?? 'inherit') as Aspect | 'inherit'} options={[{ value: 'inherit', label: "Channel's" }, ...ASPECTS.map((a) => ({ value: a.value, label: a.label }))]} onChange={(v) => onChange({ aspect: v === 'inherit' ? null : (v as Aspect) })} />
-          </Field>
-        </div>
-      )}
     </div>
   );
 }

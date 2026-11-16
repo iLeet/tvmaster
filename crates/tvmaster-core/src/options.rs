@@ -299,8 +299,44 @@ pub struct ShowOptions {
     pub aspect: Option<Aspect>,
 }
 
+/// What fills the screen when there is nothing to air: an empty schedule, a gap
+/// between programmes, a file that cannot be played, or the sign-off hours.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Screen {
+    /// A station card: the channel's number and name, and a message.
+    #[default]
+    Card,
+    /// SMPTE colour bars, the classic test pattern.
+    Bars,
+    /// Snow.
+    Static,
+    /// Plain black.
+    Black,
+    /// A picture of your own.
+    Image,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct OffAir {
+    #[serde(default)]
+    pub screen: Screen,
+    /// The words on the card; blank = "PLEASE STAND BY".
+    #[serde(default)]
+    pub message: String,
+    /// For `image`: a picture file on the server (png, jpg, gif, webp).
+    #[serde(default)]
+    pub image: Option<String>,
+    /// A steady tone with the bars, hiss with the snow; off = silence.
+    #[serde(default)]
+    pub tone: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ChannelOptions {
+    /// What shows when nothing is on air.
+    #[serde(default)]
+    pub off_air: OffAir,
     #[serde(default)]
     pub audio: AudioPrefs,
     #[serde(default)]
@@ -323,21 +359,38 @@ pub struct Effective {
     pub aspect: Aspect,
 }
 
+impl ShowOptions {
+    /// Check a show's settings (languages) on their own, for show defaults.
+    pub fn validate(&self) -> Result<(), String> {
+        let mut o = ChannelOptions::default();
+        o.shows.insert("x".into(), self.clone());
+        o.validate()
+    }
+}
+
 impl ChannelOptions {
     pub fn for_show(&self, show: Option<&str>) -> Effective {
+        self.for_show_with(show, None)
+    }
+
+    /// The settings while `show` airs: this channel's own override for the show
+    /// first, then the show's defaults (set once for every channel), then the
+    /// channel's base settings.
+    pub fn for_show_with(&self, show: Option<&str>, defaults: Option<&ShowOptions>) -> Effective {
         let mut e = Effective {
             audio: self.audio.clone(),
             subtitles: self.subtitles.clone(),
             look: self.video.look,
             aspect: self.video.aspect,
         };
-        let over = show.and_then(|s| {
+        let channel_override = show.and_then(|s| {
             self.shows
                 .iter()
                 .find(|(k, _)| k.eq_ignore_ascii_case(s.trim()))
                 .map(|(_, v)| v)
         });
-        if let Some(o) = over {
+        // The show's defaults first, then this channel's override on top of them.
+        for o in [defaults, channel_override].into_iter().flatten() {
             if let Some(l) = &o.audio_languages {
                 e.audio.languages = l.clone();
             }
@@ -396,6 +449,25 @@ impl ChannelOptions {
         }
         if !(3..=30).contains(&self.overlay.show_title.seconds) {
             return Err("the programme title stays up 3-30 seconds".into());
+        }
+        if self.off_air.message.chars().count() > 60
+            || self.off_air.message.chars().any(char::is_control)
+        {
+            return Err("the off-air message is at most 60 characters".into());
+        }
+        if let Some(img) = &self.off_air.image {
+            if img.len() > 500 || img.chars().any(char::is_control) {
+                return Err("the off-air picture's path is not valid".into());
+            }
+        }
+        if self.off_air.screen == Screen::Image
+            && self
+                .off_air
+                .image
+                .as_deref()
+                .is_none_or(|i| i.trim().is_empty())
+        {
+            return Err("the off-air picture needs a file".into());
         }
         if self.shows.len() > 300 {
             return Err("too many per-show settings".into());
@@ -492,5 +564,99 @@ mod tests {
         assert!(!bad(
             &|o| o.audio.languages = vec!["English".into(), "ja".into(), "pt-BR".into()]
         ));
+    }
+
+    #[test]
+    fn a_shows_defaults_sit_between_the_channel_and_its_own_override() {
+        let mut o = ChannelOptions::default();
+        o.audio.languages = vec!["eng".into()];
+        o.subtitles.mode = SubMode::Off;
+        o.shows.insert(
+            "Bebop".into(),
+            ShowOptions {
+                subtitles: Some(SubMode::Forced),
+                ..Default::default()
+            },
+        );
+        let defaults = ShowOptions {
+            audio_languages: Some(vec!["jpn".into()]),
+            subtitles: Some(SubMode::Always),
+            look: Some(Look::Vhs),
+            ..Default::default()
+        };
+        let e = o.for_show_with(Some("bebop"), Some(&defaults));
+        assert_eq!(
+            e.audio.languages,
+            vec!["jpn".to_string()],
+            "the show's default beats the channel"
+        );
+        assert_eq!(
+            e.subtitles.mode,
+            SubMode::Forced,
+            "this channel's own override beats the show's default"
+        );
+        assert_eq!(e.look, Look::Vhs);
+        // a show with only defaults, on a channel that says nothing about it
+        let e = o.for_show_with(Some("Other"), Some(&defaults));
+        assert_eq!(e.subtitles.mode, SubMode::Always);
+        // and no defaults at all is the old behaviour
+        assert_eq!(
+            o.for_show_with(Some("Other"), None),
+            o.for_show(Some("Other"))
+        );
+        assert!(defaults.validate().is_ok());
+        assert!(ShowOptions {
+            audio_languages: Some(vec!["en;x".into()]),
+            ..Default::default()
+        }
+        .validate()
+        .is_err());
+    }
+
+    #[test]
+    fn the_off_air_screen_is_chosen_and_checked() {
+        let o: ChannelOptions = serde_json::from_str(
+            r#"{"off_air":{"screen":"bars","tone":true,"message":"BACK SOON"}}"#,
+        )
+        .unwrap();
+        assert_eq!(o.off_air.screen, Screen::Bars);
+        assert!(o.off_air.tone && o.validate().is_ok());
+        assert_eq!(
+            ChannelOptions::default().off_air.screen,
+            Screen::Card,
+            "a card unless you choose otherwise"
+        );
+        let img = |p: Option<&str>| ChannelOptions {
+            off_air: OffAir {
+                screen: Screen::Image,
+                image: p.map(String::from),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(
+            img(None).validate().is_err(),
+            "a picture screen needs a file"
+        );
+        assert!(img(Some("/pics/test.png")).validate().is_ok());
+        let long = ChannelOptions {
+            off_air: OffAir {
+                message: "x".repeat(80),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(long.validate().is_err());
+        // sign-off uses the same screens
+        let so: crate::lineup::SignOff =
+            serde_json::from_str(r#"{"from":"01:00","to":"05:00","style":"black"}"#).unwrap();
+        assert_eq!(so.style, Screen::Black);
+        let default: crate::lineup::SignOff =
+            serde_json::from_str(r#"{"from":"01:00","to":"05:00"}"#).unwrap();
+        assert_eq!(
+            default.style,
+            Screen::Bars,
+            "sign-off still defaults to colour bars"
+        );
     }
 }

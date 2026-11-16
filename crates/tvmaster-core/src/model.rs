@@ -82,6 +82,9 @@ pub enum ChannelKind {
     Programming,
     /// The guide channel: a rendered, scrolling listing of every channel.
     Guide,
+    /// A test-pattern channel: always airs its off-air screen (bars and a tone,
+    /// snow, a card or a picture of your own). Nothing to schedule.
+    Test,
 }
 
 impl ChannelKind {
@@ -89,6 +92,7 @@ impl ChannelKind {
         match self {
             ChannelKind::Programming => "programming",
             ChannelKind::Guide => "guide",
+            ChannelKind::Test => "test",
         }
     }
 
@@ -96,6 +100,7 @@ impl ChannelKind {
         match s {
             "programming" => Some(ChannelKind::Programming),
             "guide" => Some(ChannelKind::Guide),
+            "test" => Some(ChannelKind::Test),
             _ => None,
         }
     }

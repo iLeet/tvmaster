@@ -365,42 +365,93 @@ pub fn slate_args(
     a
 }
 
-/// Arguments for the off-the-air hours: colour bars with a steady tone, or
-/// snow and hiss. (The "card" style is the plain station slate.)
-pub fn signoff_args(
-    style: tvmaster_core::SignOffStyle,
+/// What is drawn behind an off-air screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScreenInput<'a> {
+    Bars,
+    Static,
+    Black,
+    /// A still picture. `pixel_art` scales the station card without smoothing.
+    Picture {
+        path: &'a Path,
+        pixel_art: bool,
+    },
+}
+
+/// Arguments for a screen that holds the air when there is nothing to show:
+/// colour bars, snow, black, or a still picture, with a steady tone (hiss for
+/// snow) or silence.
+pub fn screen_args(
+    input: ScreenInput,
+    tone: bool,
     duration_ms: u64,
     ts_offset_ms: u64,
     p: &OutputProfile,
     enc: Encoder,
 ) -> Vec<String> {
     let dur = secs(duration_ms);
-    let (video, audio) = match style {
-        tvmaster_core::SignOffStyle::Static => (
-            format!(
-                "color=c=gray:s=320x180:r={},noise=alls=100:allf=t+u,scale={}:{}:flags=neighbor",
-                p.fps, p.width, p.height
-            ),
-            "anoisesrc=color=white:sample_rate=48000:amplitude=0.12".to_string(),
-        ),
-        _ => (
-            format!("smptebars=size={}x{}:rate={}", p.width, p.height, p.fps),
-            "sine=frequency=1000:sample_rate=48000,volume=0.25".to_string(),
-        ),
-    };
     let mut a: Vec<String> = ["-hide_banner", "-loglevel", "error", "-nostdin"]
         .iter()
         .map(|s| s.to_string())
         .collect();
     a.extend(hw_init_args(enc));
-    a.extend([
-        "-f".into(),
-        "lavfi".into(),
-        "-t".into(),
-        dur.clone(),
-        "-i".into(),
-        video,
-    ]);
+    let mut vf = String::new();
+    match input {
+        ScreenInput::Bars => a.extend([
+            "-f".into(),
+            "lavfi".into(),
+            "-t".into(),
+            dur.clone(),
+            "-i".into(),
+            format!("smptebars=size={}x{}:rate={}", p.width, p.height, p.fps),
+        ]),
+        ScreenInput::Black => a.extend([
+            "-f".into(),
+            "lavfi".into(),
+            "-t".into(),
+            dur.clone(),
+            "-i".into(),
+            format!("color=c=black:s={}x{}:r={}", p.width, p.height, p.fps),
+        ]),
+        ScreenInput::Static => a.extend([
+            "-f".into(),
+            "lavfi".into(),
+            "-t".into(),
+            dur.clone(),
+            "-i".into(),
+            format!(
+                "color=c=gray:s=320x180:r={},noise=alls=100:allf=t+u,scale={}:{}:flags=neighbor",
+                p.fps, p.width, p.height
+            ),
+        ]),
+        ScreenInput::Picture { path, pixel_art } => {
+            a.extend([
+                "-loop".into(),
+                "1".into(),
+                "-framerate".into(),
+                p.fps.to_string(),
+                "-t".into(),
+                dur.clone(),
+                "-i".into(),
+                path.to_string_lossy().to_string(),
+            ]);
+            vf = if pixel_art {
+                format!("scale={}:{}:flags=neighbor,setsar=1,", p.width, p.height)
+            } else {
+                format!(
+                    "{},",
+                    crate::looks::scale_chain(tvmaster_core::Aspect::Fit, p.width, p.height)
+                )
+            };
+        }
+    }
+    let audio = match (input, tone) {
+        (ScreenInput::Static, true) => {
+            "anoisesrc=color=white:sample_rate=48000:amplitude=0.12".to_string()
+        }
+        (_, true) => "sine=frequency=1000:sample_rate=48000,volume=0.25".to_string(),
+        (_, false) => "anullsrc=r=48000:cl=stereo".to_string(),
+    };
     a.extend([
         "-f".into(),
         "lavfi".into(),
@@ -415,7 +466,7 @@ pub fn signoff_args(
         "-map".into(),
         "1:a:0".into(),
         "-vf".into(),
-        pix_tail(enc).into(),
+        format!("{vf}{}", pix_tail(enc)),
     ]);
     a.extend(video_args(enc, p));
     a.extend([
@@ -1023,12 +1074,69 @@ mod tests {
     }
 
     #[test]
-    fn signoff_is_bars_and_a_tone_or_snow() {
-        use tvmaster_core::SignOffStyle;
+    fn off_air_screens_are_bars_snow_black_or_a_picture_with_a_tone_or_silence() {
         let p = OutputProfile::default();
-        let bars = signoff_args(SignOffStyle::Bars, 30_000, 0, &p, Encoder::Software).join(" ");
+        let join = |a: Vec<String>| a.join(" ");
+        let bars = join(screen_args(
+            ScreenInput::Bars,
+            true,
+            30_000,
+            0,
+            &p,
+            Encoder::Software,
+        ));
         assert!(bars.contains("smptebars=size=1280x720") && bars.contains("sine=frequency=1000"));
-        let snow = signoff_args(SignOffStyle::Static, 30_000, 0, &p, Encoder::Software).join(" ");
+        let snow = join(screen_args(
+            ScreenInput::Static,
+            true,
+            30_000,
+            0,
+            &p,
+            Encoder::Software,
+        ));
         assert!(snow.contains("noise=alls=100") && snow.contains("anoisesrc"));
+        let black = join(screen_args(
+            ScreenInput::Black,
+            false,
+            30_000,
+            0,
+            &p,
+            Encoder::Software,
+        ));
+        assert!(
+            black.contains("color=c=black:s=1280x720") && black.contains("anullsrc"),
+            "silence when no tone"
+        );
+        let card = join(screen_args(
+            ScreenInput::Picture {
+                path: Path::new("/c/card.png"),
+                pixel_art: true,
+            },
+            false,
+            30_000,
+            0,
+            &p,
+            Encoder::Software,
+        ));
+        assert!(
+            card.contains("-loop 1")
+                && card.contains("/c/card.png")
+                && card.contains("flags=neighbor")
+        );
+        let photo = join(screen_args(
+            ScreenInput::Picture {
+                path: Path::new("/pics/a.jpg"),
+                pixel_art: false,
+            },
+            false,
+            30_000,
+            0,
+            &p,
+            Encoder::Software,
+        ));
+        assert!(
+            photo.contains("pad=1280:720") && !photo.contains("flags=neighbor"),
+            "a user's picture keeps its shape: {photo}"
+        );
     }
 }

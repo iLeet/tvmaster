@@ -62,3 +62,13 @@ describe('what a show contains', () => {
     expect(audioMatches({ audio_languages: [] }, ['deu'])).toBe(true);
   });
 });
+
+describe('off-air screen', () => {
+  it('defaults to a station card with no tone, and survives old servers that omit it', async () => {
+    const { SCREENS } = await import('./options');
+    expect(emptyOptions().off_air).toEqual({ screen: 'card', message: '', image: null, tone: false });
+    expect(withDefaults({ audio: { languages: ['jpn'] } } as never).off_air.screen).toBe('card');
+    expect(withDefaults({ off_air: { screen: 'bars', tone: true } } as never).off_air).toEqual({ screen: 'bars', message: '', image: null, tone: true });
+    expect(SCREENS.map((s) => s.value)).toEqual(['card', 'bars', 'static', 'black', 'image']);
+  });
+});

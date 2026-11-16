@@ -17,8 +17,8 @@ pub use looks::{audio_chain, AudioFx, Burn, ClockFx, ItemPlan, OverlayInput};
 pub use manager::Manager;
 pub use probe::{probe_encoder, EncoderProbe};
 pub use profile::{
-    guide_args, item_args, rendered_args, segmenter_args, signoff_args, slate_args, ItemJob,
-    OutputProfile,
+    guide_args, item_args, rendered_args, screen_args, segmenter_args, slate_args, ItemJob,
+    OutputProfile, ScreenInput,
 };
 pub use tvmaster_render::GuideData;
 
@@ -85,6 +85,11 @@ pub trait ScheduleSource: Send + Sync + 'static {
     /// matches the current schedule.
     fn upcoming(&self, _channel: &str, _after_ms: i64, _limit: usize) -> Upcoming {
         Upcoming::default()
+    }
+    /// Settings for `show` that apply on every channel (its audio language,
+    /// subtitles, look), read when the show airs so a change takes effect on the next item.
+    fn show_defaults(&self, _channel: &str, _show: &str) -> Option<tvmaster_core::ShowOptions> {
+        None
     }
     /// The listing to draw on a guide channel at `now_ms`.
     fn guide_data(&self, _channel: &str, _now_ms: i64) -> Option<GuideData> {

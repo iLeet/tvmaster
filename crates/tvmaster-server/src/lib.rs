@@ -415,6 +415,10 @@ fn build_router(state: AppState, https: bool) -> Router {
         .route("/api/v1/auth/logout", post(auth::logout))
         .route("/api/v1/fs/list", get(admin::fs_list))
         .route("/api/v1/shows", get(admin::shows))
+        .route(
+            "/api/v1/show-settings",
+            get(admin::show_settings).put(admin::put_show_settings),
+        )
         .route("/api/v1/system", get(admin::system))
         .route("/stream/:channel/:file", get(stream::hls))
         .route("/iptv/playlist.m3u", get(iptv::playlist))

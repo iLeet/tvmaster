@@ -92,6 +92,13 @@ CREATE TABLE IF NOT EXISTS meta (
     value TEXT NOT NULL
 );
 
+-- Settings that follow a show onto every channel (its audio language, subtitles, look).
+CREATE TABLE IF NOT EXISTS show_settings (
+    show TEXT PRIMARY KEY,   -- lower-cased name
+    name TEXT NOT NULL,
+    json TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS tvs (
     id      TEXT PRIMARY KEY,
     name    TEXT NOT NULL,

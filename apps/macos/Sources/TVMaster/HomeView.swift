@@ -123,6 +123,7 @@ struct ChannelCard: View {
 
     private var nowText: String {
         if channel.isGuide { return "Live listing of every channel" }
+        if channel.isTest { return "Test pattern" }
         guard let now = channel.now else { return "Nothing scheduled" }
         return now.subtitle.map { "\(now.headline) — \($0)" } ?? now.headline
     }

@@ -35,9 +35,35 @@ Subtitles are **burned into the picture**, so every player (IPTV apps, smart TVs
 
 **Requirements.** Text subtitles are drawn by FFmpeg's libass; the server detects whether your FFmpeg has it (`has_subtitles` in `/api/v1/system`, and the channel editor warns when it does not). Picture subtitles (PGS, VobSub) need no libass. Homebrew's FFmpeg on macOS is built without libass; most Linux builds have it. If a subtitle cannot be prepared or the filter fails, the programme airs without it rather than failing, and the file is not reported unplayable.
 
-## Per-show settings
+## Settings that follow a show onto every channel
+
+The **Shows** page of the web admin (and `PUT /api/v1/show-settings`) sets audio languages, subtitle mode and languages, look and screen shape for a show **once, for every channel that airs it**: anime in Japanese with English subtitles everywhere, or a show whose picture already has subtitles burned in set to subtitles **Off**. The order of precedence is:
+
+1. this channel's own override for the show (Picture & sound tab, "this channel"),
+2. the show's own settings (Shows page),
+3. the channel's base settings.
+
+The show's settings are read when each programme goes to air, so a change applies from the next programme without restarting anything.
+
+## Per-show settings on one channel
 
 `options.shows` maps a show name (any case) to overrides of `audio_languages`, `subtitles`, `subtitle_languages`, `look` and `aspect`. Anime in Japanese with English subtitles and everything else plain on the same channel is one entry. The editor lists every show with the languages found in its files.
+
+## When nothing is on air
+
+`options.off_air` chooses what fills the screen whenever there is nothing to show: an empty schedule, a gap between programmes, a file that cannot be played, the padding after a short episode. Before M13 this was always a dark card.
+
+| `screen` | What |
+|---|---|
+| `card` (default) | A station card in the channel's colours: its number and name and your message (`message`, blank = PLEASE STAND BY). Drawn by TVMaster itself, so it needs no FFmpeg text support. |
+| `bars` | SMPTE colour bars. |
+| `static` | Snow. |
+| `black` | Plain black. |
+| `image` | A picture file of your own on the server (`image`: png, jpg, gif, webp, bmp), fitted to the screen. If the file goes missing the card is shown instead. |
+
+`tone` adds a steady 1 kHz tone to the bars, black or picture, and hiss to the snow; off = silence. The sign-off hours use the same screens (bars and snow come with their tone and hiss).
+
+**Test pattern channel.** A channel of kind `test` (Channels, New channel, Test pattern) airs only its off-air screen: colour bars and a tone by default, or whatever you choose. It needs no library and no schedule, so it is a ready-made test signal for checking a TV, a tuner or an IPTV app. Use it however you like: bars with a tone to set levels, black for a screen saver, a picture of your own as a "channel logo" channel.
 
 ## Picture
 
@@ -62,6 +88,10 @@ A look can also be set per show.
 ## Sign-off
 
 `lineup.signoff` = `{ "from": "02:00", "to": "05:00", "style": "bars" }` (local time of the channel, a `to` before `from` runs overnight). During those hours the channel airs SMPTE colour bars with a 1 kHz tone (`bars`), snow and hiss (`static`) or the plain station card (`card`), and the schedule shows "Sign-off". It uses no episodes and moves no cursors, so what airs afterwards is undisturbed; a programme already running at the start finishes first, and the first show afterwards starts on the grid.
+
+## Where the settings are
+
+In the web admin: **Sound & picture** tab of each channel (and a summary of it on the General tab), **Shows** page for per-show settings, **Screen** tab on a test channel. In the Mac app: the channel editor's Picture & sound tab (it says so when the server is too old to have these settings; the web admin is served by the server itself, so an old server shows the old pages).
 
 ## Applying changes
 

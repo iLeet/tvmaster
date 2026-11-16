@@ -27,8 +27,8 @@ pub use lineup::{
 pub use model::{Channel, ChannelKind, GuideConfig, RunOutPolicy, Strategy, Tv};
 pub use options::{
     Aspect, AudioPrefs, BugOptions, ChannelOptions, ClockOptions, Corner, Deinterlace, Effective,
-    Look, Loudness, OverlayOptions, Quality, ShowOptions, ShowTitleOptions, SubMode, SubPrefs,
-    SubSize, SubStyle, VideoOptions,
+    Look, Loudness, OffAir, OverlayOptions, Quality, Screen, ShowOptions, ShowTitleOptions,
+    SubMode, SubPrefs, SubSize, SubStyle, VideoOptions,
 };
 pub use rng::fnv1a;
 pub use scheduler::{

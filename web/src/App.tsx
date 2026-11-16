@@ -9,6 +9,7 @@ import { ChannelEditor } from './pages/ChannelEditor';
 import { Dashboard } from './pages/Dashboard';
 import { Libraries } from './pages/Libraries';
 import { Remote } from './pages/Remote';
+import { Shows } from './pages/Shows';
 import { Schedule } from './pages/Schedule';
 import { Settings } from './pages/Settings';
 import { Tvs } from './pages/Tvs';
@@ -18,6 +19,7 @@ const NAV: { path: string; label: string; icon: string }[] = [
   { path: 'channels', label: 'Channels', icon: 'channels' },
   { path: 'schedule', label: 'Schedule', icon: 'calendar' },
   { path: 'libraries', label: 'Libraries', icon: 'folder' },
+  { path: 'shows', label: 'Shows', icon: 'tv' },
   { path: 'tvs', label: 'TVs', icon: 'tv' },
   { path: 'remote', label: 'Remote', icon: 'remote' },
   { path: 'settings', label: 'Settings', icon: 'settings' },
@@ -73,6 +75,9 @@ function Shell() {
       break;
     case 'libraries':
       page = <Libraries />;
+      break;
+    case 'shows':
+      page = <Shows />;
       break;
     case 'tvs':
       page = <Tvs />;

@@ -265,6 +265,11 @@ impl ScheduleSource for DbSchedule {
         })
     }
 
+    fn show_defaults(&self, _channel: &str, show: &str) -> Option<tvmaster_core::ShowOptions> {
+        let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
+        tvmaster_db::get_show_settings(&db, show).ok().flatten()
+    }
+
     fn guide_data(&self, channel: &str, now_ms: i64) -> Option<GuideData> {
         let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
         build_guide(&db, channel, now_ms)

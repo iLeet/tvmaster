@@ -780,6 +780,60 @@ pub fn get_tv(conn: &Connection, id: &str) -> Result<Option<Tv>> {
     .optional()
 }
 
+// ---------- per-show settings ----------
+
+/// A show's settings, as set once for every channel.
+pub fn get_show_settings(
+    conn: &Connection,
+    show: &str,
+) -> Result<Option<tvmaster_core::ShowOptions>> {
+    let json: Option<String> = conn
+        .query_row(
+            "SELECT json FROM show_settings WHERE show = ?1",
+            [show.trim().to_lowercase()],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(json.and_then(|j| serde_json::from_str(&j).ok()))
+}
+
+/// Every show that has settings: (name as written, settings).
+pub fn list_show_settings(conn: &Connection) -> Result<Vec<(String, tvmaster_core::ShowOptions)>> {
+    let mut st = conn.prepare("SELECT name, json FROM show_settings ORDER BY show")?;
+    let rows = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+    let mut out = Vec::new();
+    for row in rows {
+        let (name, json) = row?;
+        if let Ok(o) = serde_json::from_str(&json) {
+            out.push((name, o));
+        }
+    }
+    Ok(out)
+}
+
+/// Save a show's settings; settings with nothing in them remove the entry.
+pub fn set_show_settings(
+    conn: &Connection,
+    show: &str,
+    settings: &tvmaster_core::ShowOptions,
+) -> Result<()> {
+    let key = show.trim().to_lowercase();
+    if *settings == tvmaster_core::ShowOptions::default() {
+        conn.execute("DELETE FROM show_settings WHERE show = ?1", [key])?;
+        return Ok(());
+    }
+    conn.execute(
+        "INSERT INTO show_settings (show, name, json) VALUES (?1, ?2, ?3)
+         ON CONFLICT(show) DO UPDATE SET name = excluded.name, json = excluded.json",
+        params![
+            key,
+            show.trim(),
+            serde_json::to_string(settings).unwrap_or_else(|_| "{}".into())
+        ],
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1152,5 +1206,35 @@ mod tests {
         assert_eq!(get_tv(&c, "den").unwrap().unwrap(), tv);
         assert_eq!(list_tvs(&c).unwrap().len(), 1);
         assert!(get_tv(&c, "nope").unwrap().is_none());
+    }
+
+    #[test]
+    fn show_settings_are_kept_by_lower_case_name_and_cleared_when_empty() {
+        use tvmaster_core::{ShowOptions, SubMode};
+        let c = crate::open_in_memory().unwrap();
+        assert_eq!(get_show_settings(&c, "Bebop").unwrap(), None);
+        let s = ShowOptions {
+            audio_languages: Some(vec!["jpn".into()]),
+            subtitles: Some(SubMode::Always),
+            ..Default::default()
+        };
+        set_show_settings(&c, "Cowboy Bebop", &s).unwrap();
+        assert_eq!(
+            get_show_settings(&c, "  cowboy BEBOP ").unwrap(),
+            Some(s.clone())
+        );
+        // changing it replaces it, and the name keeps the spelling it was saved with
+        let s2 = ShowOptions {
+            subtitles: Some(SubMode::Off),
+            ..Default::default()
+        };
+        set_show_settings(&c, "cowboy bebop", &s2).unwrap();
+        let all = list_show_settings(&c).unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].0, "cowboy bebop");
+        assert_eq!(all[0].1, s2);
+        // nothing in it: removed
+        set_show_settings(&c, "Cowboy Bebop", &ShowOptions::default()).unwrap();
+        assert!(list_show_settings(&c).unwrap().is_empty());
     }
 }

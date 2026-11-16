@@ -1,7 +1,16 @@
 // Pure helpers for the channel's picture, sound and on-screen options.
 // Kept free of React so they can be unit tested.
 
-import type { ChannelOptions, ShowOptions, ShowSummary } from './types';
+import type { ChannelOptions, Screen, ShowOptions, ShowSummary } from './types';
+
+/** The screens that can fill the picture when nothing is on air (and during sign-off). */
+export const SCREENS: { value: Screen; label: string; help: string }[] = [
+  { value: 'card', label: 'Station card', help: "The channel's number and name with a message, in its colours." },
+  { value: 'bars', label: 'Colour bars', help: 'SMPTE colour bars, the classic test pattern.' },
+  { value: 'static', label: 'Snow', help: 'Static.' },
+  { value: 'black', label: 'Black', help: 'A plain black screen.' },
+  { value: 'image', label: 'My picture', help: 'A picture file on the server (png, jpg, gif, webp).' },
+];
 
 /** Languages offered in the pickers: code (as the server stores it) and name. */
 export const LANGUAGES: [string, string][] = [
@@ -22,6 +31,7 @@ export function langName(code: string): string {
 
 export function emptyOptions(): ChannelOptions {
   return {
+    off_air: { screen: 'card', message: '', image: null, tone: false },
     audio: { languages: [], avoid_commentary: true, avoid_description: true, loudness: 'off', night_mode: false, dialogue_boost: false, mono: false },
     subtitles: { mode: 'off', languages: [], size: 'medium', style: 'outline' },
     video: { aspect: 'fit', deinterlace: 'auto', quality: '720', fps: null, kbps: null, look: 'none' },
@@ -38,6 +48,7 @@ export function emptyOptions(): ChannelOptions {
 export function withDefaults(o: Partial<ChannelOptions> | null | undefined): ChannelOptions {
   const d = emptyOptions();
   return {
+    off_air: { ...d.off_air, ...o?.off_air },
     audio: { ...d.audio, ...o?.audio },
     subtitles: { ...d.subtitles, ...o?.subtitles },
     video: { ...d.video, ...o?.video },

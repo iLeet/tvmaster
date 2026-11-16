@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api, errorMessage } from '../api';
 import { emptyLineup, lineupSummary, nextFreeNumber, slugify, validateId } from '../lib';
 import { useQuery } from '../live';
-import { emptyOptions, withDefaults } from '../options';
+import { emptyOptions, langName, withDefaults } from '../options';
 import { href, navigate } from '../router';
 import type { Channel, ChannelOptions, ChannelView, GuideConfig, Library, RunOut, ShowSummary, Strategy, System } from '../types';
 import { Badge, Btn, Card, Chips, ConfirmBtn, Field, Segmented, Spinner, Toggle, useToast } from '../ui';
@@ -15,7 +15,7 @@ interface Draft {
   number: number;
   name: string;
   group: string;
-  kind: 'programming' | 'guide';
+  kind: 'programming' | 'guide' | 'test';
   strategy: Strategy;
   run_out: RunOut;
   chaos: number;
@@ -33,6 +33,14 @@ const STRATEGIES: { value: Strategy; label: string; help: string }[] = [
   { value: 'chaos', label: 'Chaos', help: 'Anything, at random.' },
   { value: 'block_grid', label: 'TV schedule', help: 'A real weekly lineup: time slots, seasons and events (see the Programming tab).' },
 ];
+
+function soundSummary(o: ChannelOptions): string {
+  const langs = o.audio.languages.length ? o.audio.languages.map(langName).join(', then ') : "the file's own default track";
+  const subs = { off: 'no subtitles', always: 'subtitles always', forced: 'forced subtitles only', foreign: 'subtitles when the audio is foreign', sdh: 'subtitles for the hard of hearing' }[o.subtitles.mode];
+  const n = Object.keys(o.shows).length;
+  const extras = [o.audio.loudness !== 'off' ? 'volume levelling' : '', o.video.look !== 'none' ? `${o.video.look.replace('_', ' ')} look` : '', n ? `${n} show override${n === 1 ? '' : 's'}` : ''].filter(Boolean);
+  return `Audio: ${langs}. ${subs[0].toUpperCase()}${subs.slice(1)}.${extras.length ? ` ${extras.join(', ')}.` : ''}`;
+}
 
 const RUN_OUT: { value: RunOut; label: string; help: string }[] = [
   { value: 'keep_going', label: 'Keep going', help: 'After the last episode, wrap to the first and carry on.' },
@@ -81,7 +89,7 @@ export function ChannelEditor({ id, tab }: { id: string; tab: string }) {
 
   const dirty = draft !== null && JSON.stringify(draft) !== saved;
   const groups = useMemo(() => Array.from(new Set((all.data ?? []).map((c) => c.group).filter(Boolean) as string[])), [all.data]);
-  const shownTab = draft?.kind === 'guide' && (tab === 'programming' || tab === 'ads') ? 'guide' : draft?.kind === 'programming' && tab === 'guide' ? 'general' : tab;
+  const shownTab = draft?.kind === 'test' && (tab === 'programming' || tab === 'ads' || tab === 'guide') ? 'general' : draft?.kind === 'guide' && (tab === 'programming' || tab === 'ads') ? 'guide' : draft?.kind === 'programming' && tab === 'guide' ? 'general' : tab;
 
   if (!draft) {
     return (
@@ -109,6 +117,8 @@ export function ChannelEditor({ id, tab }: { id: string; tab: string }) {
       };
       if (draft.kind === 'programming') {
         Object.assign(body, { strategy: draft.strategy, run_out: draft.run_out, chaos: draft.chaos, library_ids: draft.library_ids, lineup: draft.lineup, options: draft.options });
+      } else if (draft.kind === 'test') {
+        body.options = draft.options;
       } else {
         body.guide = draft.guide;
       }
@@ -126,7 +136,9 @@ export function ChannelEditor({ id, tab }: { id: string; tab: string }) {
 
   const tabs = draft.kind === 'guide'
     ? [['general', 'General'], ['guide', 'Guide']]
-    : [['general', 'General'], ['programming', 'Programming'], ['picture', 'Picture & sound'], ['ads', 'Ads & bumpers']];
+    : draft.kind === 'test'
+    ? [['general', 'General'], ['picture', 'Screen']]
+    : [['general', 'General'], ['programming', 'Programming'], ['picture', 'Sound & picture'], ['ads', 'Ads & bumpers']];
   const goTab = (t: string) => navigate(`channels/${id}${t === 'general' ? '' : `?tab=${t}`}`);
 
   return (
@@ -169,7 +181,7 @@ export function ChannelEditor({ id, tab }: { id: string; tab: string }) {
             </div>
             {isNew && (
               <Field label="Kind">
-                <Segmented value={draft.kind} options={[{ value: 'programming', label: 'Programming channel' }, { value: 'guide', label: 'Guide channel' }]} onChange={(kind) => set({ kind })} />
+                <Segmented value={draft.kind} options={[{ value: 'programming', label: 'Programming channel' }, { value: 'guide', label: 'Guide channel' }, { value: 'test', label: 'Test pattern' }]} onChange={(kind) => set(kind === 'test' ? { kind, options: { ...draft.options, off_air: { ...draft.options.off_air, screen: 'bars', tone: true } } } : { kind })} />
               </Field>
             )}
           </Card>
@@ -197,6 +209,18 @@ export function ChannelEditor({ id, tab }: { id: string; tab: string }) {
             </>
           )}
 
+          {draft.kind === 'programming' && !isNew && (
+            <Card className="stack">
+              <div className="row between wrap">
+                <h2 style={{ margin: 0 }}>Sound &amp; subtitles</h2>
+                <Btn small onClick={() => goTab('picture')}>Audio, subtitles and picture options…</Btn>
+              </div>
+              <p className="small dim">{soundSummary(draft.options)}</p>
+            </Card>
+          )}
+
+          {draft.kind === 'test' && <p className="small dim">A test pattern channel airs only its screen: colour bars and a tone by default, or snow, black, a station card or a picture of your own. Choose it on the Screen tab.</p>}
+
           <Card className="stack">
             <h2>Running it</h2>
             <Toggle checked={draft.autopilot} onChange={(v) => set({ autopilot: v })} label={<span><strong>Autopilot</strong> <span className="dim">— edits re-roll the future automatically (off = manual lock until you re-roll)</span></span>} />
@@ -214,6 +238,10 @@ export function ChannelEditor({ id, tab }: { id: string; tab: string }) {
 
       {shownTab === 'programming' && draft.kind === 'programming' && (
         <LineupEditor lineup={draft.lineup} shows={shownShows} onChange={(lineup) => set({ lineup, ...(draft.strategy !== 'block_grid' && lineup.blocks.length > 0 ? { strategy: 'block_grid' as Strategy } : {}) })} />
+      )}
+
+      {shownTab === 'picture' && draft.kind === 'test' && (
+        <PictureSound options={draft.options} onChange={(options) => set({ options })} lineup={draft.lineup} onLineup={(lineup) => set({ lineup })} shows={[]} sys={sys.data ?? undefined} testOnly />
       )}
 
       {shownTab === 'picture' && draft.kind === 'programming' && (

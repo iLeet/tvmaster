@@ -2,7 +2,7 @@
 //! and the "now playing" lower third. Drawn in the same chunky pixel font as
 //! the bumpers, as transparent PNGs that FFmpeg overlays.
 
-use crate::{png, text_width, Canvas};
+use crate::{png, text_width, Canvas, Theme};
 
 /// Transparent background key: never used for drawing.
 const KEY: [u8; 3] = [255, 0, 255];
@@ -70,6 +70,40 @@ pub fn lower_third(title: &str, subtitle: &str, width: u32) -> Graphic {
     to_png(&c, 235)
 }
 
+/// A full-screen station card: the channel's number and name, and a message,
+/// in the channel's colours. 640x360, to be scaled up without smoothing.
+pub fn station_card(theme: &Theme, number: u32, name: &str, message: &str) -> Graphic {
+    let (w, h) = (crate::WIDTH, crate::HEIGHT);
+    let mut c = Canvas::new(w, h);
+    c.vgradient(theme.dark, [4, 6, 12]);
+    c.rect(0, 0, w as i32, 6, theme.primary);
+    c.rect(0, h as i32 - 6, w as i32, 6, theme.accent);
+    let num = number.to_string();
+    c.text_centered(70, &num, 10, theme.primary);
+    let name: String = name.chars().take(24).collect();
+    c.text_centered(190, &name, 3, [255, 255, 255]);
+    let msg: String = if message.trim().is_empty() {
+        "PLEASE STAND BY".into()
+    } else {
+        message.trim().chars().take(36).collect()
+    };
+    let scale = if msg.chars().count() > 22 { 2 } else { 3 };
+    c.text_centered(262, &msg, scale, theme.accent);
+    Graphic {
+        w: w as u32,
+        h: h as u32,
+        png: png::rgba_png(w as u32, h as u32, &rgba_opaque(&c)),
+    }
+}
+
+fn rgba_opaque(c: &Canvas) -> Vec<u8> {
+    let mut out = Vec::with_capacity(c.w * c.h * 4);
+    for p in c.px.as_chunks::<3>().0 {
+        out.extend([p[0], p[1], p[2], 255]);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -129,5 +163,15 @@ mod tests {
         assert!(solid > 0);
         // wider than allowed is clamped
         assert_eq!(lower_third("x", "", 5000).w, 900);
+    }
+
+    #[test]
+    fn a_station_card_is_a_full_opaque_frame_with_the_channels_colours() {
+        let g = station_card(&Theme::for_channel("retro"), 4, "Retro TV", "");
+        assert_eq!((g.w, g.h), (640, 360));
+        assert_eq!(decoded_alpha(&g), (0, 640 * 360), "every pixel opaque");
+        // a different message gives a different picture
+        let other = station_card(&Theme::for_channel("retro"), 4, "Retro TV", "BACK AT NINE");
+        assert_ne!(g.png, other.png);
     }
 }

@@ -36,10 +36,11 @@ export function Channels() {
                         <div className="row">
                           <strong className="ellipsis">{c.name}</strong>
                           {c.kind === 'guide' && <Badge tone="accent">Guide</Badge>}
+                          {c.kind === 'test' && <Badge tone="accent">Test pattern</Badge>}
                           {c.autopilot ? <Badge tone="ok">Autopilot</Badge> : <Badge tone="warn">Locked</Badge>}
                         </div>
                         <div className="small dim ellipsis">
-                          {c.kind === 'guide' ? `${c.guide.hours}-hour live guide` : c.strategy === 'block_grid' || c.lineup.blocks.length ? lineupSummary(c.lineup) : `${c.strategy.replace('_', ' ')}${c.chaos ? ` · chaos ${c.chaos}%` : ''}`}
+                          {c.kind === 'guide' ? `${c.guide.hours}-hour live guide` : c.kind === 'test' ? `Test pattern: ${c.options?.off_air?.screen ?? 'card'}` : c.strategy === 'block_grid' || c.lineup.blocks.length ? lineupSummary(c.lineup) : `${c.strategy.replace('_', ' ')}${c.chaos ? ` · chaos ${c.chaos}%` : ''}`}
                         </div>
                       </div>
                       <span className={`dot ${c.on_air ? 'on' : ''}`} />

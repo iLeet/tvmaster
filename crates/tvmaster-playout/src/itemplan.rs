@@ -127,7 +127,17 @@ pub(crate) async fn plan_item(
     offset_ms: u64,
 ) -> ItemPlan {
     let opts = &spec.options;
-    let eff = opts.for_show(item.show.as_deref());
+    let defaults = match item.show.clone() {
+        Some(show) => {
+            let (source, id) = (spec.source.clone(), spec.id.clone());
+            tokio::task::spawn_blocking(move || source.show_defaults(&id, &show))
+                .await
+                .ok()
+                .flatten()
+        }
+        None => None,
+    };
+    let eff = opts.for_show_with(item.show.as_deref(), defaults.as_ref());
     let mut plan = ItemPlan {
         look: eff.look,
         aspect: eff.aspect,

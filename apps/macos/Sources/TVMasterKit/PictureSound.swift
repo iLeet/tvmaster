@@ -88,6 +88,11 @@ public struct PictureSoundSettings: Equatable, Sendable {
     public var titleSeconds = 8
     public var clockEnabled = false
 
+    public var offAirScreen = "card"
+    public var offAirMessage = ""
+    public var offAirImage = ""
+    public var offAirTone = false
+
     public var signOffEnabled = false
     public var signOffFrom = "02:00"
     public var signOffTo = "05:00"
@@ -102,7 +107,11 @@ public struct PictureSoundSettings: Equatable, Sendable {
     ]
     public static let aspects: [(value: String, label: String)] = [("fit", "Fit (bars if needed)"), ("fill", "Fill (crop edges)"), ("stretch", "Stretch")]
     public static let qualities: [(value: String, label: String)] = [("480", "480p"), ("720", "720p"), ("1080", "1080p")]
-    public static let signOffStyles: [(value: String, label: String)] = [("bars", "Colour bars"), ("static", "Snow"), ("card", "Station card")]
+    /// What can fill the screen when nothing is on air (and during sign-off).
+    public static let screens: [(value: String, label: String)] = [
+        ("card", "Station card"), ("bars", "Colour bars"), ("static", "Snow"), ("black", "Black"), ("image", "My picture"),
+    ]
+    public static let signOffStyles = screens
 
     public init() {}
 
@@ -116,6 +125,10 @@ public struct PictureSoundSettings: Equatable, Sendable {
         nightMode = bool(["audio", "night_mode"], false)
         dialogueBoost = bool(["audio", "dialogue_boost"], false)
         mono = bool(["audio", "mono"], false)
+        offAirScreen = str(["off_air", "screen"], "card")
+        offAirMessage = str(["off_air", "message"], "")
+        offAirImage = options?.get(["off_air", "image"])?.stringValue ?? ""
+        offAirTone = bool(["off_air", "tone"], false)
         subtitleMode = str(["subtitles", "mode"], "off")
         subtitleLanguages = options?.get(["subtitles", "languages"])?.stringArray ?? []
         subtitleSize = str(["subtitles", "size"], "medium")
@@ -148,6 +161,10 @@ public struct PictureSoundSettings: Equatable, Sendable {
         o.set(["audio", "night_mode"], .bool(nightMode))
         o.set(["audio", "dialogue_boost"], .bool(dialogueBoost))
         o.set(["audio", "mono"], .bool(mono))
+        o.set(["off_air", "screen"], .string(offAirScreen))
+        o.set(["off_air", "message"], .string(offAirMessage))
+        o.set(["off_air", "image"], offAirImage.isEmpty ? .null : .string(offAirImage))
+        o.set(["off_air", "tone"], .bool(offAirTone))
         o.set(["subtitles", "mode"], .string(subtitleMode))
         o.set(["subtitles", "languages"], strings(subtitleLanguages))
         o.set(["subtitles", "size"], .string(subtitleSize))

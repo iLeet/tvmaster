@@ -128,17 +128,11 @@ pub struct Lineup {
     pub signoff: Option<SignOff>,
 }
 
-/// What airs while the station is signed off.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SignOffStyle {
-    /// SMPTE colour bars with a steady tone.
-    #[default]
-    Bars,
-    /// Static and hiss.
-    Static,
-    /// The plain station card.
-    Card,
+/// What airs while the station is signed off: the same screens as when nothing is on air.
+pub type SignOffStyle = crate::options::Screen;
+
+fn signoff_screen() -> SignOffStyle {
+    SignOffStyle::Bars
 }
 
 /// Off the air from `from` to `to` every day (local time); a `to` before `from`
@@ -147,7 +141,7 @@ pub enum SignOffStyle {
 pub struct SignOff {
     pub from: String,
     pub to: String,
-    #[serde(default)]
+    #[serde(default = "signoff_screen")]
     pub style: SignOffStyle,
 }
 

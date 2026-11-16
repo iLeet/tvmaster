@@ -79,7 +79,17 @@ public struct Program: Codable, Sendable, Hashable, Identifiable {
     }
 }
 
-public enum ChannelKind: String, Codable, Sendable { case programming, guide }
+public enum ChannelKind: String, Codable, Sendable {
+    case programming, guide
+    /// A test-pattern channel: only airs its off-air screen.
+    case test
+
+    /// A kind this app does not know yet (a newer server) is treated as ordinary programming.
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = ChannelKind(rawValue: raw) ?? .programming
+    }
+}
 
 public enum Strategy: String, Codable, Sendable, CaseIterable, Identifiable {
     case sequential, shuffle, chaos
@@ -140,6 +150,9 @@ public struct Channel: Codable, Sendable, Hashable, Identifiable {
     public var next: Program?
 
     public var isGuide: Bool { kind == .guide }
+    public var isTest: Bool { kind == .test }
+    /// Has a schedule worth showing (neither the live guide nor a test pattern).
+    public var isScheduled: Bool { kind == .programming }
     public var timeZone: TimeZone? {
         lineup["timezone"]?.stringValue.flatMap { $0.isEmpty ? nil : TimeZone(identifier: $0) }
     }

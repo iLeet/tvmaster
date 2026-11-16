@@ -146,7 +146,57 @@ pub async fn shows(
         .split(',')
         .filter_map(|p| p.trim().parse().ok())
         .collect();
-    Ok(Json(json!(tvmaster_db::list_shows(&s.db(), &ids)?)))
+    let db = s.db();
+    let settings = tvmaster_db::list_show_settings(&db)?;
+    let mut shows = json!(tvmaster_db::list_shows(&db, &ids)?);
+    // Attach each show's own settings (the ones that follow it onto every channel).
+    if let Some(list) = shows.as_array_mut() {
+        for row in list {
+            let name = row["name"].as_str().unwrap_or("").to_lowercase();
+            row["defaults"] = settings
+                .iter()
+                .find(|(n, _)| n.to_lowercase() == name)
+                .map(|(_, o)| json!(o))
+                .unwrap_or(Value::Null);
+        }
+    }
+    Ok(Json(shows))
+}
+
+#[derive(serde::Deserialize)]
+pub struct ShowSettingsInput {
+    show: String,
+    #[serde(default)]
+    settings: tvmaster_core::ShowOptions,
+}
+
+/// Every show that has settings of its own: `{ "Cowboy Bebop": {…} }`.
+pub async fn show_settings(State(s): State<AppState>) -> ApiResult<Json<Value>> {
+    let map: serde_json::Map<String, Value> = tvmaster_db::list_show_settings(&s.db())?
+        .into_iter()
+        .map(|(n, o)| (n, json!(o)))
+        .collect();
+    Ok(Json(Value::Object(map)))
+}
+
+/// Set (or, with empty settings, clear) a show's settings for every channel.
+pub async fn put_show_settings(
+    State(s): State<AppState>,
+    Json(body): Json<ShowSettingsInput>,
+) -> ApiResult<Json<Value>> {
+    if body.show.trim().is_empty() || body.show.len() > 120 {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "a show name is required",
+        ));
+    }
+    body.settings
+        .validate()
+        .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, format!("invalid settings: {e}")))?;
+    tvmaster_db::set_show_settings(&s.db(), &body.show, &body.settings)?;
+    Ok(Json(
+        json!({ "show": body.show.trim(), "settings": body.settings }),
+    ))
 }
 
 pub async fn system(State(s): State<AppState>) -> Json<Value> {

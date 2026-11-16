@@ -120,7 +120,7 @@ docs/                 plan, API, design
 
 ## 12. Milestones
 
-Status: **M1-M12 done** (see notes below). Still to come: Apple notarization and a trusted Windows certificate (need your accounts), native Windows and Linux shells, HTTPS.
+Status: **M1-M13 done** (see notes below). Still to come: Apple notarization and a trusted Windows certificate (need your accounts), native Windows and Linux shells, HTTPS.
 
 1. **Foundation:** repo, workspace, CI matrix, FFmpeg manager, library scanner, SQLite schema, API skeleton.
 2. **One channel on air:** playout runner, HLS/M3U/XMLTV, shuffle + sequential, web player, watchdog, service installers, state recovery.
@@ -240,3 +240,13 @@ Golden-file schedule tests (same seed → same schedule), fake-FFmpeg harness fo
 - **UI:** web channel editor tab **Picture & sound** (language lists, every option, sign-off, per-show overrides with the languages found in each show's files and a re-scan hint); the Mac channel editor has the main settings, reading and writing the server's raw JSON so unseen settings (per-show overrides) survive an edit.
 - **Verified:** see the end of [CHANNEL-OPTIONS.md](CHANNEL-OPTIONS.md): measurements on real streams from real multi-track files (pitch of the chosen audio, burned subtitle brightness, logo/card timing, no colour in black and white, 480p/24fps, sign-off bars and tone).
 - **Known limits:** picture (bitmap) subtitles could not be generated here, so only their FFmpeg arguments are tested; the clock needs FFmpeg's drawtext (absent from Homebrew's build); text-subtitle encodings other than UTF-8 are not converted; per-show settings are edited in the web admin only; no per-file track override; a channel restart is needed for option changes (it happens automatically on save).
+
+## 26. M13 notes (off-air screens, test channel, show settings)
+
+- **Off-air screen:** one mechanism (`screen_args` and `off_air_screen` in playout) for every moment nothing airs: empty schedule, gaps, unplayable files, filler padding and sign-off. Card (drawn by the render crate as a PNG, no drawtext needed), bars, snow, black, or the owner's picture, each with an optional tone. A missing picture or a failing filter falls back to the card, then to the old plain slate, so the channel never goes dark.
+- **Test pattern channel:** `ChannelKind::Test`, a channel with no schedule that airs its off-air screen. The Mac app's channel decoder now treats a channel kind it does not know as ordinary programming instead of failing the whole list (a newer server must not break an older app).
+- **Show settings:** `show_settings` table and `/api/v1/show-settings`; playout asks the schedule source for a show's settings each time a programme goes to air (`ScheduleSource::show_defaults`), so a change applies from the next programme. Precedence: the channel's override for the show, then the show's settings, then the channel's base.
+- **Web:** a Shows page, an off-air card in Sound & picture (renamed from Picture & sound), a Sound & subtitles summary on the channel's General tab, Test pattern in the new-channel chooser. The Mac editor has the off-air screen and the test kind.
+- **Verified:** real streams: bars with a 1000 Hz tone, black, a card with colour and text, the owner's picture in the centre of the frame, the card after a missing picture; the show's own audio language beating the channel's and the channel's override beating the show's; the web Shows page saving to the API; the real test channel streamed over HTTP (bars and tone measured).
+- **Known limits:** the off-air picture is a path on the server (no upload); sign-off and off-air share one picture; show settings have no Mac UI (web only); an old server with an old embedded web UI will not show any of this until it is updated.
+

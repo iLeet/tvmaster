@@ -188,4 +188,25 @@ struct PictureSoundTests {
         #expect(Language.name("") == "Unknown")
         #expect(Language.all.count >= 30)
     }
+
+    @Test func offAirScreenRoundTripsAndKeepsAnImageOnlyWhenChosen() throws {
+        let r = JSONValue(any: try JSONSerialization.jsonObject(with: Data(#"{"off_air":{"screen":"image","message":"BACK SOON","image":"/pics/a.png","tone":true}}"#.utf8)))
+        var s = PictureSoundSettings(options: r, lineup: nil)
+        #expect(s.offAirScreen == "image" && s.offAirMessage == "BACK SOON" && s.offAirImage == "/pics/a.png" && s.offAirTone)
+        s.offAirScreen = "bars"
+        s.offAirImage = ""
+        let o = s.apply(to: r)
+        #expect(o.get(["off_air", "screen"])?.stringValue == "bars")
+        #expect(o.get(["off_air", "image"]) == .null)
+        #expect(o.get(["off_air", "tone"])?.boolValue == true)
+        #expect(PictureSoundSettings.screens.map(\.value) == ["card", "bars", "static", "black", "image"])
+    }
+
+    @Test func aChannelKindThisAppDoesNotKnowIsTreatedAsProgrammingNotAFailure() throws {
+        struct Holder: Decodable { var kind: ChannelKind }
+        let test = try JSONDecoder().decode(Holder.self, from: Data(#"{"kind":"test"}"#.utf8))
+        #expect(test.kind == .test)
+        let future = try JSONDecoder().decode(Holder.self, from: Data(#"{"kind":"holodeck"}"#.utf8))
+        #expect(future.kind == .programming, "one new kind must not break the whole channel list")
+    }
 }

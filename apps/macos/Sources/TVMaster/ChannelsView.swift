@@ -27,6 +27,7 @@ struct ChannelsView: View {
                                     HStack(spacing: 6) {
                                         Text(ch.name).fontWeight(.semibold)
                                         if ch.isGuide { Badge(text: "Guide") }
+                                        if ch.isTest { Badge(text: "Test pattern") }
                                         Badge(text: ch.autopilot ? "Autopilot" : "Locked", color: ch.autopilot ? .green : .orange)
                                         if let g = ch.group { Text(g).font(.caption).foregroundStyle(.secondary) }
                                     }
@@ -50,6 +51,7 @@ struct ChannelsView: View {
 
     private func summary(_ ch: Channel) -> String {
         if ch.isGuide { return "\(ch.guide.hours)-hour live guide" }
+        if ch.isTest { return "Test pattern" }
         let l = ch.lineupSummary
         return l.isEmpty ? "\(ch.strategy.label)\(ch.chaos > 0 ? " · chaos \(ch.chaos)%" : "")" : l
     }
@@ -75,6 +77,7 @@ struct ChannelEditorSheet: View {
     @State private var number = 2
     @State private var group = ""
     @State private var isGuide = false
+    @State private var isTest = false
     @State private var strategy: Strategy = .sequential
     @State private var runOut: RunOut = .keepGoing
     @State private var chaos = 0.0
@@ -90,6 +93,7 @@ struct ChannelEditorSheet: View {
     @State private var psOriginal = PictureSoundSettings()
     @State private var rawOptions: JSONValue?
     @State private var rawLineup: JSONValue?
+    @State private var loadingRaw = true
     private enum Tab: String, CaseIterable { case general = "General", picture = "Picture & sound" }
 
     private var isNew: Bool { channel == nil }
@@ -103,7 +107,7 @@ struct ChannelEditorSheet: View {
                     .pickerStyle(.segmented).labelsHidden().padding([.horizontal, .top], 16)
             }
             if tab == .picture && !isGuide && !isNew {
-                PictureSoundForm(ps: $ps, sys: model.system)
+                PictureSoundForm(ps: $ps, sys: model.system, testOnly: isTest, oldServer: rawOptions == nil && !loadingRaw)
             } else {
             Form {
                 Section {
@@ -115,10 +119,18 @@ struct ChannelEditorSheet: View {
                     TextField("Group", text: $group, prompt: Text("Kids, Movies, …"))
                     if isNew {
                         TextField("Id", text: $id).font(.body.monospaced())
-                        Picker("Kind", selection: $isGuide) { Text("Programming channel").tag(false); Text("Guide channel").tag(true) }
+                        Picker("Kind", selection: Binding(get: { isGuide ? 2 : isTest ? 1 : 0 }, set: { isGuide = $0 == 2; isTest = $0 == 1; if isTest { ps.offAirScreen = "bars"; ps.offAirTone = true } })) {
+                            Text("Programming channel").tag(0); Text("Test pattern").tag(1); Text("Guide channel").tag(2)
+                        }
                     }
                 }
-                if !isGuide {
+                if isTest {
+                    Section("Test pattern") {
+                        Text("A test pattern channel airs only its screen: colour bars and a tone by default. Choose the screen on the Picture & sound tab after creating it.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                if !isGuide && !isTest {
                     Section("What it airs") {
                         let shows = model.libraries.filter { $0.kind == .shows }
                         if shows.isEmpty { Text("Add a TV shows library first.").foregroundStyle(.secondary) }
@@ -166,7 +178,7 @@ struct ChannelEditorSheet: View {
             guard !loaded else { return }
             loaded = true
             if let c = channel {
-                name = c.name; id = c.id; number = c.number; group = c.group ?? ""; isGuide = c.isGuide
+                name = c.name; id = c.id; number = c.number; group = c.group ?? ""; isGuide = c.isGuide; isTest = c.isTest
                 strategy = c.strategy; runOut = c.runOut; chaos = Double(c.chaos); autopilot = c.autopilot; alwaysOn = c.alwaysOn; libraryIDs = Set(c.libraryIds)
                 // Picture and sound live in parts of the channel the typed model does not carry: fetch it raw.
                 if !c.isGuide, let client = model.client, let raw = try? await client.channelRaw(c.id) {
@@ -174,6 +186,7 @@ struct ChannelEditorSheet: View {
                     ps = PictureSoundSettings(options: rawOptions, lineup: rawLineup)
                     psOriginal = ps
                 }
+                loadingRaw = false
             } else {
                 number = Format.nextFreeNumber(taken: model.channels.map(\.number))
                 libraryIDs = Set(model.libraries.filter { $0.kind == .shows }.map(\.id))
@@ -187,15 +200,18 @@ struct ChannelEditorSheet: View {
         var f: [String: JSONValue] = [
             "id": .string(id), "number": .number(Double(number)), "name": .string(name.trimmingCharacters(in: .whitespaces)),
             "autopilot": .bool(autopilot), "always_on": .bool(alwaysOn),
-            "kind": .string(isGuide ? "guide" : "programming"),
+            "kind": .string(isGuide ? "guide" : isTest ? "test" : "programming"),
         ]
         if !group.trimmingCharacters(in: .whitespaces).isEmpty { f["group"] = .string(group) }
-        if !isGuide {
+        if isTest, isNew {
+            f["options"] = ps.apply(to: nil)
+        }
+        if !isGuide && !isTest {
             f["strategy"] = .string(strategy.rawValue); f["run_out"] = .string(runOut.rawValue)
             f["chaos"] = .number(chaos); f["library_ids"] = .array(libraryIDs.sorted().map { .number(Double($0)) })
         }
         // Only touch options and the sign-off hours when the user changed them.
-        if !isGuide, ps != psOriginal, rawOptions != nil || rawLineup != nil {
+        if !isGuide, !isNew, ps != psOriginal, rawOptions != nil || rawLineup != nil || isTest {
             f["options"] = ps.apply(to: rawOptions)
             f["lineup"] = ps.apply(toLineup: rawLineup)
         }
@@ -217,9 +233,26 @@ struct ChannelEditorSheet: View {
 struct PictureSoundForm: View {
     @Binding var ps: PictureSoundSettings
     var sys: SystemInfo?
+    /// A test-pattern channel has only its screen to choose.
+    var testOnly = false
+    /// The server did not send picture and sound settings: it is older than this app.
+    var oldServer = false
 
     var body: some View {
         Form {
+            if oldServer {
+                Section {
+                    Label("This server doesn't know about picture and sound settings yet. Update the TVMaster server (the bundled one comes with the app update).", systemImage: "exclamationmark.triangle.fill")
+                        .font(.callout).foregroundStyle(.orange)
+                }
+            }
+            Section("When nothing is on air") {
+                Picker("Screen", selection: $ps.offAirScreen) { ForEach(PictureSoundSettings.screens, id: \.value) { Text($0.label).tag($0.value) } }
+                if ps.offAirScreen == "card" { TextField("Message", text: $ps.offAirMessage, prompt: Text("PLEASE STAND BY")) }
+                if ps.offAirScreen == "image" { TextField("Picture file", text: $ps.offAirImage, prompt: Text("/path/to/picture.png")).font(.body.monospaced()) }
+                Toggle("Test tone (hiss with snow)", isOn: $ps.offAirTone)
+            }
+            if !testOnly {
             Section("Audio") {
                 LanguageList(title: "Preferred languages", empty: "Any (the file's default track)", languages: $ps.audioLanguages)
                 Toggle("Skip commentary tracks", isOn: $ps.avoidCommentary)
@@ -257,14 +290,15 @@ struct PictureSoundForm: View {
                     HStack {
                         TextField("Off at", text: $ps.signOffFrom).frame(width: 90)
                         TextField("Back at", text: $ps.signOffTo).frame(width: 90)
-                        Picker("", selection: $ps.signOffStyle) { ForEach(PictureSoundSettings.signOffStyles, id: \.value) { Text($0.label).tag($0.value) } }.labelsHidden()
+                        Picker("", selection: $ps.signOffStyle) { ForEach(PictureSoundSettings.screens, id: \.value) { Text($0.label).tag($0.value) } }.labelsHidden()
                     }
                     Text("24-hour times like 02:00, in the channel's time zone.").font(.caption).foregroundStyle(.secondary)
                 }
             }
             Section {
-                Text("Per-show settings (anime in Japanese with English subtitles, a sitcom plain, …) are in the web admin: Picture & sound.")
+                Text("Audio and subtitle settings for individual shows (anime in Japanese with English subtitles, a show with subtitles already in the picture, …) are on the Shows page of the web admin.")
                     .font(.caption).foregroundStyle(.secondary)
+            }
             }
         }
         .formStyle(.grouped)

@@ -103,6 +103,7 @@ fn make_media(dir: &Path, name: &str, black: bool, subs: bool) -> PathBuf {
 struct One {
     items: Vec<PlayItem>,
     unplayable: Mutex<Vec<i64>>,
+    defaults: Option<tvmaster_core::ShowOptions>,
 }
 impl ScheduleSource for One {
     fn item_at_or_after(&self, _c: &str, at_ms: i64) -> Option<PlayItem> {
@@ -113,6 +114,9 @@ impl ScheduleSource for One {
     }
     fn upcoming(&self, _c: &str, _a: i64, _l: usize) -> Upcoming {
         Upcoming::default()
+    }
+    fn show_defaults(&self, _c: &str, _show: &str) -> Option<tvmaster_core::ShowOptions> {
+        self.defaults.clone()
     }
 }
 
@@ -177,9 +181,22 @@ impl Rig {
         signoff: SignOffStyle,
         secs: u64,
     ) -> (Arc<One>, PathBuf) {
+        self.air_with(items, options, signoff, secs, None).await
+    }
+
+    /// Like `air`, with settings that follow the show onto every channel.
+    async fn air_with(
+        &self,
+        items: Vec<PlayItem>,
+        options: ChannelOptions,
+        signoff: SignOffStyle,
+        secs: u64,
+        defaults: Option<tvmaster_core::ShowOptions>,
+    ) -> (Arc<One>, PathBuf) {
         let source = Arc::new(One {
             items,
             unplayable: Mutex::new(Vec::new()),
+            defaults,
         });
         let spec = ChannelSpec {
             id: "t".into(),
@@ -379,6 +396,7 @@ async fn a_failing_extra_never_takes_the_programme_off_the_air() {
     let source = Arc::new(One {
         items: vec![show_item(&file, 0, 14)],
         unplayable: Mutex::new(Vec::new()),
+        defaults: None,
     });
     let spec = ChannelSpec {
         id: "t".into(),
@@ -645,5 +663,161 @@ async fn a_subtitle_file_beside_the_video_is_burned_in() {
     let (_, playlist) = rig.air(vec![item], opts, SignOffStyle::Bars, 9).await;
     let lit = brightness_series(&playlist, "crop=1000:140:140:520");
     assert!(lit.iter().copied().max().unwrap_or(0) >= 6, "{lit:?}");
+    rig.finish();
+}
+
+/// Settings made once for a show reach every channel that airs it, and the
+/// channel's own override for that show still wins.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_shows_own_settings_follow_it_onto_the_channel() {
+    let Some(rig) = rig("showdefaults") else {
+        return;
+    };
+    let file = make_media(&rig.media, "multi.mkv", false, false);
+    let defaults = tvmaster_core::ShowOptions {
+        audio_languages: Some(vec!["jpn".into()]),
+        ..Default::default()
+    };
+    // The channel says English; the show's default says Japanese: Japanese airs.
+    let mut opts = ChannelOptions::default();
+    opts.audio.languages = vec!["eng".into()];
+    let (_, playlist) = rig
+        .air_with(
+            vec![show_item(&file, 0, 14)],
+            opts,
+            SignOffStyle::Bars,
+            9,
+            Some(defaults.clone()),
+        )
+        .await;
+    assert_near(pitch(&playlist, 2.0, 6.0), 880.0, "the show's default");
+    rig.manager.stop("t");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // This channel's own override for the show beats the show's default.
+    let mut opts = ChannelOptions::default();
+    opts.audio.languages = vec!["jpn".into()];
+    opts.shows.insert(
+        "Cowboy Bebop".into(),
+        tvmaster_core::ShowOptions {
+            audio_languages: Some(vec!["eng".into()]),
+            ..Default::default()
+        },
+    );
+    let (_, playlist) = rig
+        .air_with(
+            vec![show_item(&file, 0, 14)],
+            opts,
+            SignOffStyle::Bars,
+            9,
+            Some(defaults),
+        )
+        .await;
+    assert_near(pitch(&playlist, 2.0, 6.0), 440.0, "the channel's override");
+    rig.finish();
+}
+
+fn first_frame_rgb(playlist: &Path, at: &str) -> Vec<u8> {
+    Command::new("ffmpeg")
+        .args(["-v", "error", "-i"])
+        .arg(playlist)
+        .args([
+            "-an",
+            "-ss",
+            at,
+            "-frames:v",
+            "1",
+            "-vf",
+            "scale=64:36,format=rgb24",
+            "-f",
+            "rawvideo",
+            "-",
+        ])
+        .output()
+        .unwrap()
+        .stdout
+}
+
+fn spread(rgb: &[u8]) -> u8 {
+    rgb.as_chunks::<3>()
+        .0
+        .iter()
+        .map(|p| p.iter().max().unwrap() - p.iter().min().unwrap())
+        .max()
+        .unwrap_or(0)
+}
+
+fn mean(rgb: &[u8]) -> f64 {
+    rgb.iter().map(|b| *b as f64).sum::<f64>() / rgb.len().max(1) as f64
+}
+
+/// With nothing scheduled, the channel shows what its owner chose.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_empty_channel_shows_the_chosen_off_air_screen() {
+    use tvmaster_core::Screen;
+    let Some(rig) = rig("offair") else { return };
+
+    // Colour bars with a tone: very colourful, and a 1 kHz tone.
+    let mut opts = ChannelOptions::default();
+    opts.off_air.screen = Screen::Bars;
+    opts.off_air.tone = true;
+    let (_, playlist) = rig.air(vec![], opts, SignOffStyle::Bars, 9).await;
+    assert!(
+        spread(&first_frame_rgb(&playlist, "3")) > 150,
+        "colour bars"
+    );
+    assert_near(pitch(&playlist, 2.0, 6.0), 1000.0, "the test tone");
+    rig.manager.stop("t");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Black: nothing but black and silence.
+    let mut opts = ChannelOptions::default();
+    opts.off_air.screen = Screen::Black;
+    let (_, playlist) = rig.air(vec![], opts, SignOffStyle::Bars, 9).await;
+    assert!(mean(&first_frame_rgb(&playlist, "3")) < 6.0, "black");
+    rig.manager.stop("t");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // The station card (the default): the channel's colours and its words, no tone needed, no drawtext needed.
+    let mut opts = ChannelOptions::default();
+    opts.off_air.message = "BACK AT NINE".into();
+    let (_, playlist) = rig.air(vec![], opts, SignOffStyle::Bars, 9).await;
+    let card = first_frame_rgb(&playlist, "3");
+    assert!(
+        mean(&card) > 12.0 && spread(&card) > 40,
+        "a coloured card with text, not a blank slate"
+    );
+    rig.manager.stop("t");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // A picture of the owner's own: a solid red PNG from the same encoder the graphics use.
+    let mut rgba = Vec::new();
+    for _ in 0..(64 * 36) {
+        rgba.extend([220u8, 20, 20, 255]);
+    }
+    let pic = rig.root.join("mine.png");
+    std::fs::write(&pic, tvmaster_render::png::rgba_png(64, 36, &rgba)).unwrap();
+    let mut opts = ChannelOptions::default();
+    opts.off_air.screen = Screen::Image;
+    opts.off_air.image = Some(pic.to_string_lossy().to_string());
+    let (_, playlist) = rig.air(vec![], opts, SignOffStyle::Bars, 9).await;
+    let frame = first_frame_rgb(&playlist, "3");
+    let centre = &frame[(18 * 64 + 32) * 3..(18 * 64 + 32) * 3 + 3];
+    assert!(
+        centre[0] > 150 && centre[1] < 90 && centre[2] < 90,
+        "the picture fills the screen: {centre:?}"
+    );
+    rig.manager.stop("t");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // A picture that has gone missing: the card, not a dead channel.
+    let mut opts = ChannelOptions::default();
+    opts.off_air.screen = Screen::Image;
+    opts.off_air.image = Some("/definitely/not/here.png".into());
+    let (_, playlist) = rig.air(vec![], opts, SignOffStyle::Bars, 9).await;
+    assert!(
+        mean(&first_frame_rgb(&playlist, "3")) > 12.0,
+        "falls back to the card"
+    );
     rig.finish();
 }
