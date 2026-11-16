@@ -61,6 +61,8 @@ pub struct AppState {
     network: Arc<NetworkInfo>,
     /// Where uploaded pictures are kept (`None` = uploads are off).
     pub(crate) assets_dir: Option<std::path::PathBuf>,
+    /// The server's data folder (database, caches, uploads), for the UI to suggest where media can live.
+    pub(crate) data_dir: Option<std::path::PathBuf>,
     /// Problems being reported and what the folder watcher last saw.
     pub(crate) monitor: Arc<Mutex<monitor::Book>>,
 }
@@ -120,8 +122,15 @@ impl AppState {
             presence: Arc::new(Mutex::new(HashMap::new())),
             network: Arc::new(NetworkInfo::default()),
             assets_dir: None,
+            data_dir: None,
             monitor: Arc::new(Mutex::new(monitor::Book::default())),
         }
+    }
+
+    /// The data folder, reported to the UI.
+    pub fn with_data_dir(mut self, dir: impl Into<std::path::PathBuf>) -> Self {
+        self.data_dir = Some(dir.into());
+        self
     }
 
     /// Keep uploaded pictures in this folder.
@@ -481,6 +490,12 @@ fn build_router(state: AppState, https: bool) -> Router {
         )
         .route("/api/v1/fs/list", get(admin::fs_list))
         .route("/api/v1/guide/preview", post(guide_preview::preview))
+        .route(
+            "/api/v1/libraries/:id/files",
+            axum::routing::put(libraries::upload_file)
+                .delete(libraries::delete_file)
+                .layer(axum::extract::DefaultBodyLimit::disable()),
+        )
         .route("/api/v1/monitor", get(monitor::get).put(monitor::put))
         .route("/api/v1/monitor/test", post(monitor::test))
         .route("/api/v1/monitor/rescan", post(monitor::rescan_now))

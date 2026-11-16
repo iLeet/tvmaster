@@ -79,6 +79,25 @@ export async function uploadAsset(file: File): Promise<Asset> {
   return data as Asset;
 }
 
+/** Upload one file into a library's folder, with progress (0..1). Large files are fine: it is streamed. */
+export function uploadLibraryFile(libraryId: number, path: string, file: File, onProgress: (f: number) => void, overwrite = false): Promise<{ path: string; bytes: number; indexed: boolean }> {
+  return new Promise((resolve, reject) => {
+    const x = new XMLHttpRequest();
+    x.open('PUT', `/api/v1/libraries/${libraryId}/files?path=${encodeURIComponent(path)}${overwrite ? '&overwrite=true' : ''}`);
+    x.withCredentials = true;
+    x.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded / e.total); };
+    x.onerror = () => reject(new ApiError(0, 'Cannot reach the TVMaster server'));
+    x.onload = () => {
+      if (x.status === 401) unauthorized.dispatchEvent(new Event('unauthorized'));
+      let data: { error?: string } & Record<string, unknown> = {};
+      try { data = JSON.parse(x.responseText); } catch { /* not JSON */ }
+      if (x.status >= 200 && x.status < 300) resolve(data as never);
+      else reject(new ApiError(x.status, data.error ?? `${x.status} ${x.statusText}`));
+    };
+    x.send(file);
+  });
+}
+
 /** The preview address of an uploaded picture, from the path stored in a channel's options. */
 export function assetUrlForPath(path: string | null | undefined): string | null {
   if (!path) return null;

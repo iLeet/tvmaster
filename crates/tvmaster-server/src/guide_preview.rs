@@ -48,7 +48,10 @@ pub async fn preview(State(s): State<AppState>, Json(body): Json<Body>) -> ApiRe
             let tz = crate::channels::system_timezone();
             plan::build_guide_with(&db, name, &tz, &body.guide, plan::now_ms())?
         };
-        let look = tvmaster_playout::guide_look(&body.guide, id);
+        let look = match &s.ffmpeg {
+            Some(f) => tvmaster_playout::guide_look_with_pictures(&body.guide, id, &f.ffmpeg),
+            None => tvmaster_playout::guide_look(&body.guide, id),
+        };
         // A window shows its card for the first channel, with no video behind it.
         let view = GuideView {
             window_row: (body.guide.pip.mode != PipMode::Off && !data.rows.is_empty()).then_some(0),

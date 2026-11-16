@@ -212,6 +212,23 @@ fn port_of(addr: &str) -> Option<u16> {
     addr.rsplit(':').next().and_then(|p| p.parse().ok())
 }
 
+/// Returns when the process is asked to stop: Ctrl-C (SIGINT), or SIGTERM, which is
+/// what `docker stop`, systemd and most supervisors send.
+async fn wait_for_stop_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+        if let Ok(mut term) = signal(SignalKind::terminate()) {
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {}
+                _ = term.recv() => {}
+            }
+            return;
+        }
+    }
+    let _ = tokio::signal::ctrl_c().await;
+}
+
 async fn serve(o: ServeOptions) -> Result<()> {
     let ServeOptions {
         bind,
@@ -305,6 +322,7 @@ async fn serve(o: ServeOptions) -> Result<()> {
     let state = AppState::new(conn, info, playout.clone())
         .with_token(token)
         .with_assets_dir(data_dir.join("assets"))
+        .with_data_dir(data_dir.clone())
         .with_network(network);
     state.seed_token(initial_token);
     if state.access_token().is_none() && !bind.starts_with("127.") && !bind.starts_with("localhost")
@@ -326,7 +344,7 @@ async fn serve(o: ServeOptions) -> Result<()> {
     {
         let stop = stop.clone();
         tokio::spawn(async move {
-            let _ = tokio::signal::ctrl_c().await;
+            wait_for_stop_signal().await;
             tracing::info!("shutting down");
             stop.notify_waiters();
             // Notify only wakes those already waiting; a second signal below keeps it sticky.

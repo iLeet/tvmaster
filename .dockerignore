@@ -1,5 +1,8 @@
 target
 .git
 web/node_modules
+web/dist
 apps
 dist
+docs
+*.dmg

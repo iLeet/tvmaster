@@ -7,6 +7,7 @@ struct LibrariesView: View {
     @State private var adding = false
     @State private var busy: Int?
     @State private var removing: Library?
+    @State private var uploading: Library?
     @State private var note: String?
 
     private var analysing: Bool { model.libraries.contains { $0.analysis?.running == true } }
@@ -38,6 +39,7 @@ struct LibrariesView: View {
                                 HStack {
                                     Toggle("Enabled", isOn: Binding(get: { lib.enabled }, set: { v in Task { await setEnabled(lib, v) } })).toggleStyle(.switch)
                                     Spacer()
+                                    Button { uploading = lib } label: { Label("Upload…", systemImage: "square.and.arrow.up") }.glassButton()
                                     Button { Task { await scan(lib) } } label: { busy == lib.id ? AnyView(ProgressView().controlSize(.small)) : AnyView(Label("Scan", systemImage: "arrow.clockwise")) }.glassButton().disabled(busy == lib.id)
                                     if lib.kind == .shows {
                                         Button("Find ad breaks") { Task { await analyze(lib) } }.glassButton()
@@ -60,6 +62,7 @@ struct LibrariesView: View {
             .padding(28)
         }
         .sheet(isPresented: $adding) { AddLibrarySheet { note = $0 } }
+        .sheet(item: $uploading) { lib in UploadSheet(library: lib) }
         .confirmationDialog("Remove “\(removing?.name ?? "")”?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })) {
             Button("Remove library", role: .destructive) { if let l = removing { Task { await remove(l) } } }
         } message: { Text("Your files on disk are not touched. Channels using this library will be rescheduled.") }
@@ -108,6 +111,7 @@ struct AddLibrarySheet: View {
     @State private var kind: LibraryKind = .shows
     @State private var path = ""
     @State private var busy = false
+    @State private var create = false
 
     private var isLocal: Bool { model.client?.isLocal ?? false }
     private var help: String {
@@ -129,6 +133,13 @@ struct AddLibrarySheet: View {
                 if isLocal { Button("Choose…") { choose() }.glassButton() }
             }
             if !isLocal { Text("This server is on another machine: enter the folder's path as that machine sees it.").font(.caption).foregroundStyle(.secondary) }
+            if let data = model.system?.dataDir {
+                HStack {
+                    Button("Use a new folder in the server's data folder") { path = "\(data)/media/\(kind.rawValue)"; create = true }.glassButton()
+                    Text("for files you upload from this app").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            Toggle("Make the folder if it doesn't exist", isOn: $create)
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
@@ -153,7 +164,7 @@ struct AddLibrarySheet: View {
         guard let c = model.client else { return }
         busy = true
         defer { busy = false }
-        guard let lib = await model.run({ try await c.addLibrary(path: path, kind: kind) }) else { return }
+        guard let lib = await model.run({ try await c.addLibrary(path: path, kind: kind, create: create) }) else { return }
         dismiss()
         if let r = await model.run({ try await c.scan(library: lib.id) }) {
             onDone("Added “\(lib.name)”: found \(r.found) files, indexed \(r.indexed)")

@@ -312,8 +312,27 @@ public struct TVMasterClient: Sendable {
     public func libraries() async throws -> [Library] { try await get("/libraries") }
 
     @discardableResult
-    public func addLibrary(path: String, kind: LibraryKind) async throws -> Library {
-        try await post("/libraries", body: .object(["path": .string(path), "kind": .string(kind.rawValue)]))
+    public func addLibrary(path: String, kind: LibraryKind, create: Bool = false) async throws -> Library {
+        try await post("/libraries", body: .object(["path": .string(path), "kind": .string(kind.rawValue), "create": .bool(create)]))
+    }
+
+    /// Copy a file from this Mac into a library's folder on the server (streamed from disk, so a
+    /// large video is fine). `path` is where it goes inside the library, like `Show/Season 1/Episode.mkv`.
+    /// `progress` is called with 0...1 as it goes.
+    @discardableResult
+    public func uploadFile(library id: Int, path: String, from file: URL, overwrite: Bool = false, progress: @escaping @Sendable (Double) -> Void) async throws -> UploadResult {
+        var req = try makeRequest("PUT", "/libraries/\(id)/files", query: [URLQueryItem(name: "path", value: path)] + (overwrite ? [URLQueryItem(name: "overwrite", value: "true")] : []))
+        req.timeoutInterval = 3600
+        let tracker = UploadProgress(progress)
+        let (body, response): (Data, URLResponse)
+        do { (body, response) = try await session.upload(for: req, fromFile: file, delegate: tracker) } catch { throw mapped(error) }
+        guard let http = response as? HTTPURLResponse else { throw TVMasterError.invalidResponse }
+        if http.statusCode == 401 { throw TVMasterError.unauthorized }
+        guard (200..<300).contains(http.statusCode) else {
+            let message = (try? JSONDecoder().decode([String: String].self, from: body))?["error"] ?? "Server error \(http.statusCode)"
+            throw TVMasterError.http(http.statusCode, message)
+        }
+        do { return try Self.decoder.decode(UploadResult.self, from: body) } catch { throw TVMasterError.invalidResponse }
     }
 
     @discardableResult

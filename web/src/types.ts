@@ -118,7 +118,7 @@ export interface ChannelOptions {
   shows: Record<string, ShowOptions>;
 }
 
-export type GuideTheme = 'auto' | 'prevue' | 'amber' | 'phosphor' | 'neon' | 'sunset' | 'ocean' | 'slate' | 'paper' | 'custom';
+export type GuideTheme = 'auto' | 'prevue' | 'amber' | 'phosphor' | 'neon' | 'sunset' | 'ocean' | 'slate' | 'paper' | 'midnight' | 'graphite' | 'snow' | 'forest' | 'berry' | 'mono' | 'custom';
 export type PipMode = 'off' | 'channel' | 'rotate';
 export type PipPlacement = 'top_left' | 'top_right' | 'side_left' | 'side_right';
 
@@ -128,7 +128,7 @@ export interface GuideConfig {
   ticker: string[];
   music_library_ids: number[];
   theme: GuideTheme;
-  colors: { primary: string | null; accent: string | null };
+  colors: { primary: string | null; accent: string | null; background: string | null };
   layout: {
     style: 'grid' | 'now_next';
     rows: number;
@@ -139,6 +139,16 @@ export interface GuideConfig {
     channel_names: boolean;
     progress: boolean;
     scanlines: boolean;
+  };
+  look: {
+    typeface: 'pixel' | 'smooth';
+    corners: 'square' | 'rounded';
+    text_size: 'small' | 'medium' | 'large';
+    background: { style: 'gradient' | 'solid' | 'stripes' | 'image'; image: string | null; dim: number };
+    header_style: 'bar' | 'minimal';
+    ticker_position: 'bottom' | 'top';
+    cell_times: boolean;
+    now_marker: boolean;
   };
   header: { title: boolean; clock: boolean; date: boolean; hour12: boolean; logo: string | null };
   ticker_options: { enabled: boolean; speed: 'slow' | 'normal' | 'fast'; now_on: boolean };
@@ -220,6 +230,8 @@ export interface ShowSummary {
 }
 
 export interface System {
+  /** The server's data folder (database, caches, uploads). */
+  data_dir?: string | null;
   version: string;
   os: string;
   arch: string;

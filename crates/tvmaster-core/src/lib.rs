@@ -25,9 +25,10 @@ pub use lineup::{
     SIGNOFF_LABEL,
 };
 pub use model::{
-    parse_hex_color, Channel, ChannelKind, GuideColors, GuideConfig, GuideHeader, GuideLayout,
-    GuidePip, GuideScroll, GuideStyle, GuideTheme, GuideTicker, PipAudio, PipMode, PipPlacement,
-    PipSize, RunOutPolicy, Strategy, TickerSpeed, Tv,
+    parse_hex_color, BackgroundStyle, Channel, ChannelKind, GuideAppearance, GuideBackground,
+    GuideColors, GuideConfig, GuideCorners, GuideHeader, GuideLayout, GuidePip, GuideScroll,
+    GuideStyle, GuideTextSize, GuideTheme, GuideTicker, GuideTypeface, HeaderStyle, PipAudio,
+    PipMode, PipPlacement, PipSize, RunOutPolicy, Strategy, TickerPosition, TickerSpeed, Tv,
 };
 pub use options::{
     Aspect, AudioPrefs, BugOptions, ChannelOptions, ClockOptions, Corner, Deinterlace, Effective,

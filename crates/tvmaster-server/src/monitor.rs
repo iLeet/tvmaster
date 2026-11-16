@@ -322,6 +322,15 @@ fn send(settings: &Settings, title: &str, message: &str, severity: &str, id: &st
 /// back are cleared. Returns `None` when the folder cannot be reached (nothing
 /// is flagged then: an unplugged drive is not a deleted library).
 pub(crate) async fn rescan(s: &AppState, lib: &tvmaster_db::Library) -> Option<Rescan> {
+    rescan_with(s, lib, SETTLE).await
+}
+
+/// [`rescan`] with a chosen settle time (none, for a file the server has just finished receiving).
+pub(crate) async fn rescan_with(
+    s: &AppState,
+    lib: &tvmaster_db::Library,
+    settle_for: Duration,
+) -> Option<Rescan> {
     let ffmpeg = s.ffmpeg.clone()?;
     let root = PathBuf::from(&lib.path);
     if !root.is_dir() {
@@ -346,7 +355,7 @@ pub(crate) async fn rescan(s: &AppState, lib: &tvmaster_db::Library) -> Option<R
     let settled = |f: &PathBuf| {
         std::fs::metadata(f)
             .and_then(|m| m.modified())
-            .map(|t| SystemTime::now().duration_since(t).unwrap_or_default() >= SETTLE)
+            .map(|t| SystemTime::now().duration_since(t).unwrap_or_default() >= settle_for)
             .unwrap_or(false)
     };
     let fresh: Vec<PathBuf> = files

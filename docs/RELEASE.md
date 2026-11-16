@@ -13,7 +13,7 @@ Each platform has a real installer that sets everything up: the server, starting
 | Arch, CachyOS, Manjaro | `tvmaster-<version>-1-<arch>.pkg.tar.zst` (`sudo pacman -U ...`) | Same. |
 | Any Linux or macOS, no root | `tvmaster-<version>-<target>.tar.gz`, then `./install.sh --service` | Installs under `~/.local` and runs as a systemd user service or a launchd agent. |
 | Windows, no wizard | the `.zip`, then `.\install.ps1` in an elevated PowerShell | Same steps as the wizard. |
-| Docker | `docker compose up -d` after editing the token and media path in `docker-compose.yml` | FFmpeg is in the image. |
+| Docker | `docker compose up -d` (see [DOCKER.md](DOCKER.md)) | FFmpeg is in the image; a first-run access token is printed; runs as your uid. Tested by `scripts/docker-test.sh`. |
 | Rust | `cargo run -p tvmaster-cli -- serve` | Nothing is set up for you. |
 
 On Linux the service reads settings from `/etc/tvmaster/tvmaster.env` (port, encoder). Packages never delete your data on removal (`/var/lib/tvmaster`, `/etc/tvmaster/token`), so a reinstall picks up where it stopped.

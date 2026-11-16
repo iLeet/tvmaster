@@ -33,6 +33,16 @@ Errors are `{"error": "message"}` with a suitable status code.
 
 Uploads are kept in `<data dir>/assets/`.
 
+### Putting files on the server
+
+| Method | Path | Notes |
+|---|---|---|
+| POST | `/api/v1/libraries` | Also takes `"create": true`: the folder (a full path) is made if it does not exist, so a remote server's library can be set up from an app. |
+| PUT | `/api/v1/libraries/{id}/files?path=Show/Season 1/Episode.mkv` | The file as the request body, copied into the library's folder (streamed to disk, no size limit) and indexed at once. `path` is relative; folders are made as needed; no `..`, no hidden names. Only the library's kind of file is accepted (video for shows, commercials and bumpers, plus `.srt`/`.ass`/`.ssa`/`.vtt` beside shows; audio for music). 409 when the file is already there unless `overwrite=true`; 400 for a bad path or kind, an empty body. The reply is `{path, bytes, indexed, added}`. |
+| DELETE | `/api/v1/libraries/{id}/files?path=…` | Remove a file from a library's folder and take it off the schedule. |
+
+`GET /api/v1/system` reports `data_dir`, so an app can offer a folder inside it for uploads.
+
 ### Monitoring
 
 | Method | Path | Notes |

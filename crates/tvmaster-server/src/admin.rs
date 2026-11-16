@@ -220,6 +220,7 @@ pub async fn system(State(s): State<AppState>) -> Json<Value> {
         "ffmpeg": ffmpeg,
         "on_air": s.playout.as_ref().map(|p| p.running()).unwrap_or_default(),
         "auth_required": s.token().is_some(),
+        "data_dir": s.data_dir.as_ref().map(|d| d.to_string_lossy().to_string()),
         "network": network_json(&s.network),
     }))
 }

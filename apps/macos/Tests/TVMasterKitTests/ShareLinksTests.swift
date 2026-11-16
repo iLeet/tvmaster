@@ -322,3 +322,66 @@ struct PictureSoundTests {
         #expect(EventStream.parse(Data(#"{"type":"something.else"}"#.utf8)) == nil)
     }
 }
+
+@Suite struct UploadPlanTests {
+    @Test func aPickedFolderKeepsItsNameAndLayout() {
+        let base = URL(fileURLWithPath: "/Users/me/TV")
+        let file = URL(fileURLWithPath: "/Users/me/TV/Cheers/Season 1/Cheers - S01E01.mkv")
+        #expect(UploadPlan.relativePath(file: file, base: base, subfolder: "") == "Cheers/Season 1/Cheers - S01E01.mkv")
+        #expect(UploadPlan.relativePath(file: file, base: base, subfolder: "/Sitcoms/") == "Sitcoms/Cheers/Season 1/Cheers - S01E01.mkv")
+    }
+
+    @Test func aSingleFileGoesInByItsName() {
+        let f = URL(fileURLWithPath: "/Users/me/Movies/Bumper 1.mp4")
+        #expect(UploadPlan.relativePath(file: f, base: f.deletingLastPathComponent(), subfolder: "") == "Bumper 1.mp4")
+        #expect(UploadPlan.relativePath(file: f, base: URL(fileURLWithPath: "/elsewhere"), subfolder: "Retro") == "Retro/Bumper 1.mp4", "a file outside the base falls back to its name")
+    }
+
+    @Test func theServerReplyDecodes() throws {
+        let d = JSONDecoder(); d.keyDecodingStrategy = .convertFromSnakeCase
+        let r = try d.decode(UploadResult.self, from: Data(#"{"path":"/media/x.mp4","bytes":1234,"indexed":true,"added":1}"#.utf8))
+        #expect(r.bytes == 1234 && r.indexed)
+    }
+}
+
+@Suite struct GuideLookTests {
+    @Test func anOlderGuideReadsAsTheRetroLook() {
+        let s = GuideSettings(guide: nil)
+        #expect(s.typeface == "pixel" && s.corners == "square" && s.backgroundStyle == "gradient" && s.nowMarker && !s.cellTimes)
+    }
+
+    @Test func theLookOptionsAreWrittenWithTheServersKeys() {
+        var s = GuideSettings()
+        s.typeface = "smooth"; s.corners = "rounded"; s.textSize = "large"
+        s.backgroundStyle = "image"; s.backgroundImage = "/data/assets/x.jpg"; s.backgroundDim = 60
+        s.headerStyle = "minimal"; s.tickerPosition = "top"; s.cellTimes = true; s.nowMarker = false
+        s.colorBackground = "#101830"
+        let out = s.apply(to: nil)
+        #expect(out.get(["look", "typeface"])?.stringValue == "smooth")
+        #expect(out.get(["look", "background", "style"])?.stringValue == "image")
+        #expect(out.get(["look", "background", "dim"])?.intValue == 60)
+        #expect(out.get(["look", "ticker_position"])?.stringValue == "top")
+        #expect(out.get(["look", "now_marker"])?.boolValue == false)
+        #expect(out.get(["colors", "background"])?.stringValue == "#101830")
+        #expect(GuideSettings(guide: out) == s)
+    }
+
+    @Test func aPictureBackgroundNeedsAPicture() {
+        var s = GuideSettings()
+        s.backgroundStyle = "image"
+        #expect(s.problem != nil)
+        s.backgroundImage = "/data/assets/x.jpg"
+        #expect(s.problem == nil)
+    }
+
+    @Test func presetsChangeTheLookButNotWhatTheGuideLists() {
+        var s = GuideSettings()
+        s.title = "Mine"; s.channels = ["a"]; s.ticker = ["hi"]
+        for p in GuideSettings.presets { var g = s; p.apply(&g); #expect(g.title == "Mine" && g.channels == ["a"] && g.ticker == ["hi"]) }
+        var m = s
+        GuideSettings.presets.first { $0.id == "modern-dark" }!.apply(&m)
+        #expect(m.typeface == "smooth" && !m.scanlines && m.theme == "midnight")
+        GuideSettings.presets.first { $0.id == "retro" }!.apply(&m)
+        #expect(m.typeface == "pixel" && m.scanlines)
+    }
+}

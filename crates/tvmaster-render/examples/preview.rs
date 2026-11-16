@@ -139,6 +139,33 @@ fn main() {
             live,
         ));
     }
+    // The smooth looks, drawn at 1280x720.
+    for (n, pal) in [
+        ("midnight", Palette::midnight()),
+        ("snow", Palette::snow()),
+        ("graphite", Palette::graphite()),
+    ] {
+        let mut l = GuideLook::new(pal);
+        l.smooth_text = true;
+        l.rounded = true;
+        l.scanlines = false;
+        l.cell_times = n == "snow";
+        l.header_minimal = n == "graphite";
+        looks.push((
+            Box::leak(format!("modern_{n}").into_boxed_str()),
+            l,
+            GuideView::default(),
+        ));
+    }
+    let mut m = GuideLook::new(Palette::midnight());
+    m.smooth_text = true;
+    m.rounded = true;
+    m.scanlines = false;
+    m.now_next = true;
+    m.progress = true;
+    m.rows = 5;
+    m.window = Some(win(Placement::SideRight, WindowSize::Medium));
+    looks.push(("modern_nownext_pip", m, live));
     for (name, look, view) in &looks {
         std::fs::write(
             format!("{dir}/{name}.ppm"),

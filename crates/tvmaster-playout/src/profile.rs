@@ -595,6 +595,8 @@ pub struct LogoInput<'a> {
 pub struct GuideRun<'a> {
     pub src_w: usize,
     pub src_h: usize,
+    /// Scale the listing up smoothly (the modern looks) instead of in hard pixels (the retro looks).
+    pub smooth_scale: bool,
     /// Music for FFmpeg's concat demuxer; silence when `None`.
     pub music_list: Option<&'a Path>,
     pub pip: Option<PipInput<'a>>,
@@ -669,8 +671,15 @@ pub fn guide_run_args(run: &GuideRun, p: &OutputProfile, enc: Encoder) -> Vec<St
     }
 
     let base = format!(
-        "scale={}:{}:flags=neighbor,setsar=1,fps={}",
-        p.width, p.height, p.fps
+        "scale={}:{}:flags={},setsar=1,fps={}",
+        p.width,
+        p.height,
+        if run.smooth_scale {
+            "bicubic"
+        } else {
+            "neighbor"
+        },
+        p.fps
     );
     if pip_input.is_none() && logo_input.is_none() {
         a.extend([
@@ -874,6 +883,7 @@ mod tests {
         let run = |music| GuideRun {
             src_w: 640,
             src_h: 360,
+            smooth_scale: false,
             music_list: music,
             pip: None,
             logo: None,
@@ -903,6 +913,7 @@ mod tests {
         let run = GuideRun {
             src_w: 640,
             src_h: 360,
+            smooth_scale: false,
             music_list: Some(list),
             pip: Some(PipInput {
                 playlist: hls,

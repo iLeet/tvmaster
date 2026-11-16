@@ -591,3 +591,106 @@ async fn a_video_window_whose_channel_is_missing_shows_no_signal_and_the_guide_c
     manager.stop("guide");
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_modern_guide_with_a_picture_background_streams_at_full_resolution() {
+    let Ok(info) = FfmpegInfo::detect("ffmpeg", "ffprobe") else {
+        eprintln!("ffmpeg not installed; skipping");
+        return;
+    };
+    if !info.has_libx264 {
+        return;
+    }
+    let root = std::env::temp_dir().join(format!("tvmaster-modern-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    // A pure green picture to put behind the listing.
+    let pic = root.join("bg.png");
+    assert!(ffmpeg_ok(&[
+        "-f",
+        "lavfi",
+        "-i",
+        "color=c=0x00c000:s=320x180",
+        "-frames:v",
+        "1",
+        pic.to_str().unwrap()
+    ]));
+    let mut config = tvmaster_core::GuideConfig::default();
+    config.look.typeface = tvmaster_core::GuideTypeface::Smooth;
+    config.look.corners = tvmaster_core::GuideCorners::Rounded;
+    config.look.background.style = tvmaster_core::BackgroundStyle::Image;
+    config.look.background.image = Some(pic.to_string_lossy().to_string());
+    config.look.background.dim = 0;
+    config.layout.scanlines = false;
+    config.theme = tvmaster_core::GuideTheme::Midnight;
+    let source = Arc::new(GuideSource {
+        calls: AtomicUsize::new(0),
+    });
+    let mut cfg = EngineConfig::new(&info.ffmpeg, Encoder::Software, &root);
+    cfg.readrate_burst = info.has_readrate_burst;
+    let manager = Manager::new(cfg);
+    assert!(manager.start_if_absent(ChannelSpec {
+        id: "guide".into(),
+        name: "Guide".into(),
+        always_on: true,
+        source,
+        guide: Some(GuideSpec {
+            music: vec![],
+            config,
+            pip_host: None
+        }),
+        options: Default::default(),
+        number: 0,
+        can_burn_text: false,
+        signoff: Default::default(),
+    }));
+    let playlist = manager.hls_dir("guide").join("index.m3u8");
+    let t0 = Instant::now();
+    while !std::fs::read_to_string(&playlist)
+        .unwrap_or_default()
+        .contains("#EXTINF")
+    {
+        assert!(
+            t0.elapsed() < Duration::from_secs(30),
+            "the guide never came up"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    let f = frozen(&playlist);
+    // 1280x720 out, and the picture is behind the listing: the strip under the rows is green.
+    let size = Command::new("ffprobe")
+        .args([
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width,height",
+            "-of",
+            "csv=p=0",
+        ])
+        .arg(&f)
+        .output()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&size.stdout)
+        .lines()
+        .filter(|l| !l.is_empty())
+        .all(|l| l == "1280,720"));
+    let c = colour_at(&f, 2.0, 1270, 470);
+    assert!(
+        c[1] > 150 && c[0] < 40 && c[2] < 40,
+        "the picture shows behind the listing: {c:?}"
+    );
+    manager.stop("guide");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+fn ffmpeg_ok(args: &[&str]) -> bool {
+    Command::new("ffmpeg")
+        .args(["-hide_banner", "-loglevel", "error", "-y"])
+        .args(args)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}

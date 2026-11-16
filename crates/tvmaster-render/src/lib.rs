@@ -9,10 +9,11 @@
 pub mod guide;
 pub mod overlay;
 pub mod png;
+pub mod text;
 
 pub use guide::{
-    geometry, render_guide, Geometry, GuideCell, GuideData, GuideLook, GuideRow, GuideView,
-    Palette, Placement, Rect, WindowLook, WindowSize,
+    geometry, render_guide, Background, Geometry, GuideCell, GuideData, GuideLook, GuideRow,
+    GuideView, Palette, Placement, Rect, WindowLook, WindowSize,
 };
 
 use font8x8::{UnicodeFonts, BASIC_FONTS, LATIN_FONTS};

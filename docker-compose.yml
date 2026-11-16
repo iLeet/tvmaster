@@ -1,14 +1,36 @@
+# TVMaster in Docker:   docker compose up -d     then open http://<this machine>:8787/admin/
+# The first start prints an access token:   docker compose logs tvmaster
+# Everything is documented in docs/DOCKER.md.
 services:
   tvmaster:
     build: .
+    image: tvmaster:latest
+    container_name: tvmaster
     restart: unless-stopped
     ports:
-      - "8787:8787"
+      - "8787:8787"          # the web admin, the player, the IPTV playlist and the API
+      # - "8788:8788"        # HTTPS, if you turn it on below
     environment:
-      # Pick your own: `docker run --rm tvmaster token` prints a random one.
-      TVMASTER_TOKEN: "change-me-to-a-long-random-token"
+      TZ: "America/Toronto"  # your time zone: channel schedules and the guide use it
+      PUID: "1000"           # the user and group that own the files TVMaster writes
+      PGID: "1000"           #   (find yours with `id`)
+      # TVMASTER_TOKEN: "choose-a-long-token"   # fix the access token (otherwise one is made on the first start)
+      # TVMASTER_NO_FIRST_TOKEN: "1"            # or start with no token (turn one on in Settings)
+      # TVMASTER_TLS: "1"                       # also serve HTTPS on 8788 (a self-signed certificate)
+      # TVMASTER_ENCODER: "nvenc"               # a GPU encoder; see docs/DOCKER.md
     volumes:
-      - tvmaster-data:/data
-      - /path/to/your/media:/media:ro
+      - tvmaster-data:/data   # the database, caches and uploaded pictures
+      - ./media:/media        # your shows, commercials, bumpers and music; uploads from the apps land here
+    # init: true is built in (tini). For an NVIDIA GPU, add:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [video, compute, utility]
+    # For an Intel or AMD GPU (VAAPI), add:
+    # devices:
+    #   - /dev/dri:/dev/dri
 volumes:
   tvmaster-data:

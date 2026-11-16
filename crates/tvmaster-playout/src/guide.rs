@@ -49,6 +49,12 @@ pub fn guide_look(c: &GuideConfig, channel_id: &str) -> GuideLook {
         GuideTheme::Ocean => Palette::ocean(),
         GuideTheme::Slate => Palette::slate(),
         GuideTheme::Paper => Palette::paper(),
+        GuideTheme::Midnight => Palette::midnight(),
+        GuideTheme::Graphite => Palette::graphite(),
+        GuideTheme::Snow => Palette::snow(),
+        GuideTheme::Forest => Palette::forest(),
+        GuideTheme::Berry => Palette::berry(),
+        GuideTheme::Mono => Palette::mono(),
         GuideTheme::Custom => {
             let auto = Theme::for_channel(channel_id);
             let pick = |s: &Option<String>, fallback| {
@@ -56,9 +62,13 @@ pub fn guide_look(c: &GuideConfig, channel_id: &str) -> GuideLook {
                     .and_then(tvmaster_core::parse_hex_color)
                     .unwrap_or(fallback)
             };
-            Palette::custom(
+            Palette::custom_on(
                 pick(&c.colors.primary, auto.primary),
                 pick(&c.colors.accent, auto.accent),
+                c.colors
+                    .background
+                    .as_deref()
+                    .and_then(tvmaster_core::parse_hex_color),
             )
         }
     };
@@ -74,6 +84,24 @@ pub fn guide_look(c: &GuideConfig, channel_id: &str) -> GuideLook {
     look.title = c.header.title;
     look.clock = c.header.clock;
     look.date = c.header.date;
+    let a = &c.look;
+    look.smooth_text = a.typeface == tvmaster_core::GuideTypeface::Smooth;
+    look.rounded = a.corners == tvmaster_core::GuideCorners::Rounded;
+    look.text_scale = match a.text_size {
+        tvmaster_core::GuideTextSize::Small => 0.8,
+        tvmaster_core::GuideTextSize::Medium => 1.0,
+        tvmaster_core::GuideTextSize::Large => 1.5,
+    };
+    look.background = match a.background.style {
+        tvmaster_core::BackgroundStyle::Solid => tvmaster_render::Background::Solid,
+        tvmaster_core::BackgroundStyle::Stripes => tvmaster_render::Background::Stripes,
+        // A picture is loaded separately (see `background_image`); until then, the gradient.
+        _ => tvmaster_render::Background::Gradient,
+    };
+    look.header_minimal = a.header_style == tvmaster_core::HeaderStyle::Minimal;
+    look.ticker_top = a.ticker_position == tvmaster_core::TickerPosition::Top;
+    look.cell_times = a.cell_times;
+    look.now_marker = a.now_marker;
     look.logo = c
         .header
         .logo
@@ -100,6 +128,57 @@ pub fn guide_look(c: &GuideConfig, channel_id: &str) -> GuideLook {
             },
             info: c.pip.info,
         });
+    }
+    look
+}
+
+/// The guide's background picture, scaled to fill a `w` x `h` frame (cropping the
+/// overflow) and darkened by `dim` percent, as raw RGB. `None` if FFmpeg cannot read it.
+/// Blocks (runs FFmpeg once).
+pub fn background_image(
+    ffmpeg: &Path,
+    src: &Path,
+    w: usize,
+    h: usize,
+    dim: u8,
+) -> Option<Arc<Vec<u8>>> {
+    let keep = 1.0 - f64::from(dim.min(90)) / 100.0;
+    let out = std::process::Command::new(ffmpeg)
+        .args(["-v", "error", "-i"])
+        .arg(src)
+        .args([
+            "-vf",
+            &format!(
+                "scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},colorchannelmixer=rr={keep}:gg={keep}:bb={keep},format=rgb24"
+            ),
+            "-frames:v",
+            "1",
+            "-f",
+            "rawvideo",
+            "-",
+        ])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    (out.status.success() && out.stdout.len() == w * h * 3).then(|| Arc::new(out.stdout))
+}
+
+/// [`guide_look`] with the background picture, if the guide has one, loaded.
+/// Blocks while FFmpeg reads the picture.
+pub fn guide_look_with_pictures(c: &GuideConfig, channel_id: &str, ffmpeg: &Path) -> GuideLook {
+    let mut look = guide_look(c, channel_id);
+    let bg = &c.look.background;
+    if bg.style == tvmaster_core::BackgroundStyle::Image {
+        let (w, h) = look.size();
+        if let Some(img) = bg
+            .image
+            .as_deref()
+            .filter(|i| !i.trim().is_empty())
+            .and_then(|i| background_image(ffmpeg, Path::new(i), w, h, bg.dim))
+        {
+            look.background = tvmaster_render::Background::Image(img);
+        }
     }
     look
 }
@@ -253,8 +332,13 @@ pub(crate) async fn produce_guide(
 ) -> Result<()> {
     let gspec = spec.guide.clone().context("not a guide channel")?;
     let config = gspec.config.clone();
-    let look = guide_look(&config, &spec.id);
+    let (ff, cid) = (cfg.ffmpeg.clone(), spec.id.clone());
+    let cfg2 = config.clone();
+    let look = tokio::task::spawn_blocking(move || guide_look_with_pictures(&cfg2, &cid, &ff))
+        .await
+        .map_err(|e| anyhow!("loading the guide's look: {e}"))?;
     let geo = geometry(&look);
+    let (src_w, src_h) = look.size();
     let dir = cfg.root.join("hls").join(
         spec.id
             .chars()
@@ -350,8 +434,9 @@ pub(crate) async fn produce_guide(
         });
         let args = guide_run_args(
             &GuideRun {
-                src_w: WIDTH,
-                src_h: HEIGHT,
+                src_w,
+                src_h,
+                smooth_scale: look.smooth_text,
                 music_list: list.as_deref(),
                 pip: pip_args,
                 logo: logo
@@ -488,7 +573,7 @@ async fn run_once(
             };
             let (d, l) = (data.clone(), look.clone());
             let chunk = tokio::task::spawn_blocking(move || {
-                let mut buf = Vec::with_capacity(n as usize * WIDTH * HEIGHT * 3);
+                let mut buf = Vec::with_capacity(n as usize * l.size().0 * l.size().1 * 3);
                 for j in 0..n {
                     let t = (frame + j) as f32 / GUIDE_FPS as f32;
                     buf.extend_from_slice(&render_guide(&d, &l, &view, t).px);

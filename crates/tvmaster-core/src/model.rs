@@ -127,6 +127,18 @@ pub enum GuideTheme {
     Slate,
     /// Light, like a printed listing.
     Paper,
+    /// Deep navy with a cyan highlight.
+    Midnight,
+    /// Charcoal with an orange highlight.
+    Graphite,
+    /// Clean white with a blue highlight.
+    Snow,
+    /// Deep green with an amber highlight.
+    Forest,
+    /// Plum with a pink highlight.
+    Berry,
+    /// Black and white.
+    Mono,
     /// From `colors.primary` and `colors.accent`.
     Custom,
 }
@@ -138,6 +150,130 @@ pub struct GuideColors {
     pub primary: Option<String>,
     #[serde(default)]
     pub accent: Option<String>,
+    /// For `custom`: the background colour (blank = a dark shade of the main colour).
+    #[serde(default)]
+    pub background: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GuideTypeface {
+    /// The chunky pixel font, drawn small and scaled up: the retro look.
+    #[default]
+    Pixel,
+    /// A smooth modern typeface, drawn at full 1280x720 resolution.
+    Smooth,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GuideCorners {
+    #[default]
+    Square,
+    Rounded,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GuideTextSize {
+    Small,
+    #[default]
+    Medium,
+    Large,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BackgroundStyle {
+    #[default]
+    Gradient,
+    Solid,
+    Stripes,
+    /// A picture of your own behind the listing (`background.image`).
+    Image,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GuideBackground {
+    #[serde(default)]
+    pub style: BackgroundStyle,
+    /// A picture on the server (png, jpg, gif, webp), fitted to fill the screen.
+    #[serde(default)]
+    pub image: Option<String>,
+    /// How much the picture is darkened so the listing stays readable, 0-90 percent.
+    #[serde(default = "default_dim")]
+    pub dim: u8,
+}
+
+fn default_dim() -> u8 {
+    45
+}
+
+impl Default for GuideBackground {
+    fn default() -> Self {
+        Self {
+            style: BackgroundStyle::Gradient,
+            image: None,
+            dim: default_dim(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HeaderStyle {
+    /// A filled band across the top.
+    #[default]
+    Bar,
+    /// Just the words over the background, with a thin line under them.
+    Minimal,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TickerPosition {
+    #[default]
+    Bottom,
+    Top,
+}
+
+/// How the guide is drawn, apart from its colours and what it lists.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GuideAppearance {
+    #[serde(default)]
+    pub typeface: GuideTypeface,
+    #[serde(default)]
+    pub corners: GuideCorners,
+    /// The size of the programme and channel text.
+    #[serde(default)]
+    pub text_size: GuideTextSize,
+    #[serde(default)]
+    pub background: GuideBackground,
+    #[serde(default)]
+    pub header_style: HeaderStyle,
+    #[serde(default)]
+    pub ticker_position: TickerPosition,
+    /// Show each programme's start and end under its name when there is room.
+    #[serde(default)]
+    pub cell_times: bool,
+    /// The vertical line at "now" on the time grid.
+    #[serde(default = "yes")]
+    pub now_marker: bool,
+}
+
+impl Default for GuideAppearance {
+    fn default() -> Self {
+        Self {
+            typeface: GuideTypeface::Pixel,
+            corners: GuideCorners::Square,
+            text_size: GuideTextSize::Medium,
+            background: GuideBackground::default(),
+            header_style: HeaderStyle::Bar,
+            ticker_position: TickerPosition::Bottom,
+            cell_times: false,
+            now_marker: true,
+        }
+    }
 }
 
 /// How the listing is arranged.
@@ -386,6 +522,8 @@ pub struct GuideConfig {
     #[serde(default)]
     pub layout: GuideLayout,
     #[serde(default)]
+    pub look: GuideAppearance,
+    #[serde(default)]
     pub header: GuideHeader,
     #[serde(default)]
     pub ticker_options: GuideTicker,
@@ -410,6 +548,7 @@ impl Default for GuideConfig {
             theme: GuideTheme::Auto,
             colors: GuideColors::default(),
             layout: GuideLayout::default(),
+            look: GuideAppearance::default(),
             header: GuideHeader::default(),
             ticker_options: GuideTicker::default(),
             channels: Vec::new(),
@@ -446,6 +585,7 @@ impl GuideConfig {
         for (what, c) in [
             ("primary", &self.colors.primary),
             ("accent", &self.colors.accent),
+            ("background", &self.colors.background),
         ] {
             if let Some(c) = c.as_deref().filter(|c| !c.trim().is_empty()) {
                 if parse_hex_color(c).is_none() {
@@ -462,6 +602,20 @@ impl GuideConfig {
         }
         if !matches!(l.time_step, 15 | 30 | 60) {
             return Err("guide.layout.time_step must be 15, 30 or 60".into());
+        }
+        let bg = &self.look.background;
+        if bg.dim > 90 {
+            return Err("guide.look.background.dim must be 0-90".into());
+        }
+        if let Some(img) = &bg.image {
+            if img.len() > 500 || img.chars().any(char::is_control) {
+                return Err("the guide background picture's path is not valid".into());
+            }
+        }
+        if bg.style == BackgroundStyle::Image
+            && bg.image.as_deref().is_none_or(|i| i.trim().is_empty())
+        {
+            return Err("a picture background needs a picture".into());
         }
         if let Some(logo) = &self.header.logo {
             if logo.len() > 500 || logo.chars().any(char::is_control) {
@@ -564,6 +718,10 @@ mod guide_tests {
         assert_eq!(old.layout, GuideLayout::default());
         assert_eq!(old.layout.rows, 6);
         assert!(old.ticker_options.enabled && old.ticker_options.now_on);
+        assert_eq!(old.look, GuideAppearance::default());
+        assert_eq!(old.look.typeface, GuideTypeface::Pixel);
+        assert!(old.look.now_marker && !old.look.cell_times);
+        assert_eq!(old.look.background.style, BackgroundStyle::Gradient);
         assert_eq!(old.pip.mode, PipMode::Off);
         assert!(old.validate().is_ok());
         let none: GuideConfig = serde_json::from_str("{}").unwrap();
@@ -583,10 +741,30 @@ mod guide_tests {
         g.pip.mode = PipMode::Rotate;
         g.pip.placement = PipPlacement::TopLeft;
         g.pip.audio = PipAudio::Channel;
+        g.look.typeface = GuideTypeface::Smooth;
+        g.look.corners = GuideCorners::Rounded;
+        g.look.text_size = GuideTextSize::Large;
+        g.look.background.style = BackgroundStyle::Image;
+        g.look.background.image = Some("/data/assets/ab-bg.jpg".into());
+        g.look.header_style = HeaderStyle::Minimal;
+        g.look.ticker_position = TickerPosition::Top;
+        g.look.cell_times = true;
+        g.look.now_marker = false;
+        g.colors.background = Some("#101830".into());
         let json = serde_json::to_value(&g).unwrap();
         assert_eq!(json["theme"], "custom");
         assert_eq!(json["layout"]["style"], "now_next");
         assert_eq!(json["pip"]["placement"], "top_left");
+        assert_eq!(json["look"]["typeface"], "smooth");
+        assert_eq!(json["look"]["background"]["style"], "image");
+        assert_eq!(json["look"]["ticker_position"], "top");
+        assert_eq!(json["colors"]["background"], "#101830");
+        assert_eq!(
+            serde_json::from_str::<GuideConfig>(r#"{"theme":"midnight"}"#)
+                .unwrap()
+                .theme,
+            GuideTheme::Midnight
+        );
         assert_eq!(serde_json::from_value::<GuideConfig>(json).unwrap(), g);
     }
 
@@ -605,6 +783,9 @@ mod guide_tests {
         assert!(bad(&|g| g.pip.seconds = 3).contains("seconds"));
         assert!(bad(&|g| g.pip.mode = PipMode::Channel).contains("channel"));
         assert!(bad(&|g| g.hours = 9).contains("hours"));
+        assert!(bad(&|g| g.look.background.dim = 95).contains("dim"));
+        assert!(bad(&|g| g.look.background.style = BackgroundStyle::Image).contains("picture"));
+        assert!(bad(&|g| g.colors.background = Some("navy".into())).contains("background"));
         let mut ok = GuideConfig::default();
         ok.pip.mode = PipMode::Channel;
         ok.pip.channel = Some("retro".into());

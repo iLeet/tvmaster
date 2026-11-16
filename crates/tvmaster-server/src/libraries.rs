@@ -45,6 +45,9 @@ pub async fn list(State(s): State<AppState>) -> ApiResult<Json<Value>> {
 pub struct NewLibrary {
     path: String,
     kind: Option<String>,
+    /// Make the folder if it does not exist (for a library that uploads go into).
+    #[serde(default)]
+    create: bool,
 }
 
 pub async fn add(
@@ -59,6 +62,20 @@ pub async fn add(
         ));
     }
     let path = PathBuf::from(&body.path);
+    if body.create && !path.exists() {
+        if !path.is_absolute() {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "give the full path of the folder to make",
+            ));
+        }
+        std::fs::create_dir_all(&path).map_err(|e| {
+            ApiError::new(
+                StatusCode::BAD_REQUEST,
+                format!("could not make that folder: {e}"),
+            )
+        })?;
+    }
     if !path.is_dir() {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
@@ -127,6 +144,171 @@ pub async fn scan(State(s): State<AppState>, Path(id): Path<i64>) -> ApiResult<J
     Ok(Json(
         json!({ "found": found, "indexed": items.len(), "skipped": skipped, "analysing": analysing }),
     ))
+}
+
+/// Where an uploaded file goes: `rel` inside `root`, never outside it. Folders
+/// in `rel` are made as needed; every part must be a plain name.
+fn upload_target(root: &FsPath, rel: &str, kind: &str) -> Result<PathBuf, &'static str> {
+    if rel.is_empty() || rel.len() > 400 || rel.starts_with('/') || rel.starts_with('\\') {
+        return Err("give a relative path like Season 1/Episode.mkv");
+    }
+    let mut out = root.to_path_buf();
+    let parts: Vec<&str> = rel.split(['/', '\\']).collect();
+    for (i, p) in parts.iter().enumerate() {
+        let bad = p.is_empty()
+            || *p == "."
+            || *p == ".."
+            || p.starts_with('.')
+            || p.len() > 200
+            || p.chars()
+                .any(|c| c.is_control() || matches!(c, ':' | '*' | '?' | '"' | '<' | '>' | '|'));
+        if bad {
+            return Err("that path has a name that is not allowed (no .., hidden names or special characters)");
+        }
+        if i == parts.len() - 1 {
+            let ext = FsPath::new(p)
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_lowercase();
+            if !tvmaster_media::library_extensions(kind).contains(&ext.as_str()) {
+                return Err("that kind of file is not accepted by this library");
+            }
+        }
+        out.push(p);
+    }
+    Ok(out)
+}
+
+#[derive(Deserialize)]
+pub struct FileQuery {
+    path: String,
+    #[serde(default)]
+    overwrite: bool,
+}
+
+/// `PUT /api/v1/libraries/{id}/files?path=Show/Season 1/Episode.mkv`: put a file
+/// into a library's folder on the server. The body is the file, streamed to disk
+/// (no size limit), then indexed so it is on the schedule without a scan.
+pub async fn upload_file(
+    State(s): State<AppState>,
+    Path(id): Path<i64>,
+    axum::extract::Query(q): axum::extract::Query<FileQuery>,
+    body: axum::body::Body,
+) -> ApiResult<Json<Value>> {
+    use tokio::io::AsyncWriteExt;
+    use tokio_stream::StreamExt;
+    let lib = tvmaster_db::get_library(&s.db(), id)?
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "no such library"))?;
+    let root = PathBuf::from(&lib.path);
+    if !root.is_dir() {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "the library folder is not reachable",
+        ));
+    }
+    let dest = upload_target(&root, &q.path, &lib.kind)
+        .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, e))?;
+    if dest.exists() && !q.overwrite {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "a file with that name is already there",
+        ));
+    }
+    if let Some(dir) = dest.parent() {
+        tokio::fs::create_dir_all(dir).await.map_err(|e| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("cannot make the folder: {e}"),
+            )
+        })?;
+    }
+    let part = dest.with_file_name(format!(
+        ".{}.part",
+        dest.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("upload")
+    ));
+    let io = |e: std::io::Error| {
+        ApiError::new(
+            StatusCode::INSUFFICIENT_STORAGE,
+            format!("could not save the file: {e}"),
+        )
+    };
+    let mut file = tokio::fs::File::create(&part).await.map_err(io)?;
+    let mut stream = body.into_data_stream();
+    let mut bytes: u64 = 0;
+    let result: Result<(), ApiError> = async {
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|e| {
+                ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    format!("the upload was interrupted: {e}"),
+                )
+            })?;
+            bytes += chunk.len() as u64;
+            file.write_all(&chunk).await.map_err(io)?;
+        }
+        file.flush().await.map_err(io)?;
+        Ok(())
+    }
+    .await;
+    drop(file);
+    if let Err(e) = result {
+        let _ = tokio::fs::remove_file(&part).await;
+        return Err(e);
+    }
+    if bytes == 0 {
+        let _ = tokio::fs::remove_file(&part).await;
+        return Err(ApiError::new(StatusCode::BAD_REQUEST, "the file was empty"));
+    }
+    tokio::fs::rename(&part, &dest).await.map_err(io)?;
+    // Index it now rather than waiting for the next watch pass.
+    let note = crate::monitor::rescan_with(&s, &lib, std::time::Duration::ZERO).await;
+    let indexed = tvmaster_db::library_media_paths(&s.db(), lib.id)?
+        .iter()
+        .any(|(_, p, missing)| !missing && FsPath::new(p) == dest);
+    Ok(Json(json!({
+        "path": dest.to_string_lossy(),
+        "bytes": bytes,
+        "indexed": indexed,
+        "added": note.map_or(0, |n| n.added),
+    })))
+}
+
+/// `DELETE /api/v1/libraries/{id}/files?path=...`: remove a file from a library's folder.
+pub async fn delete_file(
+    State(s): State<AppState>,
+    Path(id): Path<i64>,
+    axum::extract::Query(q): axum::extract::Query<FileQuery>,
+) -> ApiResult<StatusCode> {
+    let lib = tvmaster_db::get_library(&s.db(), id)?
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "no such library"))?;
+    let root = PathBuf::from(&lib.path);
+    let dest = upload_target(&root, &q.path, &lib.kind)
+        .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, e))?;
+    tokio::fs::remove_file(&dest)
+        .await
+        .map_err(|_| ApiError::new(StatusCode::NOT_FOUND, "no such file"))?;
+    // Flag it missing and let channels on autopilot re-plan without it. (A folder scan would
+    // refuse to act on a library that has just become empty, so this does it directly.)
+    {
+        let db = s.db();
+        for (mid, path, missing) in tvmaster_db::library_media_paths(&db, lib.id)? {
+            if !missing && FsPath::new(&path) == dest {
+                tvmaster_db::mark_media_missing(&db, mid)?;
+            }
+        }
+        let now = crate::plan::now_ms();
+        for c in tvmaster_db::list_channels(&db)?
+            .iter()
+            .filter(|c| c.library_ids.contains(&lib.id) && c.autopilot)
+        {
+            crate::autopilot::reroll(&db, c, now)?;
+        }
+    }
+    s.emit(json!({ "type": "library.changed", "library": lib.id, "added": 0, "removed": 1, "back": 0 }));
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// Remove a library and its indexed files (the files on disk are untouched).
@@ -516,5 +698,198 @@ mod tests {
             call(&app, "GET", "/api/v1/tvs/den", "").await.0,
             StatusCode::NOT_FOUND
         );
+    }
+
+    #[test]
+    fn uploads_cannot_leave_the_library_folder_or_bring_the_wrong_kind_of_file() {
+        let root = std::path::Path::new("/media/bumpers");
+        let ok = |p: &str, k: &str| super::upload_target(root, p, k);
+        assert_eq!(
+            ok("Retro/Bump 1.mp4", "bumpers").unwrap(),
+            root.join("Retro").join("Bump 1.mp4")
+        );
+        assert!(ok("../etc/passwd.mp4", "bumpers").is_err());
+        assert!(ok("a/../../b.mp4", "bumpers").is_err());
+        assert!(ok("/abs/file.mp4", "bumpers").is_err());
+        assert!(ok("..\\x.mp4", "bumpers").is_err());
+        assert!(ok(".hidden.mp4", "bumpers").is_err());
+        assert!(ok("a//b.mp4", "bumpers").is_err());
+        assert!(ok("bad:name.mp4", "bumpers").is_err());
+        assert!(ok("script.sh", "bumpers").is_err());
+        assert!(
+            ok("clip.mp3", "bumpers").is_err(),
+            "audio is for music libraries"
+        );
+        assert!(ok("song.mp3", "music").is_ok());
+        assert!(
+            ok("Show S01E01.srt", "shows").is_ok(),
+            "subtitles go beside shows"
+        );
+        assert!(ok("Show S01E01.srt", "commercials").is_err());
+        assert!(ok("", "shows").is_err());
+    }
+
+    #[tokio::test]
+    async fn a_video_can_be_uploaded_into_a_library_and_is_on_the_schedule_at_once() {
+        use http_body_util::BodyExt;
+        use tower::ServiceExt;
+        let Ok(info) = tvmaster_media::FfmpegInfo::detect("ffmpeg", "ffprobe") else {
+            eprintln!("ffmpeg not installed; skipping");
+            return;
+        };
+        let dir = std::env::temp_dir().join(format!("tvm-up-{}", crate::generate_token()));
+        let video = dir.join("src.mp4");
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(std::process::Command::new("ffmpeg")
+            .args([
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=size=160x90:rate=10:duration=2",
+                "-pix_fmt",
+                "yuv420p"
+            ])
+            .arg(&video)
+            .status()
+            .unwrap()
+            .success());
+        let bytes = std::fs::read(&video).unwrap();
+        let state = AppState::new(tvmaster_db::open_in_memory().unwrap(), Some(info), None);
+        let app = router(state.clone());
+        let lib_dir = dir.join("bumpers");
+        let (st, lib) = call(
+            &app,
+            "POST",
+            "/api/v1/libraries",
+            &format!(
+                r#"{{"path":"{}","kind":"bumpers","create":true}}"#,
+                lib_dir.display()
+            ),
+        )
+        .await;
+        assert_eq!(st, StatusCode::CREATED, "{lib}");
+        assert!(lib_dir.is_dir(), "the folder was made");
+        let id = lib["id"].as_i64().unwrap();
+
+        let put = |uri: String, body: Vec<u8>, method: &'static str| {
+            let app = app.clone();
+            async move {
+                let req = axum::http::Request::builder()
+                    .method(method)
+                    .uri(uri)
+                    .body(axum::body::Body::from(body))
+                    .unwrap();
+                let res = app.oneshot(req).await.unwrap();
+                let st = res.status();
+                let b = res.into_body().collect().await.unwrap().to_bytes();
+                (
+                    st,
+                    serde_json::from_slice::<serde_json::Value>(&b).unwrap_or_default(),
+                )
+            }
+        };
+        let (st, r) = put(
+            format!("/api/v1/libraries/{id}/files?path=Retro/Bump%201.mp4"),
+            bytes.clone(),
+            "PUT",
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{r}");
+        assert_eq!(r["indexed"], true, "{r}");
+        assert_eq!(
+            std::fs::read(lib_dir.join("Retro/Bump 1.mp4")).unwrap(),
+            bytes,
+            "stored exactly as sent"
+        );
+        assert!(
+            !lib_dir.join("Retro/.Bump 1.mp4.part").exists(),
+            "no half-written file left"
+        );
+        let (_, libs) = call(&app, "GET", "/api/v1/libraries", "").await;
+        assert_eq!(libs[0]["items"], 1);
+
+        assert_eq!(
+            put(
+                format!("/api/v1/libraries/{id}/files?path=Retro/Bump%201.mp4"),
+                bytes.clone(),
+                "PUT"
+            )
+            .await
+            .0,
+            StatusCode::CONFLICT,
+            "not silently replaced"
+        );
+        assert_eq!(
+            put(
+                format!("/api/v1/libraries/{id}/files?path=Retro/Bump%201.mp4&overwrite=true"),
+                bytes.clone(),
+                "PUT"
+            )
+            .await
+            .0,
+            StatusCode::OK
+        );
+        assert_eq!(
+            put(
+                format!("/api/v1/libraries/{id}/files?path=..%2Fescape.mp4"),
+                bytes.clone(),
+                "PUT"
+            )
+            .await
+            .0,
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            put(
+                format!("/api/v1/libraries/{id}/files?path=x.exe"),
+                bytes.clone(),
+                "PUT"
+            )
+            .await
+            .0,
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            put(
+                format!("/api/v1/libraries/{id}/files?path=empty.mp4"),
+                vec![],
+                "PUT"
+            )
+            .await
+            .0,
+            StatusCode::BAD_REQUEST
+        );
+        assert!(!dir.join("escape.mp4").exists());
+        assert_eq!(
+            put(
+                "/api/v1/libraries/999/files?path=a.mp4".into(),
+                bytes,
+                "PUT"
+            )
+            .await
+            .0,
+            StatusCode::NOT_FOUND
+        );
+
+        assert_eq!(
+            put(
+                format!("/api/v1/libraries/{id}/files?path=Retro/Bump%201.mp4"),
+                vec![],
+                "DELETE"
+            )
+            .await
+            .0,
+            StatusCode::NO_CONTENT
+        );
+        let (_, libs) = call(&app, "GET", "/api/v1/libraries", "").await;
+        assert_eq!(
+            libs[0]["items"], 0,
+            "removing the file takes it off the schedule too"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

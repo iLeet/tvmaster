@@ -40,7 +40,9 @@ struct GuideForm: View {
             .padding([.horizontal, .top], 16)
             if let previewError { Text(previewError).font(.caption).foregroundStyle(.orange).padding(.horizontal, 16).padding(.top, 4) }
             Form {
+                presets
                 colours
+                style
                 listing
                 heading
                 ticker
@@ -53,6 +55,40 @@ struct GuideForm: View {
     }
 
     // MARK: sections
+
+    private var presets: some View {
+        Section("Start from a look") {
+            Text("One click sets the colours and style together; everything below still works afterwards.").font(.caption).foregroundStyle(.secondary)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8)], spacing: 8) {
+                ForEach(GuideSettings.presets) { p in
+                    Button { p.apply(&gs) } label: {
+                        Text(p.label).frame(maxWidth: .infinity)
+                    }
+                    .glassButton().help(p.help)
+                }
+            }
+        }
+    }
+
+    private var style: some View {
+        Section("Style") {
+            Picker("Letters", selection: Binding(get: { gs.typeface }, set: { v in gs.typeface = v; if v == "smooth" { gs.scanlines = false } })) {
+                Text("Retro pixels").tag("pixel"); Text("Smooth").tag("smooth")
+            }.pickerStyle(.segmented)
+            Text(gs.typeface == "pixel" ? "Chunky pixel letters, drawn small and scaled up: the retro look." : "A smooth modern typeface, drawn at full 1280x720 resolution.")
+                .font(.caption).foregroundStyle(.secondary)
+            Picker("Corners", selection: $gs.corners) { Text("Square").tag("square"); Text("Rounded").tag("rounded") }.pickerStyle(.segmented)
+            Picker("Text size", selection: $gs.textSize) { Text("Small").tag("small"); Text("Medium").tag("medium"); Text("Large").tag("large") }.pickerStyle(.segmented)
+            Picker("Heading", selection: $gs.headerStyle) { Text("Coloured bar").tag("bar"); Text("Just the words").tag("minimal") }.pickerStyle(.segmented)
+            Picker("Background", selection: $gs.backgroundStyle) { Text("Gradient").tag("gradient"); Text("Solid").tag("solid"); Text("Stripes").tag("stripes"); Text("Picture").tag("image") }.pickerStyle(.segmented)
+            if gs.backgroundStyle == "image" {
+                PictureChooser(title: "Picture", path: $gs.backgroundImage, hint: "Fitted to the screen and darkened so the listing stays readable.")
+                LabeledContent("Darken the picture \(gs.backgroundDim)%") { Slider(value: Binding(get: { Double(gs.backgroundDim) }, set: { gs.backgroundDim = Int($0) }), in: 0...90, step: 1) }
+            }
+            Toggle("Times on each programme (when there is room)", isOn: $gs.cellTimes)
+            Toggle("Line at “now” on the time grid", isOn: $gs.nowMarker)
+        }
+    }
 
     private var colours: some View {
         Section("Colours") {
@@ -81,6 +117,8 @@ struct GuideForm: View {
             if gs.theme == "custom" {
                 ColorPicker("Main colour", selection: Binding(get: { color(gs.colorPrimary.isEmpty ? "#3366ff" : gs.colorPrimary) }, set: { gs.colorPrimary = hex($0) }), supportsOpacity: false)
                 ColorPicker("Highlight", selection: Binding(get: { color(gs.colorAccent.isEmpty ? "#ffcc00" : gs.colorAccent) }, set: { gs.colorAccent = hex($0) }), supportsOpacity: false)
+                ColorPicker("Background", selection: Binding(get: { color(gs.colorBackground.isEmpty ? "#101830" : gs.colorBackground) }, set: { gs.colorBackground = hex($0) }), supportsOpacity: false)
+                if !gs.colorBackground.isEmpty { Button("Use a dark shade of the main colour") { gs.colorBackground = "" }.glassButton() }
             }
             Toggle("Scanlines (a faint CRT texture)", isOn: $gs.scanlines)
         }
@@ -130,6 +168,7 @@ struct GuideForm: View {
         Section("Ticker") {
             Toggle("Scrolling line along the bottom", isOn: $gs.tickerEnabled)
             if gs.tickerEnabled {
+                Picker("Where", selection: $gs.tickerPosition) { Text("Bottom").tag("bottom"); Text("Top").tag("top") }.pickerStyle(.segmented)
                 Picker("Speed", selection: $gs.tickerSpeed) { Text("Slow").tag("slow"); Text("Normal").tag("normal"); Text("Fast").tag("fast") }.pickerStyle(.segmented)
                 Toggle("Announce what is on now (“NOW ON 4: Cheers”)", isOn: $gs.tickerNowOn)
                 VStack(alignment: .leading, spacing: 4) {

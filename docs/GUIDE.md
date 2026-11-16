@@ -6,6 +6,23 @@ A guide channel (`kind: "guide"`) is a live TV listing that TVMaster draws itsel
 
 `theme`: `auto` (colours made from the channel, the original look), `prevue` (cable blue and yellow), `amber`, `phosphor` (green screen), `neon`, `sunset`, `ocean`, `slate`, `paper` (light, like a printed listing) or `custom`, which builds a look from `colors.primary` and `colors.accent` (`#rrggbb`). `layout.scanlines` turns the CRT texture on or off.
 
+## Style
+
+`look` chooses how the guide is drawn, apart from its colours:
+
+| Field | |
+|---|---|
+| `look.typeface` | `pixel` (the chunky retro letters, drawn at 640x360 and scaled up) or `smooth` (a modern typeface drawn at full 1280x720, bundled so it looks the same everywhere). Smooth text draws capitals and lower case, Latin and accented letters; anything else shows as `?`. |
+| `look.corners` | `square` or `rounded`. |
+| `look.text_size` | `small`, `medium`, `large`. The pixel font only has whole sizes, so Large doubles it. |
+| `look.background` | `style`: `gradient`, `solid`, `stripes` or `image` (with `image`, a picture on the server, and `dim` 0-90, how much it is darkened). The picture is fitted to fill the screen. |
+| `look.header_style` | `bar` (a coloured band) or `minimal` (just the words with a thin line). |
+| `look.ticker_position` | `bottom` or `top`. |
+| `look.cell_times` | Each programme's start and end under its name when there is room. |
+| `look.now_marker` | The vertical line at "now" on the time grid. |
+
+The editors also have one-click looks (Retro, Modern dark, Clean white, Minimal) that set colours and style together. More colours: themes `midnight`, `graphite`, `snow`, `forest`, `berry`, `mono`, and for `custom` a `colors.background` as well as `primary` and `accent`.
+
 ## Layout
 
 | Field | |
@@ -52,4 +69,4 @@ Real FFmpeg: a video window that rotates between a red and a green channel shows
 
 ## Known limits
 
-The listing is drawn at 640x360 and scaled up (the same chunky look as the bumpers), so it is not sharp text at 1080p. A guide's settings are read when it starts: saving them restarts the guide.
+The retro looks are drawn at 640x360 and scaled up (the same chunky look as the bumpers); the smooth looks are drawn at 1280x720 and scaled to the channel's size. Drawing a smooth frame takes about a millisecond on a laptop, so it costs nothing noticeable. A guide's settings are read when it starts: saving them restarts the guide.

@@ -1,5 +1,5 @@
 ; TVMaster installer for Windows (NSIS).
-;   makensis -DVERSION=0.0.1 -DARCH=x64 -DEXE=path\to\tvmaster.exe -DOUT=TVMaster-0.0.1-x64-setup.exe tvmaster.nsi
+;   makensis -DVERSION=1.0.0 -DARCH=x64 -DEXE=path\to\tvmaster.exe -DOUT=TVMaster-1.0.0-x64-setup.exe tvmaster.nsi
 ; Silent install with every default:  TVMaster-x.y.z-x64-setup.exe /S
 Unicode true
 !include "MUI2.nsh"

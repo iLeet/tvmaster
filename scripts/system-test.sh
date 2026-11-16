@@ -159,6 +159,15 @@ api -XPOST "$H/api/v1/channels" -d "{\"id\":\"logo\",\"number\":8,\"name\":\"Log
 OUT="$(probe "$H/stream/logo/index.m3u8?token=$TOKEN")"; echo "$OUT" | grep -q h264 && ok "and it streams" || bad "picture channel stream" "$OUT"
 # the guide editor's preview
 curl -fsS "${auth[@]}" -H 'content-type: application/json' -d '{"name":"Preview","guide":{"theme":"neon","layout":{"style":"now_next"},"pip":{"mode":"rotate"}}}' "$H/api/v1/guide/preview" -o "$W/preview.png" && head -c 8 "$W/preview.png" | od -An -c | tr -d ' \n' | grep -q 'PNG' && ok "the guide preview is a PNG" || bad "guide preview"
+curl -fsS "${auth[@]}" -H 'content-type: application/json' -d "{\"name\":\"Preview\",\"guide\":{\"theme\":\"midnight\",\"look\":{\"typeface\":\"smooth\",\"corners\":\"rounded\",\"background\":{\"style\":\"image\",\"image\":\"$ASSET_PATH\",\"dim\":30}}}}" "$H/api/v1/guide/preview" -o "$W/preview2.png" && [[ "$(od -An -tu1 -j18 -N1 "$W/preview2.png" | tr -d ' ')" == 5 ]] && ok "a smooth guide with a picture background previews at 1280 pixels wide" || bad "smooth preview"
+# uploading a video into a library made from the app
+mkdir -p "$W/uploads"
+UL="$(api -XPOST "$H/api/v1/libraries" -d "{\"path\":\"$W/uploads/bumpers\",\"kind\":\"bumpers\",\"create\":true}" | json "d['id']")"
+[[ -d "$W/uploads/bumpers" ]] && ok "a library folder can be made from the app" || bad "library folder not made"
+UR="$(curl -fsS "${auth[@]}" -XPUT --data-binary "@$W/ads/Spot 1.mp4" "$H/api/v1/libraries/$UL/files?path=Retro/Spot%201.mp4")"
+[[ "$(echo "$UR" | json "d['indexed']")" == True && -f "$W/uploads/bumpers/Retro/Spot 1.mp4" ]] && ok "a video uploaded into a library is stored and indexed at once" || bad "upload" "$UR"
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -XPUT --data-binary 'x' "${auth[@]}" "$H/api/v1/libraries/$UL/files?path=../../escape.mp4")" == 400 ]] && ok "an upload cannot escape the library folder" || bad "path escape not refused"
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -XPUT --data-binary @"$W/ads/Spot 1.mp4" "${auth[@]}" "$H/api/v1/libraries/$UL/files?path=Retro/Spot%201.mp4")" == 409 ]] && ok "and does not silently replace a file" || bad "overwrite not refused"
 # a guide with its own look, a clock in 24-hour time and a live video window
 api -XPOST "$H/api/v1/channels" -d '{"id":"guide","number":3,"name":"Guide","kind":"guide","guide":{"theme":"prevue","hours":2,"header":{"hour12":false},"layout":{"rows":4,"time_step":15},"pip":{"mode":"channel","channel":"retro","placement":"side_right","size":"medium"}}}' >/dev/null && ok "the guide is set up with a theme, 24-hour times and a video window"
 curl -fsS "${auth[@]}" "$H/stream/guide/index.m3u8" >/dev/null
@@ -206,6 +215,13 @@ PID2=$!
 for _ in $(seq 1 40); do curl -s "http://127.0.0.1:$HP2/api/v1/health" >/dev/null 2>&1 && break; sleep 0.25; done
 [[ "$(curl -s -o /dev/null -w '%{http_code}' "$H2/api/v1/channels")" == 200 ]] && ok "and a token switched off stays off after a restart (the seed is used once)" || bad "seed token came back"
 kill -INT "$PID2"; wait "$PID2" 2>/dev/null
+
+# docker stop and systemd send SIGTERM: it must stop cleanly, like Ctrl-C does
+"$BIN" serve --bind "127.0.0.1:$HP2" --data-dir "$W/data3" >"$W/server4.log" 2>&1 &
+PID2=$!
+for _ in $(seq 1 40); do curl -s "http://127.0.0.1:$HP2/api/v1/health" >/dev/null 2>&1 && break; sleep 0.25; done
+kill -TERM "$PID2"; wait "$PID2" 2>/dev/null; RC=$?
+[[ "$RC" == 0 ]] && ok "SIGTERM (docker stop, systemd) stops the server cleanly" || bad "SIGTERM exit status $RC"
 
 # ---- shutdown ----------------------------------------------------------
 section "Shutdown"

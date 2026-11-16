@@ -121,3 +121,21 @@ describe('platform and routes', () => {
     expect(parseHash('#/remote/living%20room').parts).toEqual(['remote', 'living room']);
   });
 });
+
+import { formatBytes, uploadPath } from './lib';
+
+describe('uploads', () => {
+  it('writes sizes people can read', () => {
+    expect(formatBytes(512)).toBe('512 B');
+    expect(formatBytes(1536)).toBe('1.5 KB');
+    expect(formatBytes(5 * 1024 * 1024)).toBe('5.0 MB');
+    expect(formatBytes(1.5 * 1024 ** 3)).toBe('1.5 GB');
+    expect(formatBytes(250 * 1024 ** 2)).toBe('250 MB');
+  });
+  it('keeps a picked folder\'s layout and adds the chosen sub-folder in front', () => {
+    expect(uploadPath('', { name: 'a.mp4' })).toBe('a.mp4');
+    expect(uploadPath('Retro/', { name: 'a.mp4' })).toBe('Retro/a.mp4');
+    expect(uploadPath('/Retro', { name: 'a.mp4', webkitRelativePath: 'Show/Season 1/a.mp4' })).toBe('Retro/Show/Season 1/a.mp4');
+    expect(uploadPath('', { name: 'a.mp4', webkitRelativePath: 'Show/a.mp4' })).toBe('Show/a.mp4');
+  });
+});

@@ -5,6 +5,23 @@ import type { AdConfig, Block, Lineup, Source } from './types';
 
 export const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
+/** `1.4 GB`, `820 MB`, `12 KB`. */
+export function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let v = n / 1024;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return `${v >= 100 ? v.toFixed(0) : v.toFixed(1)} ${units[i]}`;
+}
+
+/** Where an uploaded file goes inside a library: the folder it was picked from (when picking a whole folder) or the chosen sub-folder, then its name. */
+export function uploadPath(subfolder: string, file: { name: string; webkitRelativePath?: string }): string {
+  const rel = file.webkitRelativePath || file.name;
+  const sub = subfolder.trim().replace(/^[\\/]+|[\\/]+$/g, '');
+  return sub ? `${sub}/${rel}` : rel;
+}
+
 export function formatDuration(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000));
   if (s < 60) return `${s}s`;

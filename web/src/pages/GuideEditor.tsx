@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { GUIDE_THEMES, PIP_PLACEMENTS, cleanColor, toggleId } from '../guide';
+import { GUIDE_PRESETS, GUIDE_THEMES, PIP_PLACEMENTS, cleanColor, toggleId } from '../guide';
 import { PictureField } from '../PictureField';
 import type { ChannelView, GuideConfig, Library } from '../types';
 import { Card, Chips, Field, Segmented, Toggle } from '../ui';
@@ -62,6 +62,7 @@ export function GuideEditor({
   const set = (p: Partial<GuideConfig>) => onChange({ ...g, ...p });
   const layout = (p: Partial<GuideConfig['layout']>) => set({ layout: { ...g.layout, ...p } });
   const header = (p: Partial<GuideConfig['header']>) => set({ header: { ...g.header, ...p } });
+  const look = (p: Partial<GuideConfig['look']>) => set({ look: { ...g.look, ...p } });
   const ticker = (p: Partial<GuideConfig['ticker_options']>) => set({ ticker_options: { ...g.ticker_options, ...p } });
   const pip = (p: Partial<GuideConfig['pip']>) => set({ pip: { ...g.pip, ...p } });
   const programming = channels.filter((c) => c.kind === 'programming').sort((a, b) => a.number - b.number);
@@ -85,6 +86,18 @@ export function GuideEditor({
       </Card>
 
       <Card className="stack">
+        <h2>Start from a look</h2>
+        <p className="small dim">One click sets the colours and style together; everything below still works afterwards.</p>
+        <div className="row wrap" style={{ gap: 10 }}>
+          {GUIDE_PRESETS.map((p) => (
+            <button key={p.id} type="button" className="btn" title={p.help} onClick={() => onChange(p.apply(g))} style={{ display: 'grid', gap: 2, textAlign: 'left', padding: '8px 14px' }}>
+              <strong>{p.label}</strong><span className="small dim" style={{ maxWidth: 200 }}>{p.help}</span>
+            </button>
+          ))}
+        </div>
+      </Card>
+
+      <Card className="stack">
         <h2>Colours</h2>
         <div className="row wrap" style={{ gap: 10 }}>
           {GUIDE_THEMES.map((t) => (
@@ -105,10 +118,10 @@ export function GuideEditor({
         {theme && <p className="small dim">{theme.help}</p>}
         {g.theme === 'custom' && (
           <div className="row wrap nest" style={{ alignItems: 'flex-end' }}>
-            {(['primary', 'accent'] as const).map((k) => (
-              <Field key={k} label={k === 'primary' ? 'Main colour' : 'Highlight'}>
+            {(['primary', 'accent', 'background'] as const).map((k) => (
+              <Field key={k} label={k === 'primary' ? 'Main colour' : k === 'accent' ? 'Highlight' : 'Background'} hint={k === 'background' ? 'Blank = a dark shade of the main colour.' : undefined}>
                 <span className="row" style={{ gap: 8 }}>
-                  <input type="color" aria-label={k} value={cleanColor(g.colors[k] ?? '') ?? (k === 'primary' ? '#3366ff' : '#ffcc00')} onChange={(e) => set({ colors: { ...g.colors, [k]: e.target.value } })} />
+                  <input type="color" aria-label={k} value={cleanColor(g.colors[k] ?? '') ?? (k === 'primary' ? '#3366ff' : k === 'accent' ? '#ffcc00' : '#101830')} onChange={(e) => set({ colors: { ...g.colors, [k]: e.target.value } })} />
                   <input className="input mono" style={{ width: 110 }} placeholder="#3366ff" value={g.colors[k] ?? ''} onChange={(e) => set({ colors: { ...g.colors, [k]: e.target.value || null } })} />
                 </span>
               </Field>
@@ -116,6 +129,31 @@ export function GuideEditor({
           </div>
         )}
         <Toggle checked={g.layout.scanlines} onChange={(v) => layout({ scanlines: v })} label={<span>Scanlines <span className="dim small">a faint CRT texture over everything</span></span>} />
+      </Card>
+
+      <Card className="stack">
+        <h2>Style</h2>
+        <Field label="Letters" hint={g.look.typeface === 'pixel' ? 'Chunky pixel letters, drawn small and scaled up: the retro look.' : 'A smooth modern typeface, drawn at full 1280x720 resolution.'}>
+          <Segmented value={g.look.typeface} options={[{ value: 'pixel', label: 'Retro pixels' }, { value: 'smooth', label: 'Smooth' }]} onChange={(typeface) => set({ look: { ...g.look, typeface }, layout: typeface === 'smooth' ? { ...g.layout, scanlines: false } : g.layout })} />
+        </Field>
+        <div className="row wrap" style={{ alignItems: 'flex-end' }}>
+          <Field label="Corners"><Segmented value={g.look.corners} options={[{ value: 'square', label: 'Square' }, { value: 'rounded', label: 'Rounded' }]} onChange={(corners) => look({ corners })} /></Field>
+          <Field label="Text size" hint={g.look.typeface === 'pixel' ? 'Pixel letters only come in whole sizes, so Large doubles them.' : undefined}><Segmented value={g.look.text_size} options={[{ value: 'small', label: 'Small' }, { value: 'medium', label: 'Medium' }, { value: 'large', label: 'Large' }]} onChange={(text_size) => look({ text_size })} /></Field>
+          <Field label="Heading"><Segmented value={g.look.header_style} options={[{ value: 'bar', label: 'Coloured bar' }, { value: 'minimal', label: 'Just the words' }]} onChange={(header_style) => look({ header_style })} /></Field>
+        </div>
+        <Field label="Background" hint={g.look.background.style === 'image' ? 'A picture fitted to the screen and darkened so the listing stays readable.' : undefined}>
+          <Segmented value={g.look.background.style} options={[{ value: 'gradient', label: 'Gradient' }, { value: 'solid', label: 'Solid' }, { value: 'stripes', label: 'Stripes' }, { value: 'image', label: 'Picture' }]} onChange={(style) => look({ background: { ...g.look.background, style } })} />
+        </Field>
+        {g.look.background.style === 'image' && (
+          <div className="stack nest">
+            <PictureField value={g.look.background.image} onChange={(image) => look({ background: { ...g.look.background, image } })} />
+            <Field label={`Darken the picture ${g.look.background.dim}%`}><input type="range" min={0} max={90} value={g.look.background.dim} onChange={(e) => look({ background: { ...g.look.background, dim: Number(e.target.value) } })} /></Field>
+          </div>
+        )}
+        <div className="row wrap">
+          <Toggle checked={g.look.cell_times} onChange={(v) => look({ cell_times: v })} label={<span>Times on each programme <span className="dim small">when there is room</span></span>} />
+          <Toggle checked={g.look.now_marker} onChange={(v) => look({ now_marker: v })} label="Line at “now” on the time grid" />
+        </div>
       </Card>
 
       <Card className="stack">
@@ -194,6 +232,7 @@ export function GuideEditor({
         {g.ticker_options.enabled && (
           <div className="stack nest">
             <div className="row wrap" style={{ alignItems: 'flex-end' }}>
+              <Field label="Where"><Segmented value={g.look.ticker_position} options={[{ value: 'bottom', label: 'Bottom' }, { value: 'top', label: 'Top' }]} onChange={(ticker_position) => look({ ticker_position })} /></Field>
               <Field label="Speed"><Segmented value={g.ticker_options.speed} options={[{ value: 'slow', label: 'Slow' }, { value: 'normal', label: 'Normal' }, { value: 'fast', label: 'Fast' }]} onChange={(speed) => ticker({ speed })} /></Field>
             </div>
             <Toggle checked={g.ticker_options.now_on} onChange={(v) => ticker({ now_on: v })} label={<span>Announce what is on now <span className="dim small">“NOW ON 4: Cheers”, after your own lines</span></span>} />

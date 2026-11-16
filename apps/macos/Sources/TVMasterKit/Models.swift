@@ -237,6 +237,8 @@ public struct SystemInfo: Codable, Sendable, Hashable {
     public var os: String
     public var arch: String
     public var timezone: String
+    /// The server's data folder (database, caches, uploads). Absent on older servers.
+    public var dataDir: String?
     public var ffmpeg: FFmpeg?
     public var onAir: [String]
     public var authRequired: Bool

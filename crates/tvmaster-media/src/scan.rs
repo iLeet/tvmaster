@@ -53,6 +53,16 @@ fn clean(s: &str) -> String {
         .join(" ")
 }
 
+/// File extensions a library of this kind accepts: video for shows, commercials
+/// and bumpers (plus subtitle files beside shows), audio for music.
+pub fn library_extensions(kind: &str) -> Vec<&'static str> {
+    match kind {
+        "music" => AUDIO_EXTS.to_vec(),
+        "shows" => VIDEO_EXTS.iter().chain(SUB_EXTS).copied().collect(),
+        _ => VIDEO_EXTS.to_vec(),
+    }
+}
+
 const SUB_EXTS: &[&str] = &["srt", "ass", "ssa", "vtt"];
 
 /// Subtitle files that sit next to `video` and belong to it: `Name.srt`,
