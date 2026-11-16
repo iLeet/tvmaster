@@ -9,3 +9,4 @@ dist/
 # self-signed Windows signing certificate (private key)
 packaging/windows/selfsigned/
 *.pfx
+deploy/
