@@ -143,6 +143,70 @@ curl -fsS "$H/admin/" | grep -qi '<div id="root"' && ok "admin UI is served over
 curl -fsS --cacert "$CERT" "$S/admin/" | grep -qi '<div id="root"' && ok "admin UI is served over HTTPS" || bad "admin UI over HTTPS"
 curl -fsS --http2 --cacert "$CERT" -o /dev/null -w '%{http_version}' "$S/admin/" | grep -q '^2$' && ok "HTTPS negotiates HTTP/2 (what browsers use)" || bad "no HTTP/2"
 
+# ---- the guide, pictures, monitoring -----------------------------------
+section "Guide options, uploads and monitoring"
+# the access token was given on the command line, so the UI may not change it
+[[ "$(api "$H/api/v1/security" | json "d['locked']")" == True ]] && ok "a token set with --token is reported as locked" || bad "security status" "$(api "$H/api/v1/security")"
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -XPUT "${auth[@]}" -H 'content-type: application/json' -d '{"enabled":false}' "$H/api/v1/security")" == 409 ]] && ok "the UI cannot switch off a command-line token" || bad "locked token was changeable"
+# a picture is uploaded, served back and used
+ffmpeg -hide_banner -loglevel error -y -f lavfi -i "color=c=orange:s=64x36:d=1" -frames:v 1 "$W/logo.png"
+UP="$(curl -fsS "${auth[@]}" -H 'content-type: image/png' --data-binary "@$W/logo.png" "$H/api/v1/assets?name=My%20Logo.png")"
+ASSET_PATH="$(echo "$UP" | json "d['path']")"; ASSET_URL="$(echo "$UP" | json "d['url']")"
+[[ -f "$ASSET_PATH" ]] && ok "an uploaded picture is stored on the server" || bad "upload" "$UP"
+curl -fsS "${auth[@]}" "$H$ASSET_URL" | cmp -s - "$W/logo.png" && ok "and served back byte for byte" || bad "asset download differs"
+[[ "$(echo '<svg/>' | curl -s -o /dev/null -w '%{http_code}' -XPOST "${auth[@]}" --data-binary @- "$H/api/v1/assets")" == 400 ]] && ok "something that is not a picture is refused" || bad "non-image accepted"
+api -XPOST "$H/api/v1/channels" -d "{\"id\":\"logo\",\"number\":8,\"name\":\"Logo TV\",\"kind\":\"test\",\"options\":{\"off_air\":{\"screen\":\"image\",\"image\":\"$ASSET_PATH\"},\"overlay\":{\"bug\":{\"enabled\":true,\"image\":\"$ASSET_PATH\"}}}}" >/dev/null && ok "a test channel uses the uploaded picture as its screen and logo" || bad "channel with picture"
+OUT="$(probe "$H/stream/logo/index.m3u8?token=$TOKEN")"; echo "$OUT" | grep -q h264 && ok "and it streams" || bad "picture channel stream" "$OUT"
+# the guide editor's preview
+curl -fsS "${auth[@]}" -H 'content-type: application/json' -d '{"name":"Preview","guide":{"theme":"neon","layout":{"style":"now_next"},"pip":{"mode":"rotate"}}}' "$H/api/v1/guide/preview" -o "$W/preview.png" && head -c 8 "$W/preview.png" | od -An -c | tr -d ' \n' | grep -q 'PNG' && ok "the guide preview is a PNG" || bad "guide preview"
+# a guide with its own look, a clock in 24-hour time and a live video window
+api -XPOST "$H/api/v1/channels" -d '{"id":"guide","number":3,"name":"Guide","kind":"guide","guide":{"theme":"prevue","hours":2,"header":{"hour12":false},"layout":{"rows":4,"time_step":15},"pip":{"mode":"channel","channel":"retro","placement":"side_right","size":"medium"}}}' >/dev/null && ok "the guide is set up with a theme, 24-hour times and a video window"
+curl -fsS "${auth[@]}" "$H/stream/guide/index.m3u8" >/dev/null
+sleep 8
+[[ "$(api "$H/api/v1/health" | json "'retro' in d['on_air']")" == True ]] && ok "showing a channel in the guide's window put that channel on air" || bad "the window's channel is not on air"
+ffmpeg -hide_banner -loglevel error -y -t 6 -i "$H/stream/guide/index.m3u8?token=$TOKEN" -f null - 2>"$W/guide.err" && ok "the guide with a live window decodes" || bad "guide with window" "$(tail -2 "$W/guide.err")"
+# watching folders and alerts
+[[ "$(api "$H/api/v1/monitor" | json "d['settings']['watch_minutes']")" == 15 ]] && ok "folders are watched every 15 minutes by default" || bad "monitor settings"
+clip "$W/tv/Alpha/Season 1/Alpha - S01E04 - Episode 4.mp4" 12 440; touch -t 202001010000 "$W/tv/Alpha/Season 1/Alpha - S01E04 - Episode 4.mp4"
+R="$(api -XPOST "$H/api/v1/monitor/rescan")"; [[ "$(echo "$R" | json "d['added']")" == 1 ]] && ok "a new episode dropped into a library is found without a manual scan" || bad "rescan" "$R"
+rm "$W/tv/Alpha/Season 1/Alpha - S01E04 - Episode 4.mp4"
+R="$(api -XPOST "$H/api/v1/monitor/rescan")"; [[ "$(echo "$R" | json "d['removed']")" == 1 ]] && ok "and a removed one is noticed" || bad "rescan removal" "$R"
+# the player works on a TV remote and without internet
+PLAYER="$(curl -fsS "$H/")"
+echo "$PLAYER" | grep -q ChannelUp && ! echo "$PLAYER" | grep -q cdnjs && ok "the web player takes TV remote keys and loads nothing from the internet" || bad "player"
+[[ "$(curl -s -o /dev/null -w '%{http_code}' "$H/admin/vendor/hls.min.js")" == 200 ]] && ok "the player library is served by the server itself" || bad "hls.js not served"
+# an access token that can be switched on and off while running
+HP2=$((HP + 2)); mkdir -p "$W/data2"
+"$BIN" serve --bind "127.0.0.1:$HP2" --data-dir "$W/data2" >"$W/server2.log" 2>&1 &
+PID2=$!
+for _ in $(seq 1 40); do curl -fsS "http://127.0.0.1:$HP2/api/v1/health" >/dev/null 2>&1 && break; sleep 0.25; done
+H2="http://127.0.0.1:$HP2"
+[[ "$(curl -s -o /dev/null -w '%{http_code}' "$H2/api/v1/channels")" == 200 ]] && ok "with no token the server is open" || bad "open server refused"
+T2="$(curl -fsS -XPUT -H 'content-type: application/json' -d '{"enabled":true}' "$H2/api/v1/security" | json "d['token']")"
+[[ "$(curl -s -o /dev/null -w '%{http_code}' "$H2/api/v1/channels")" == 401 && "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $T2" "$H2/api/v1/channels")" == 200 ]] && ok "a token can be switched on from the UI's API while running" || bad "enable token"
+kill -INT "$PID2"; wait "$PID2" 2>/dev/null
+"$BIN" serve --bind "127.0.0.1:$HP2" --data-dir "$W/data2" >"$W/server2.log" 2>&1 &
+PID2=$!
+for _ in $(seq 1 40); do curl -s "http://127.0.0.1:$HP2/api/v1/health" >/dev/null 2>&1 && break; sleep 0.25; done
+[[ "$(curl -s -o /dev/null -w '%{http_code}' "$H2/api/v1/channels")" == 401 ]] && ok "and it is still on after a restart" || bad "token not kept"
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -XPUT -H 'content-type: application/json' -H "Authorization: Bearer $T2" -d '{"enabled":false}' "$H2/api/v1/security")" == 200 && "$(curl -s -o /dev/null -w '%{http_code}' "$H2/api/v1/channels")" == 200 ]] && ok "and can be switched off again" || bad "disable token"
+kill -INT "$PID2"; wait "$PID2" 2>/dev/null
+# what the packages do: a token that only seeds the first run, so the UI can turn it off for good
+mkdir -p "$W/data3"; printf '%s' "$("$BIN" token)" > "$W/first-token"
+"$BIN" serve --bind "127.0.0.1:$HP2" --data-dir "$W/data3" --initial-token-file "$W/first-token" >"$W/server3.log" 2>&1 &
+PID2=$!
+for _ in $(seq 1 40); do curl -s "http://127.0.0.1:$HP2/api/v1/health" >/dev/null 2>&1 && break; sleep 0.25; done
+T3="$(cat "$W/first-token")"
+[[ "$(curl -s -o /dev/null -w '%{http_code}' "$H2/api/v1/channels")" == 401 ]] && ok "a first-run token file starts the server protected" || bad "initial token not applied"
+[[ "$(curl -s -H "Authorization: Bearer $T3" "$H2/api/v1/security" | json "d['locked']")" == False ]] && ok "and the UI is allowed to change it" || bad "initial token is locked"
+curl -s -o /dev/null -XPUT -H 'content-type: application/json' -H "Authorization: Bearer $T3" -d '{"enabled":false}' "$H2/api/v1/security"
+kill -INT "$PID2"; wait "$PID2" 2>/dev/null
+"$BIN" serve --bind "127.0.0.1:$HP2" --data-dir "$W/data3" --initial-token-file "$W/first-token" >"$W/server3.log" 2>&1 &
+PID2=$!
+for _ in $(seq 1 40); do curl -s "http://127.0.0.1:$HP2/api/v1/health" >/dev/null 2>&1 && break; sleep 0.25; done
+[[ "$(curl -s -o /dev/null -w '%{http_code}' "$H2/api/v1/channels")" == 200 ]] && ok "and a token switched off stays off after a restart (the seed is used once)" || bad "seed token came back"
+kill -INT "$PID2"; wait "$PID2" 2>/dev/null
+
 # ---- shutdown ----------------------------------------------------------
 section "Shutdown"
 kill -INT "$PID"; for _ in $(seq 1 40); do kill -0 "$PID" 2>/dev/null || break; sleep 0.25; done

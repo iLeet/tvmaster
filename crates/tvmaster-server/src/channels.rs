@@ -126,6 +126,8 @@ fn programming_differs(a: &Channel, b: &Channel) -> bool {
 /// Does a running channel have to be restarted to pick up this change?
 fn restart_needed(old: &Channel, new: &Channel) -> bool {
     old.options != new.options
+        // A guide's colours, layout, video window and music are read when it starts.
+        || old.guide != new.guide
         || old.lineup.signoff != new.lineup.signoff
         || (new.options.overlay.bug.enabled && (old.name != new.name || old.number != new.number))
 }
@@ -238,6 +240,29 @@ pub async fn upsert(
     if let Some(g) = &body.guide {
         g.validate()
             .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, e))?;
+        for (what, id) in g
+            .pip
+            .channel
+            .iter()
+            .map(|c| ("the video window's channel", c))
+            .chain(g.pip.channels.iter().map(|c| ("a video window channel", c)))
+        {
+            match tvmaster_db::get_channel(&s.db(), id)? {
+                Some(c) if c.kind != tvmaster_core::ChannelKind::Guide => {}
+                Some(_) => {
+                    return Err(ApiError::new(
+                        StatusCode::BAD_REQUEST,
+                        format!("{what} '{id}' is a guide: pick a programming channel"),
+                    ))
+                }
+                None => {
+                    return Err(ApiError::new(
+                        StatusCode::BAD_REQUEST,
+                        format!("{what} '{id}' does not exist"),
+                    ))
+                }
+            }
+        }
         for id in &g.music_library_ids {
             match tvmaster_db::get_library(&s.db(), *id)? {
                 Some(l) if l.kind == "music" => {}
@@ -892,6 +917,148 @@ mod tests {
         );
         let (_, xml) = crate::test_util::call_raw(&app, "GET", "/iptv/guide.xml", "").await;
         assert!(xml.contains("<title>Retro Guide</title>"));
+    }
+
+    #[tokio::test]
+    async fn changing_a_guides_look_restarts_it_so_the_change_shows() {
+        let (_state, app, _shows, _ads, _clips) = app_with_ads();
+        let make = |guide: &str| {
+            let app = app.clone();
+            let body =
+                format!(r#"{{"id":"guide","number":3,"name":"G","kind":"guide","guide":{guide}}}"#);
+            async move { call(&app, "POST", "/api/v1/channels", &body).await }
+        };
+        make("{}").await;
+        let (_, before) = call(&app, "GET", "/api/v1/channels/guide", "").await;
+        let (st, after) = make(r#"{"theme":"amber"}"#).await;
+        assert_eq!(st, StatusCode::OK);
+        let mut a: crate::Channel = serde_json::from_value(before).unwrap();
+        let b: crate::Channel = serde_json::from_value(after).unwrap();
+        assert!(
+            restart_needed(&a, &b),
+            "a new theme needs the encoder restarted"
+        );
+        a.guide = b.guide.clone();
+        assert!(!restart_needed(&a, &b), "nothing changed");
+    }
+
+    #[tokio::test]
+    async fn guide_options_shape_what_the_guide_lists_and_how() {
+        let (state, app, shows, _ads, _clips) = app_with_ads();
+        for (id, n) in [("a", 4), ("b", 5), ("c", 6)] {
+            let body = format!(
+                r#"{{"id":"{id}","number":{n},"name":"{id} tv","library_ids":[{shows}],"strategy":"sequential"}}"#
+            );
+            assert_eq!(
+                call(&app, "POST", "/api/v1/channels", &body).await.0,
+                StatusCode::CREATED
+            );
+        }
+        let make = |guide: &str| {
+            let app = app.clone();
+            let body = format!(
+                r#"{{"id":"guide","number":3,"name":"Retro","kind":"guide","guide":{guide}}}"#
+            );
+            async move { call(&app, "POST", "/api/v1/channels", &body).await }
+        };
+        let now = crate::plan::now_ms();
+        let build = || crate::plan::build_guide(&state.db(), "guide", now).unwrap();
+
+        // The default lists everything by number, with the clock in 12-hour time.
+        assert_eq!(make("{}").await.0, StatusCode::CREATED);
+        let d = build();
+        assert_eq!(
+            d.rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+            ["a", "b", "c"]
+        );
+        assert!(
+            d.rows[0]
+                .cells
+                .iter()
+                .all(|c| !c.range.is_empty() && c.range.contains('-')),
+            "ranges are filled in"
+        );
+        assert!(d.clock.ends_with("AM") || d.clock.ends_with("PM"));
+
+        // Only some channels, in the order given.
+        assert_eq!(
+            make(r#"{"channels":["c","a","nope"]}"#).await.0,
+            StatusCode::OK
+        );
+        assert_eq!(
+            build()
+                .rows
+                .iter()
+                .map(|r| r.id.as_str())
+                .collect::<Vec<_>>(),
+            ["c", "a"]
+        );
+
+        // 24-hour time, marks every 15 minutes, and no "now on" lines in the ticker.
+        assert_eq!(
+            make(r#"{"hours":2,"ticker":["Hello"],"header":{"hour12":false},"layout":{"time_step":15},"ticker_options":{"now_on":false}}"#).await.0,
+            StatusCode::OK
+        );
+        let d = build();
+        assert_eq!(d.marks.len(), 8, "two hours of quarter hours");
+        assert_eq!(d.marks[1].0 - d.marks[0].0, 15 * 60_000);
+        assert!(
+            d.clock.len() == 5 && d.clock.contains(':') && !d.clock.contains('M'),
+            "{}",
+            d.clock
+        );
+        assert!(
+            d.rows[0].cells[0].range.matches(':').count() == 2
+                && !d.rows[0].cells[0].range.contains('M'),
+            "{}",
+            d.rows[0].cells[0].range
+        );
+        assert_eq!(d.ticker, "Hello", "only your own line");
+    }
+
+    #[tokio::test]
+    async fn a_video_window_must_point_at_a_real_programming_channel() {
+        let (_state, app, shows, _ads, _clips) = app_with_ads();
+        let body = format!(r#"{{"id":"a","number":4,"name":"A","library_ids":[{shows}]}}"#);
+        assert_eq!(
+            call(&app, "POST", "/api/v1/channels", &body).await.0,
+            StatusCode::CREATED
+        );
+        let post = |guide: &str| {
+            let app = app.clone();
+            let body =
+                format!(r#"{{"id":"guide","number":3,"name":"G","kind":"guide","guide":{guide}}}"#);
+            async move { call(&app, "POST", "/api/v1/channels", &body).await }
+        };
+        let (st, e) = post(r#"{"pip":{"mode":"channel","channel":"missing"}}"#).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST);
+        assert!(
+            e["error"].as_str().unwrap().contains("does not exist"),
+            "{e}"
+        );
+        let (st, _) = post(r#"{"pip":{"mode":"channel"}}"#).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "a window needs a channel");
+        assert_eq!(
+            post(
+                r#"{"pip":{"mode":"channel","channel":"a","placement":"top_left","size":"large"}}"#
+            )
+            .await
+            .0,
+            StatusCode::CREATED
+        );
+        // A guide cannot be shown inside itself.
+        let (st, e) = post(r#"{"pip":{"mode":"channel","channel":"guide"}}"#).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST);
+        assert!(e["error"].as_str().unwrap().contains("guide"), "{e}");
+        assert_eq!(
+            post(r#"{"layout":{"rows":2}}"#).await.0,
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            post(r#"{"colors":{"primary":"red"}}"#).await.0,
+            StatusCode::BAD_REQUEST
+        );
+        assert!(post(r#"{"theme":"nonsense"}"#).await.0.is_client_error());
     }
 
     #[tokio::test]

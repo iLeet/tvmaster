@@ -1,0 +1,201 @@
+import SwiftUI
+import TVMasterKit
+
+/// Colour from `#rrggbb`.
+private func color(_ hex: String) -> Color {
+    let h = hex.trimmingCharacters(in: CharacterSet(charactersIn: "# "))
+    guard h.count == 6, let v = UInt32(h, radix: 16) else { return .gray }
+    return Color(red: Double((v >> 16) & 255) / 255, green: Double((v >> 8) & 255) / 255, blue: Double(v & 255) / 255)
+}
+
+private func hex(_ c: Color) -> String {
+    let n = NSColor(c).usingColorSpace(.sRGB) ?? .gray
+    return String(format: "#%02x%02x%02x", Int(n.redComponent * 255), Int(n.greenComponent * 255), Int(n.blueComponent * 255))
+}
+
+/// Everything about how a guide channel looks, with a live picture of the result.
+struct GuideForm: View {
+    @Environment(AppModel.self) private var model
+    @Binding var gs: GuideSettings
+    var id: String
+    var name: String
+    /// The channel's `guide` JSON as the server wrote it (so nothing the editor does not show is lost).
+    var raw: JSONValue?
+
+    @State private var preview: NSImage?
+    @State private var previewError: String?
+
+    private var programming: [Channel] { model.channels.filter { $0.kind == .programming }.sorted { $0.number < $1.number } }
+    private var showable: [Channel] { model.channels.filter { !$0.isGuide }.sorted { $0.number < $1.number } }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ZStack {
+                Rectangle().fill(.black)
+                if let preview { Image(nsImage: preview).resizable().interpolation(.none).scaledToFit() }
+                else if previewError == nil { ProgressView().controlSize(.small) }
+            }
+            .aspectRatio(16 / 9, contentMode: .fit)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .padding([.horizontal, .top], 16)
+            if let previewError { Text(previewError).font(.caption).foregroundStyle(.orange).padding(.horizontal, 16).padding(.top, 4) }
+            Form {
+                colours
+                listing
+                heading
+                ticker
+                videoWindow
+                music
+            }
+            .formStyle(.grouped)
+        }
+        .task(id: gs) { await refreshPreview() }
+    }
+
+    // MARK: sections
+
+    private var colours: some View {
+        Section("Colours") {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 84), spacing: 8)], spacing: 8) {
+                ForEach(GuideSettings.themes) { t in
+                    let chosen = gs.theme == t.value
+                    Button { gs.theme = t.value } label: {
+                        VStack(spacing: 4) {
+                            HStack(spacing: 0) {
+                                Rectangle().fill(color(t.value == "custom" && !gs.colorPrimary.isEmpty ? gs.colorPrimary : t.colors[0]))
+                                Rectangle().fill(color(t.value == "custom" && !gs.colorAccent.isEmpty ? gs.colorAccent : t.colors[1])).frame(width: 22)
+                            }
+                            .frame(height: 24).clipShape(RoundedRectangle(cornerRadius: 5))
+                            Text(t.label).font(.caption)
+                        }
+                        .padding(6).frame(maxWidth: .infinity)
+                        .background(chosen ? Color.accentColor.opacity(0.18) : .clear, in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(chosen ? Color.accentColor : .secondary.opacity(0.25), lineWidth: chosen ? 2 : 1))
+                    }
+                    .buttonStyle(.plain).help(t.help)
+                }
+            }
+            if let t = GuideSettings.themes.first(where: { $0.value == gs.theme }) {
+                Text(t.help).font(.caption).foregroundStyle(.secondary)
+            }
+            if gs.theme == "custom" {
+                ColorPicker("Main colour", selection: Binding(get: { color(gs.colorPrimary.isEmpty ? "#3366ff" : gs.colorPrimary) }, set: { gs.colorPrimary = hex($0) }), supportsOpacity: false)
+                ColorPicker("Highlight", selection: Binding(get: { color(gs.colorAccent.isEmpty ? "#ffcc00" : gs.colorAccent) }, set: { gs.colorAccent = hex($0) }), supportsOpacity: false)
+            }
+            Toggle("Scanlines (a faint CRT texture)", isOn: $gs.scanlines)
+        }
+    }
+
+    private var listing: some View {
+        Section("Listing") {
+            Picker("Style", selection: $gs.style) { Text("Time grid").tag("grid"); Text("Now & next").tag("now_next") }.pickerStyle(.segmented)
+            Text(gs.style == "grid" ? "Channels down the side, programmes across a time line." : "One big row per channel: what is on now and what is next. Easy to read from the couch.")
+                .font(.caption).foregroundStyle(.secondary)
+            Picker("Channels on screen", selection: $gs.rows) { ForEach(3...10, id: \.self) { Text("\($0)").tag($0) } }
+            Picker("Hours of schedule", selection: $gs.hours) { ForEach(2...6, id: \.self) { Text("\($0) hours").tag($0) } }
+            if gs.style == "grid" {
+                Picker("Time marks", selection: $gs.timeStep) { Text("15 min").tag(15); Text("30 min").tag(30); Text("Hourly").tag(60) }.pickerStyle(.segmented)
+            }
+            Picker("When there are more channels than fit", selection: $gs.scroll) { Text("Page by page").tag("page"); Text("Smooth roll").tag("smooth") }.pickerStyle(.segmented)
+            if gs.scroll == "page" {
+                LabeledContent("Each page stays \(gs.pageSeconds) s") { Slider(value: Binding(get: { Double(gs.pageSeconds) }, set: { gs.pageSeconds = Int($0) }), in: 4...30, step: 1) }
+            }
+            Toggle("Channel numbers", isOn: $gs.channelNumbers)
+            Toggle("Channel names", isOn: $gs.channelNames)
+            Toggle("Progress bar on what is airing", isOn: $gs.progress)
+            DisclosureGroup("Which channels (\(gs.channels.isEmpty ? "all" : "\(gs.channels.count) chosen"))") {
+                Text(gs.channels.isEmpty ? "Every programming channel, by number. Tick some to list only those, in the order you tick them." : "Only these, in the order you ticked them.")
+                    .font(.caption).foregroundStyle(.secondary)
+                ForEach(programming) { c in
+                    let pos = gs.channels.firstIndex(of: c.id)
+                    Toggle(pos.map { "\($0 + 1). \(c.number) \(c.name)" } ?? "\(c.number) \(c.name)", isOn: Binding(get: { pos != nil }, set: { _ in gs.channels = GuideSettings.toggled(gs.channels, c.id) }))
+                }
+                if !gs.channels.isEmpty { Button("Show every channel again") { gs.channels = [] }.glassButton() }
+            }
+        }
+    }
+
+    private var heading: some View {
+        Section("Heading") {
+            TextField("Heading", text: $gs.title, prompt: Text("\(name.isEmpty ? "Channel" : name) GUIDE"))
+            Toggle("Heading text", isOn: $gs.headerTitle)
+            Toggle("Clock", isOn: $gs.headerClock)
+            Toggle("Date", isOn: $gs.headerDate)
+            Picker("Times", selection: $gs.hour12) { Text("12-hour (9:30 PM)").tag(true); Text("24-hour (21:30)").tag(false) }.pickerStyle(.segmented)
+            PictureChooser(title: "Logo", path: $gs.logo, hint: "Optional. A picture at the left of the heading; a transparent png works best.")
+        }
+    }
+
+    private var ticker: some View {
+        Section("Ticker") {
+            Toggle("Scrolling line along the bottom", isOn: $gs.tickerEnabled)
+            if gs.tickerEnabled {
+                Picker("Speed", selection: $gs.tickerSpeed) { Text("Slow").tag("slow"); Text("Normal").tag("normal"); Text("Fast").tag("fast") }.pickerStyle(.segmented)
+                Toggle("Announce what is on now (“NOW ON 4: Cheers”)", isOn: $gs.tickerNowOn)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Your lines (one per line)").font(.caption).foregroundStyle(.secondary)
+                    TextEditor(text: Binding(get: { gs.ticker.joined(separator: "\n") }, set: { gs.ticker = $0.components(separatedBy: "\n") }))
+                        .font(.body).frame(height: 70).scrollContentBackground(.hidden)
+                        .padding(4).background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 6))
+                }
+            }
+        }
+    }
+
+    private var videoWindow: some View {
+        Section("Video window") {
+            Text("A live picture-in-picture of one of your channels inside the guide, with a card saying what is on. The guide starts that channel while it is showing it.")
+                .font(.caption).foregroundStyle(.secondary)
+            Picker("Show", selection: $gs.pipMode) { Text("Nothing").tag("off"); Text("One channel").tag("channel"); Text("Flip through channels").tag("rotate") }.pickerStyle(.segmented)
+            if gs.pipMode == "channel" {
+                Picker("Channel", selection: $gs.pipChannel) {
+                    Text("Choose…").tag("")
+                    ForEach(showable) { Text("\($0.number) \($0.name)").tag($0.id) }
+                }
+            }
+            if gs.pipMode == "rotate" {
+                LabeledContent("Each channel for \(gs.pipSeconds) s") { Slider(value: Binding(get: { Double(gs.pipSeconds) }, set: { gs.pipSeconds = Int($0) }), in: 10...300, step: 5) }
+                DisclosureGroup("Which channels (\(gs.pipChannels.isEmpty ? "every one in the guide" : "\(gs.pipChannels.count) chosen"))") {
+                    ForEach(showable) { c in
+                        Toggle("\(c.number) \(c.name)", isOn: Binding(get: { gs.pipChannels.contains(c.id) }, set: { _ in gs.pipChannels = GuideSettings.toggled(gs.pipChannels, c.id) }))
+                    }
+                }
+            }
+            if gs.pipMode != "off" {
+                Picker("Where", selection: $gs.pipPlacement) { ForEach(GuideSettings.placements, id: \.value) { Text($0.label).tag($0.value) } }
+                Picker("Size", selection: $gs.pipSize) { Text("Small").tag("small"); Text("Medium").tag("medium"); Text("Large").tag("large") }.pickerStyle(.segmented)
+                Picker("Sound", selection: $gs.pipAudio) { Text("Guide music").tag("music"); Text("The channel").tag("channel") }.pickerStyle(.segmented)
+                Toggle("A card beside the window saying what is on", isOn: $gs.pipInfo)
+            }
+            if let p = gs.problem { Label(p, systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange) }
+        }
+    }
+
+    private var music: some View {
+        Section("Music") {
+            let libs = model.libraries.filter { $0.kind == .music }
+            if libs.isEmpty { Text("Add a Music library to play music under the guide.").font(.caption).foregroundStyle(.secondary) }
+            ForEach(libs) { lib in
+                Toggle("\(lib.name) (\(lib.items) files)", isOn: Binding(get: { gs.musicLibraryIds.contains(lib.id) }, set: { on in
+                    if on { gs.musicLibraryIds.append(lib.id) } else { gs.musicLibraryIds.removeAll { $0 == lib.id } }
+                }))
+            }
+        }
+    }
+
+    // MARK: preview
+
+    private func refreshPreview() async {
+        try? await Task.sleep(nanoseconds: 350_000_000)
+        guard !Task.isCancelled, let client = model.client else { return }
+        do {
+            let data = try await client.guidePreview(id: id, name: name, guide: gs.apply(to: raw))
+            guard !Task.isCancelled else { return }
+            preview = NSImage(data: data)
+            previewError = nil
+        } catch {
+            guard !Task.isCancelled else { return }
+            previewError = error.localizedDescription
+        }
+    }
+}

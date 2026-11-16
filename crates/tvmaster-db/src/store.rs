@@ -673,6 +673,15 @@ pub fn mark_media_present(conn: &Connection, media_id: i64) -> Result<()> {
     Ok(())
 }
 
+/// Every file the library has indexed: (id, path, flagged missing).
+pub fn library_media_paths(conn: &Connection, library_id: i64) -> Result<Vec<(i64, String, bool)>> {
+    let mut st = conn.prepare("SELECT id, path, missing FROM media_items WHERE library_id = ?1")?;
+    let rows = st.query_map([library_id], |r| {
+        Ok((r.get(0)?, r.get(1)?, r.get::<_, i64>(2)? != 0))
+    })?;
+    rows.collect()
+}
+
 pub fn mark_media_missing(conn: &Connection, media_id: i64) -> Result<()> {
     conn.execute(
         "UPDATE media_items SET missing = 1 WHERE id = ?1",

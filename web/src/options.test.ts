@@ -72,3 +72,15 @@ describe('off-air screen', () => {
     expect(SCREENS.map((s) => s.value)).toEqual(['card', 'bars', 'static', 'black', 'image']);
   });
 });
+
+import { assetUrlForPath } from './api';
+
+describe('assetUrlForPath', () => {
+  it('previews only pictures uploaded to the server', () => {
+    expect(assetUrlForPath('/var/lib/tvmaster/assets/0123abcd-logo.png')).toBe('/api/v1/assets/0123abcd-logo.png');
+    expect(assetUrlForPath('C:\\ProgramData\\TVMaster\\assets\\ff00-x.jpg')).toBe('/api/v1/assets/ff00-x.jpg');
+    expect(assetUrlForPath('/home/me/pictures/cat.png')).toBeNull();
+    expect(assetUrlForPath('/data/assets/../../etc/x.png')).toBeNull();
+    expect(assetUrlForPath(null)).toBeNull();
+  });
+});

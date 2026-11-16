@@ -204,6 +204,9 @@ pub struct BugOptions {
     /// What it says; blank = the channel number and name.
     #[serde(default)]
     pub text: String,
+    /// A logo picture on the server (png, jpg, gif, webp), shown instead of the text.
+    #[serde(default)]
+    pub image: Option<String>,
     #[serde(default)]
     pub position: Corner,
     /// 10-100 percent.
@@ -220,6 +223,7 @@ impl Default for BugOptions {
         Self {
             enabled: false,
             text: String::new(),
+            image: None,
             position: Corner::TopRight,
             opacity: 60,
         }
@@ -454,6 +458,11 @@ impl ChannelOptions {
             || self.off_air.message.chars().any(char::is_control)
         {
             return Err("the off-air message is at most 60 characters".into());
+        }
+        if let Some(img) = &self.overlay.bug.image {
+            if img.len() > 500 || img.chars().any(char::is_control) {
+                return Err("the logo picture's path is not valid".into());
+            }
         }
         if let Some(img) = &self.off_air.image {
             if img.len() > 500 || img.chars().any(char::is_control) {

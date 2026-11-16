@@ -52,6 +52,10 @@ enum Command {
         /// process listings and service definitions.
         #[arg(long, env = "TVMASTER_TOKEN_FILE", conflicts_with = "token")]
         token_file: Option<PathBuf>,
+        /// Start with the token in this file the first time only; after that the
+        /// admin UI can turn it off or replace it (a saved choice wins).
+        #[arg(long, env = "TVMASTER_INITIAL_TOKEN_FILE", conflicts_with_all = ["token", "token_file"])]
+        initial_token_file: Option<PathBuf>,
         /// Also serve HTTPS (on --tls-bind) with a self-signed certificate that is
         /// made once and kept in the data folder. Clients trust it by its fingerprint.
         #[arg(long, env = "TVMASTER_TLS")]
@@ -93,7 +97,8 @@ enum Command {
         data_dir: PathBuf,
         #[arg(long, default_value = "0.0.0.0:8787")]
         bind: String,
-        /// Have the service read its access token from this file.
+        /// Have the service start with the access token in this file (the admin
+        /// UI can turn it off or replace it afterwards).
         #[arg(long)]
         token_file: Option<PathBuf>,
         /// Have the service also serve HTTPS.
@@ -120,23 +125,29 @@ async fn main() -> Result<()> {
             idle_seconds,
             token,
             token_file,
+            initial_token_file,
             tls,
             tls_bind,
             tls_cert,
             tls_key,
             no_http,
         } => {
-            let token = match token_file {
-                Some(f) => Some(
-                    std::fs::read_to_string(&f)
-                        .with_context(|| format!("reading the token file {}", f.display()))?
-                        .lines()
-                        .next()
-                        .unwrap_or("")
-                        .trim()
-                        .to_string(),
-                ),
+            let first_line = |f: &PathBuf| -> Result<String> {
+                Ok(std::fs::read_to_string(f)
+                    .with_context(|| format!("reading the token file {}", f.display()))?
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .trim()
+                    .to_string())
+            };
+            let token = match &token_file {
+                Some(f) => Some(first_line(f)?),
                 None => token,
+            };
+            let initial_token = match &initial_token_file {
+                Some(f) => Some(first_line(f)?),
+                None => None,
             };
             serve(ServeOptions {
                 bind,
@@ -146,6 +157,7 @@ async fn main() -> Result<()> {
                 encoder,
                 idle_seconds,
                 token,
+                initial_token,
                 tls: tls || tls_bind.is_some() || tls_cert.is_some(),
                 tls_bind: tls_bind.unwrap_or_else(|| "0.0.0.0:8788".into()),
                 tls_files: tls_cert.zip(tls_key),
@@ -189,6 +201,7 @@ struct ServeOptions {
     encoder: Option<String>,
     idle_seconds: u64,
     token: Option<String>,
+    initial_token: Option<String>,
     tls: bool,
     tls_bind: String,
     tls_files: Option<(PathBuf, PathBuf)>,
@@ -208,6 +221,7 @@ async fn serve(o: ServeOptions) -> Result<()> {
         encoder,
         idle_seconds,
         token,
+        initial_token,
         tls,
         tls_bind,
         tls_files,
@@ -219,8 +233,12 @@ async fn serve(o: ServeOptions) -> Result<()> {
             tvmaster_server::valid_token(t),
             "the token must be 8-128 characters: letters, digits, - _ . ~ (run `tvmaster token` for one)"
         );
-    } else if !bind.starts_with("127.") && !bind.starts_with("localhost") {
-        tracing::warn!("no --token set: anyone on your network can control this server");
+    }
+    if let Some(t) = &initial_token {
+        anyhow::ensure!(
+            tvmaster_server::valid_token(t),
+            "the initial token must be 8-128 characters: letters, digits, - _ . ~"
+        );
     }
     std::fs::create_dir_all(&data_dir)
         .with_context(|| format!("creating {}", data_dir.display()))?;
@@ -286,11 +304,21 @@ async fn serve(o: ServeOptions) -> Result<()> {
     };
     let state = AppState::new(conn, info, playout.clone())
         .with_token(token)
+        .with_assets_dir(data_dir.join("assets"))
         .with_network(network);
+    state.seed_token(initial_token);
+    if state.access_token().is_none() && !bind.starts_with("127.") && !bind.starts_with("localhost")
+    {
+        tracing::warn!(
+            "no access token is set: anyone on your network can control this server (turn one on in Settings)"
+        );
+    }
     // Keeps every channel's schedule filled days ahead; the first pass runs now.
     state.spawn_autopilot();
     // Pushes "now playing" changes to connected remotes and players.
     state.spawn_now_watcher();
+    // Re-reads watched folders and reports problems (a drive that is gone, a channel that keeps crashing).
+    state.spawn_monitor();
     state.start_always_on();
 
     // One signal stops both listeners.

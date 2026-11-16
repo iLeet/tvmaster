@@ -2,7 +2,7 @@ import { api } from '../api';
 import { formatClock, formatDuration } from '../lib';
 import { useLiveEvent, useLiveStatus, useQuery } from '../live';
 import { href } from '../router';
-import type { ChannelView, Library, System, Tv } from '../types';
+import type { ChannelView, Library, MonitorState, System, Tv } from '../types';
 import { Badge, Card, Empty, Icon, Spinner } from '../ui';
 
 export function Dashboard() {
@@ -10,10 +10,13 @@ export function Dashboard() {
   const tvs = useQuery(() => api.get<Tv[]>('/tvs'));
   const libs = useQuery(() => api.get<Library[]>('/libraries'));
   const sys = useQuery(() => api.get<System>('/system'));
+  const monitor = useQuery(() => api.get<MonitorState>('/monitor'));
   const live = useLiveStatus();
 
   useLiveEvent(['channel.now', 'schedule.changed'], () => channels.reload());
   useLiveEvent(['tv.state', 'tv.removed'], () => tvs.reload());
+  useLiveEvent(['alert.raised', 'alert.cleared'], () => monitor.reload());
+  useLiveEvent(['library.changed'], () => libs.reload());
 
   const list = channels.data ?? [];
   const items = (libs.data ?? []).reduce((n, l) => n + l.items, 0);
@@ -28,7 +31,12 @@ export function Dashboard() {
         </span>
       </div>
 
-      {sys.data && !sys.data.ffmpeg && (
+      {(monitor.data?.alerts ?? []).map((a) => (
+        <div key={a.id} className="err-banner" style={a.severity === 'warning' ? { borderColor: 'var(--warn)', color: 'var(--warn)' } : undefined}>
+          <strong>{a.title}.</strong> {a.detail}
+        </div>
+      ))}
+      {sys.data && !sys.data.ffmpeg && !(monitor.data?.alerts ?? []).some((a) => a.id === 'system:ffmpeg') && (
         <div className="err-banner">
           FFmpeg was not found, so channels cannot stream. Install FFmpeg (it needs <span className="mono">ffmpeg</span> and <span className="mono">ffprobe</span> on the PATH) and restart the server.
         </div>

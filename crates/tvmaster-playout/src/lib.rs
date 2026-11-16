@@ -5,6 +5,7 @@
 //! unplayable files with a station slate, and resyncs to live if it falls
 //! behind, so a channel never goes dark.
 
+mod guide;
 mod itemplan;
 mod looks;
 mod manager;
@@ -13,12 +14,13 @@ mod profile;
 mod runner;
 mod ts;
 
+pub use guide::guide_look;
 pub use looks::{audio_chain, AudioFx, Burn, ClockFx, ItemPlan, OverlayInput};
-pub use manager::Manager;
+pub use manager::{ChannelHealth, Manager};
 pub use probe::{probe_encoder, EncoderProbe};
 pub use profile::{
-    guide_args, item_args, rendered_args, screen_args, segmenter_args, slate_args, ItemJob,
-    OutputProfile, ScreenInput,
+    guide_run_args, item_args, rendered_args, screen_args, segmenter_args, slate_args, GuideRun,
+    ItemJob, LogoInput, OutputProfile, PipInput, ScreenInput,
 };
 pub use tvmaster_render::GuideData;
 
@@ -97,11 +99,34 @@ pub trait ScheduleSource: Send + Sync + 'static {
     }
 }
 
+/// Lets a guide show another channel live in a window.
+pub trait PipHost: Send + Sync + 'static {
+    /// Make sure `channel` is on air (starting it if need be) and counted as
+    /// watched, and return its HLS playlist once it has video. `None` when it
+    /// cannot be shown: unknown, a guide itself, or not up within a few
+    /// seconds. Blocks.
+    fn open(&self, channel: &str) -> Option<PathBuf>;
+}
+
 /// What a guide channel needs besides the schedule data.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct GuideSpec {
     /// Music files to loop under the guide (silence if empty).
     pub music: Vec<PathBuf>,
+    /// The guide's settings: colours, layout, heading, ticker, video window.
+    pub config: tvmaster_core::GuideConfig,
+    /// How the video window gets its channel (`None` = no window).
+    pub pip_host: Option<Arc<dyn PipHost>>,
+}
+
+impl std::fmt::Debug for GuideSpec {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GuideSpec")
+            .field("music", &self.music)
+            .field("config", &self.config)
+            .field("pip_host", &self.pip_host.is_some())
+            .finish()
+    }
 }
 
 /// Everything the runner needs to put one channel on air.

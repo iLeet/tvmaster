@@ -41,6 +41,9 @@ describe('share links', () => {
     expect(l.iptv.every((x) => x.hasToken)).toBe(true);
     expect(l.web.every((x) => !x.value.includes('token'))).toBe(true);
     expect(l.tuner[0].value).not.toContain('token');
+    expect(l.smarttv[0].value).toBe('http://tv.local:8787/?ui=tv&token=abc%20123');
+    expect(l.smarttv[0].hasToken).toBe(true);
+    expect(shareLinks(net(), opts()).smarttv[0].value).toBe('http://tv.local:8787/?ui=tv');
     const none = shareLinks(net(), opts());
     expect(none.iptv.every((x) => !x.value.includes('token') && !x.hasToken)).toBe(true);
   });

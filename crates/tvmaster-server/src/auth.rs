@@ -21,6 +21,8 @@ use serde_json::json;
 use std::time::Duration;
 
 const COOKIE: &str = "tvmaster_token";
+/// Where a token set from the admin UI is kept.
+pub const META_KEY: &str = "access_token";
 
 /// Tokens go into cookies and URLs, so only unreserved characters are allowed.
 pub fn valid_token(t: &str) -> bool {
@@ -87,14 +89,14 @@ fn is_public(path: &str) -> bool {
 }
 
 pub async fn guard(State(s): State<AppState>, req: Request, next: Next) -> Response {
-    let Some(token) = &s.token else {
+    let Some(token) = s.token() else {
         return next.run(req).await;
     };
     if is_public(req.uri().path()) {
         return next.run(req).await;
     }
     let ok =
-        presented(req.headers(), req.uri().query()).is_some_and(|t| constant_time_eq(&t, token));
+        presented(req.headers(), req.uri().query()).is_some_and(|t| constant_time_eq(&t, &token));
     if ok {
         return next.run(req).await;
     }
@@ -111,18 +113,16 @@ pub async fn guard(State(s): State<AppState>, req: Request, next: Next) -> Respo
 /// `?token=...` to append to URLs handed to clients that cannot send headers
 /// (empty when authentication is off).
 pub fn url_suffix(s: &AppState) -> String {
-    s.token
-        .as_ref()
-        .map(|t| format!("?token={t}"))
-        .unwrap_or_default()
+    s.token().map(|t| format!("?token={t}")).unwrap_or_default()
 }
 
 pub async fn status(State(s): State<AppState>, headers: HeaderMap) -> Json<serde_json::Value> {
-    let authenticated = match &s.token {
+    let token = s.token();
+    let authenticated = match &token {
         None => true,
         Some(t) => presented(&headers, None).is_some_and(|p| constant_time_eq(&p, t)),
     };
-    Json(json!({ "required": s.token.is_some(), "authenticated": authenticated }))
+    Json(json!({ "required": token.is_some(), "authenticated": authenticated }))
 }
 
 #[derive(Deserialize)]
@@ -135,23 +135,11 @@ pub async fn login(
     headers: HeaderMap,
     Json(body): Json<Login>,
 ) -> Response {
-    match &s.token {
+    match &s.token() {
         None => Json(json!({ "ok": true })).into_response(),
         Some(t) if constant_time_eq(&body.token, t) => {
             let mut res = Json(json!({ "ok": true })).into_response();
-            // Over HTTPS the cookie is marked Secure, so a browser never sends it in the clear.
-            let secure = if crate::request_scheme(&headers) == "https" {
-                "; Secure"
-            } else {
-                ""
-            };
-            let cookie = format!(
-                "{COOKIE}={t}; Path=/; HttpOnly; SameSite=Strict{secure}; Max-Age=31536000"
-            );
-            res.headers_mut().insert(
-                header::SET_COOKIE,
-                HeaderValue::from_str(&cookie).expect("token is cookie-safe"),
-            );
+            set_cookie(&mut res, &headers, t);
             res
         }
         Some(_) => {
@@ -164,6 +152,98 @@ pub async fn login(
                 .into_response()
         }
     }
+}
+
+/// Remember `token` in the browser (HttpOnly, and Secure over HTTPS so it is
+/// never sent in the clear).
+fn set_cookie(res: &mut Response, headers: &HeaderMap, token: &str) {
+    let secure = if crate::request_scheme(headers) == "https" {
+        "; Secure"
+    } else {
+        ""
+    };
+    let cookie =
+        format!("{COOKIE}={token}; Path=/; HttpOnly; SameSite=Strict{secure}; Max-Age=31536000");
+    res.headers_mut().insert(
+        header::SET_COOKIE,
+        HeaderValue::from_str(&cookie).expect("token is cookie-safe"),
+    );
+}
+
+/// `GET /api/v1/security`: is the token on, can it be changed here, and what
+/// is it. Only reachable by someone who already has it (or when it is off).
+pub async fn security(State(s): State<AppState>) -> Json<serde_json::Value> {
+    let token = s.token();
+    Json(json!({
+        "enabled": token.is_some(),
+        "locked": s.token_locked,
+        "token": token,
+    }))
+}
+
+#[derive(Deserialize)]
+pub struct SecurityBody {
+    enabled: bool,
+    /// Use this token instead of a generated one (when enabling or replacing).
+    #[serde(default)]
+    token: Option<String>,
+    /// Replace the current token with a fresh random one.
+    #[serde(default)]
+    rotate: bool,
+}
+
+/// `PUT /api/v1/security`: turn the access token on or off, or replace it.
+/// The caller's browser is given the new cookie so it stays signed in.
+pub async fn put_security(
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<SecurityBody>,
+) -> Result<Response, crate::ApiError> {
+    use crate::ApiError;
+    if s.token_locked {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "the token was set with --token on the command line; restart without it to manage it here",
+        ));
+    }
+    let current = s.token();
+    let new = if !body.enabled {
+        None
+    } else if let Some(t) = body.token.filter(|t| !t.is_empty()) {
+        if !valid_token(&t) {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "a token is 8-128 characters: letters, digits, - _ . ~",
+            ));
+        }
+        Some(t)
+    } else if body.rotate || current.is_none() {
+        Some(generate_token())
+    } else {
+        current
+    };
+    {
+        let db = s.db();
+        match &new {
+            Some(t) => tvmaster_db::meta_set(&db, META_KEY, t),
+            None => tvmaster_db::meta_set(&db, META_KEY, ""),
+        }?;
+    }
+    *s.token.write().unwrap_or_else(|p| p.into_inner()) = new.clone();
+    let mut res =
+        Json(json!({ "enabled": new.is_some(), "locked": false, "token": new })).into_response();
+    match &new {
+        Some(t) => set_cookie(&mut res, &headers, t),
+        None => {
+            res.headers_mut().insert(
+                header::SET_COOKIE,
+                HeaderValue::from_static(
+                    "tvmaster_token=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0",
+                ),
+            );
+        }
+    }
+    Ok(res)
 }
 
 pub async fn logout() -> Response {
@@ -285,6 +365,149 @@ mod tests {
                 StatusCode::UNAUTHORIZED
             );
         }
+    }
+
+    #[tokio::test]
+    async fn the_token_can_be_turned_on_rotated_and_off_at_runtime() {
+        use crate::test_util::call;
+        let state = AppState::in_memory().with_token(None);
+        let app = router(state.clone());
+        let (st, v) = call(&app, "GET", "/api/v1/security", "").await;
+        assert_eq!(
+            (st, v["enabled"].as_bool(), v["locked"].as_bool()),
+            (StatusCode::OK, Some(false), Some(false))
+        );
+
+        // Turn it on: a token is generated and saved.
+        let (st, v) = call(&app, "PUT", "/api/v1/security", r#"{"enabled":true}"#).await;
+        assert_eq!(st, StatusCode::OK);
+        let token = v["token"].as_str().unwrap().to_string();
+        assert!(valid_token(&token));
+        assert_eq!(state.token().as_deref(), Some(token.as_str()));
+        assert_eq!(
+            get(&app, "/api/v1/channels", &[]).await,
+            StatusCode::UNAUTHORIZED
+        );
+        let bearer = format!("Bearer {token}");
+        assert_eq!(
+            get(&app, "/api/v1/channels", &[("authorization", &bearer)]).await,
+            StatusCode::OK
+        );
+
+        // It survives a restart (a new state on the same database would read it back).
+        let saved = tvmaster_db::meta_get(&state.db(), META_KEY).unwrap();
+        assert_eq!(saved.as_deref(), Some(token.as_str()));
+
+        // Rotating needs the old token, and gives a new one.
+        let put = |body: &str, auth: Option<&str>| {
+            let mut b = axum::http::Request::builder()
+                .method("PUT")
+                .uri("/api/v1/security")
+                .header("content-type", "application/json");
+            if let Some(a) = auth {
+                b = b.header("authorization", a);
+            }
+            b.body(axum::body::Body::from(body.to_string())).unwrap()
+        };
+        let res =
+            tower::ServiceExt::oneshot(app.clone(), put(r#"{"enabled":true,"rotate":true}"#, None))
+                .await
+                .unwrap();
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+        let res = tower::ServiceExt::oneshot(
+            app.clone(),
+            put(r#"{"enabled":true,"rotate":true}"#, Some(&bearer)),
+        )
+        .await
+        .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert!(res.headers()[header::SET_COOKIE]
+            .to_str()
+            .unwrap()
+            .contains("tvmaster_token="));
+        assert_ne!(state.token().unwrap(), token);
+
+        // A chosen token must be valid.
+        let bearer = format!("Bearer {}", state.token().unwrap());
+        let res = tower::ServiceExt::oneshot(
+            app.clone(),
+            put(r#"{"enabled":true,"token":"short"}"#, Some(&bearer)),
+        )
+        .await
+        .unwrap();
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+        let res = tower::ServiceExt::oneshot(
+            app.clone(),
+            put(
+                r#"{"enabled":true,"token":"my-own-token-1"}"#,
+                Some(&bearer),
+            ),
+        )
+        .await
+        .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(state.token().as_deref(), Some("my-own-token-1"));
+
+        // Off again.
+        let res = tower::ServiceExt::oneshot(
+            app.clone(),
+            put(r#"{"enabled":false}"#, Some("Bearer my-own-token-1")),
+        )
+        .await
+        .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert!(res.headers()[header::SET_COOKIE]
+            .to_str()
+            .unwrap()
+            .contains("Max-Age=0"));
+        assert_eq!(state.token(), None);
+        assert_eq!(get(&app, "/api/v1/channels", &[]).await, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn a_saved_token_is_used_at_startup_and_a_command_line_one_is_locked() {
+        let state = AppState::in_memory();
+        tvmaster_db::meta_set(&state.db(), META_KEY, "saved-token-1234").unwrap();
+        let state = state.with_token(None);
+        assert_eq!(state.token().as_deref(), Some("saved-token-1234"));
+        assert!(!state.token_locked);
+
+        let locked = AppState::in_memory().with_token(Some("cli-token-12345".into()));
+        let app = router(locked);
+        let put = axum::http::Request::builder()
+            .method("PUT")
+            .uri("/api/v1/security")
+            .header("content-type", "application/json")
+            .header("authorization", "Bearer cli-token-12345")
+            .body(axum::body::Body::from(r#"{"enabled":false}"#))
+            .unwrap();
+        let res = tower::ServiceExt::oneshot(app.clone(), put).await.unwrap();
+        assert_eq!(res.status(), StatusCode::CONFLICT);
+        let req = axum::http::Request::builder()
+            .uri("/api/v1/security")
+            .header("authorization", "Bearer cli-token-12345")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let res = tower::ServiceExt::oneshot(app, req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn an_installer_token_seeds_the_first_run_only() {
+        let state = AppState::in_memory().with_token(None);
+        state.seed_token(Some("installer-token-1".into()));
+        assert_eq!(state.token().as_deref(), Some("installer-token-1"));
+        // The owner turns it off; a restart with the same seed must respect that.
+        tvmaster_db::meta_set(&state.db(), META_KEY, "").unwrap();
+        let again = AppState::new(tvmaster_db::open_in_memory().unwrap(), None, None);
+        tvmaster_db::meta_set(&again.db(), META_KEY, "").unwrap();
+        let again = again.with_token(None);
+        again.seed_token(Some("installer-token-1".into()));
+        assert_eq!(again.token(), None, "a saved choice of 'off' wins");
+        // Junk is ignored.
+        let fresh = AppState::in_memory().with_token(None);
+        fresh.seed_token(Some("no".into()));
+        assert_eq!(fresh.token(), None);
     }
 
     #[tokio::test]

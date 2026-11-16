@@ -81,7 +81,7 @@ A look can also be set per show.
 
 | Setting | What |
 |---|---|
-| `overlay.bug` | The channel logo in a corner: `enabled`, `text` (blank = number and name), `position`, `opacity` 10-100. Drawn in the same chunky pixel font as the bumpers. |
+| `overlay.bug` | The channel logo in a corner: `enabled`, `text` (blank = number and name), `image` (optional: a logo picture on the server, uploaded in the editor; shown instead of the text, fitted into a corner-sized box, any common format, its transparency kept), `position`, `opacity` 10-100. The text is drawn in the same chunky pixel font as the bumpers. A logo picture that cannot be read falls back to the text. |
 | `overlay.show_title` | A "now playing" card with the show's name and episode when a programme starts (not after each commercial break), for `seconds` 3-30. |
 | `overlay.clock` | A clock in a corner (`hour12`). **Needs FFmpeg with the `drawtext` filter** (the editor says when yours has none; no clock appears then). |
 

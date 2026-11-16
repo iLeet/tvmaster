@@ -2,7 +2,7 @@
 
 ## Install
 
-Each platform has a real installer that sets everything up: the server, starting at boot, an access token, FFmpeg, and (where there is a firewall) the firewall rule.
+Each platform has a real installer that sets everything up: the server, starting at boot, a first-run access token (the admin UI can turn it off or replace it afterwards), FFmpeg, and (where there is a firewall) the firewall rule.
 
 | You have | Get | What it does |
 |---|---|---|

@@ -258,6 +258,48 @@ public struct SystemInfo: Codable, Sendable, Hashable {
     }
 }
 
+/// Something that needs attention (a library offline, a channel that keeps failing).
+public struct AlertItem: Codable, Sendable, Hashable, Identifiable {
+    public var id: String
+    public var severity: String
+    public var title: String
+    public var detail: String
+    public var sinceMs: Int64
+    public var isError: Bool { severity == "error" }
+}
+
+public struct MonitorSettings: Codable, Sendable, Hashable {
+    public var watchMinutes: Int
+    public var alerts: Bool
+    public var webhook: String?
+    public var webhookText: Bool
+    public var notifyRecovery: Bool
+}
+
+/// What `/api/v1/monitor` says: the settings and the problems right now.
+public struct MonitorState: Codable, Sendable, Hashable {
+    public var settings: MonitorSettings
+    public var alerts: [AlertItem]
+    /// `curl` is available on the server to send the webhook.
+    public var curl: Bool
+}
+
+/// A picture uploaded to the server (an off-air screen, a channel logo).
+public struct Asset: Codable, Sendable, Hashable, Identifiable {
+    public var id: String
+    /// Where the file is on the server: what a channel's picture option stores.
+    public var path: String
+    public var bytes: Int
+}
+
+/// The server's access-token setting (`/api/v1/security`).
+public struct SecurityStatus: Codable, Sendable, Hashable {
+    public var enabled: Bool
+    /// Set with `--token` on the server's command line, so it cannot be changed from here.
+    public var locked: Bool
+    public var token: String?
+}
+
 public struct AuthStatus: Codable, Sendable, Hashable {
     public var required: Bool
     public var authenticated: Bool
@@ -284,6 +326,8 @@ public enum ServerEvent: Sendable, Equatable {
     case tvRemoved(String)
     case channelNow(channel: String, now: Program?, next: Program?)
     case scheduleChanged(channel: String)
+    /// A problem was raised or went away, or a watched folder changed.
+    case monitorChanged
     /// The live connection came up or went down.
     case connection(Bool)
 }

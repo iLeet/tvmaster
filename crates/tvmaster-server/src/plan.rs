@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tokio::sync::Notify;
-use tvmaster_core::{ChannelKind, ItemKind, Zone};
+use tvmaster_core::{Channel, ChannelKind, ItemKind, Zone};
 use tvmaster_db::MediaRow;
 use tvmaster_playout::{GuideData, PlayItem, PlayKind, ScheduleSource, Upcoming};
 use tvmaster_render::{GuideCell, GuideRow};
@@ -122,10 +122,17 @@ pub struct DbSchedule {
     pub(crate) wake: Arc<Notify>,
 }
 
-/// "8:30 PM"
+/// "8:30 PM", or "20:30" on a 24-hour clock.
 fn time_label(zone: &Zone, ms: i64) -> String {
+    clock_label(zone, ms, true)
+}
+
+fn clock_label(zone: &Zone, ms: i64, hour12: bool) -> String {
     let t = zone.local(ms);
     let (h, m) = (chrono::Timelike::hour(&t), chrono::Timelike::minute(&t));
+    if !hour12 {
+        return format!("{h:02}:{m:02}");
+    }
     let (h12, ampm) = match h {
         0 => (12, "AM"),
         1..=11 => (h, "AM"),
@@ -135,11 +142,45 @@ fn time_label(zone: &Zone, ms: i64) -> String {
     format!("{h12}:{m:02} {ampm}")
 }
 
-/// The listing a guide channel draws: every programming channel, from the
-/// current half hour, plus a ticker with what is on now.
+/// "9:00-9:30 PM" (the meridiem is written once when both ends share it).
+fn range_label(zone: &Zone, start: i64, end: i64, hour12: bool) -> String {
+    let (a, b) = (
+        clock_label(zone, start, hour12),
+        clock_label(zone, end, hour12),
+    );
+    if !hour12 {
+        return format!("{a}-{b}");
+    }
+    match (a.rsplit_once(' '), b.rsplit_once(' ')) {
+        (Some((ta, ma)), Some((_, mb))) if ma == mb => format!("{ta}-{b}"),
+        _ => format!("{a}-{b}"),
+    }
+}
+
+/// The listing a guide channel draws: its channels (every programming
+/// channel unless the guide names some), from the current time step, plus a
+/// ticker with what is on now.
 pub fn build_guide(db: &Connection, guide_id: &str, now_ms: i64) -> Option<GuideData> {
-    const HALF_HOUR: i64 = 30 * 60_000;
     let guide = tvmaster_db::get_channel(db, guide_id).ok().flatten()?;
+    build_guide_with(
+        db,
+        &guide.name,
+        &guide.lineup.timezone,
+        &guide.guide,
+        now_ms,
+    )
+}
+
+/// The same, for settings that are not saved (a preview while editing).
+pub fn build_guide_with(
+    db: &Connection,
+    guide_name: &str,
+    guide_timezone: &str,
+    cfg: &tvmaster_core::GuideConfig,
+    now_ms: i64,
+) -> Option<GuideData> {
+    let step = i64::from(cfg.layout.time_step) * 60_000;
+    let hour12 = cfg.header.hour12;
     let channels = tvmaster_db::list_channels(db).ok()?;
     let zone = Zone::parse(
         &channels
@@ -148,26 +189,41 @@ pub fn build_guide(db: &Connection, guide_id: &str, now_ms: i64) -> Option<Guide
             .map(|c| c.lineup.timezone.clone())
             .unwrap_or_default(),
     )
-    .or_else(|| Zone::parse(&guide.lineup.timezone))
+    .or_else(|| Zone::parse(guide_timezone))
     .unwrap_or_else(Zone::utc);
-    let start = zone.floor_grid(now_ms, HALF_HOUR);
-    let window_ms = guide.guide.hours as i64 * 3_600_000;
+    let start = zone.floor_grid(now_ms, step.min(30 * 60_000));
+    let window_ms = cfg.hours as i64 * 3_600_000;
+
+    // The channels to list: the ones the guide names, in its order, or all by number.
+    let programming = || {
+        channels
+            .iter()
+            .filter(|c| c.kind == ChannelKind::Programming)
+    };
+    let listed: Vec<&Channel> = if cfg.channels.is_empty() {
+        programming().collect()
+    } else {
+        cfg.channels
+            .iter()
+            .filter_map(|id| programming().find(|c| &c.id == id))
+            .collect()
+    };
 
     let mut rows = Vec::new();
-    let mut ticker: Vec<String> = guide.guide.ticker.clone();
-    for ch in channels
-        .iter()
-        .filter(|c| c.kind == ChannelKind::Programming)
-    {
+    let mut ticker: Vec<String> = cfg.ticker.clone();
+    for ch in listed {
         let progs = programs(db, &ch.id, start, start + window_ms).unwrap_or_default();
-        if let (Some(now), _) = now_and_next(&progs, now_ms) {
-            ticker.push(format!(
-                "NOW ON {}: {}",
-                ch.number,
-                now.show.clone().unwrap_or(now.title.clone())
-            ));
+        if cfg.ticker_options.now_on {
+            if let (Some(now), _) = now_and_next(&progs, now_ms) {
+                ticker.push(format!(
+                    "NOW ON {}: {}",
+                    ch.number,
+                    now.show.clone().unwrap_or(now.title.clone())
+                ));
+            }
         }
         rows.push(GuideRow {
+            id: ch.id.clone(),
             number: ch.number,
             name: ch.name.clone(),
             cells: progs
@@ -175,29 +231,29 @@ pub fn build_guide(db: &Connection, guide_id: &str, now_ms: i64) -> Option<Guide
                 .map(|p| GuideCell {
                     start_ms: p.start_ms,
                     end_ms: p.end_ms,
+                    range: range_label(&zone, p.start_ms, p.end_ms, hour12),
                     title: p.show.unwrap_or(p.title),
                 })
                 .collect(),
         });
     }
-    let title = guide
-        .guide
+    let title = cfg
         .title
         .clone()
         .filter(|t| !t.trim().is_empty())
-        .unwrap_or_else(|| format!("{} GUIDE", guide.name));
+        .unwrap_or_else(|| format!("{guide_name} GUIDE"));
     let local = zone.local(now_ms);
     Some(GuideData {
         title,
         now_ms,
         window_start_ms: start,
         window_ms,
-        clock: time_label(&zone, now_ms),
+        clock: clock_label(&zone, now_ms, hour12),
         date: local.format("%a %b %-d").to_string().to_uppercase(),
-        marks: (0..window_ms / HALF_HOUR)
+        marks: (0..window_ms / step)
             .map(|i| {
-                let at = start + i * HALF_HOUR;
-                (at, time_label(&zone, at))
+                let at = start + i * step;
+                (at, clock_label(&zone, at, hour12))
             })
             .collect(),
         rows,

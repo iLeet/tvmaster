@@ -60,7 +60,7 @@ export function tunerAddress(net: Network | undefined, o: ShareOptions, pagePort
   return `${bracket(o.host)}:${port}`;
 }
 
-export function shareLinks(net: Network | undefined, o: ShareOptions, pagePort = ''): { iptv: ShareLink[]; tuner: ShareLink[]; web: ShareLink[] } {
+export function shareLinks(net: Network | undefined, o: ShareOptions, pagePort = ''): { iptv: ShareLink[]; tuner: ShareLink[]; web: ShareLink[]; smarttv: ShareLink[] } {
   const base = origin(net, o, pagePort);
   const t = q(o.token);
   const withToken = !!t;
@@ -70,6 +70,8 @@ export function shareLinks(net: Network | undefined, o: ShareOptions, pagePort =
       { id: 'guide', label: 'Programme guide (XMLTV)', value: `${base}/iptv/guide.xml${t}`, hasToken: withToken },
     ],
     tuner: [{ id: 'tuner', label: 'Tuner address', value: tunerAddress(net, o, pagePort) }],
+    // The page a TV's own browser opens: full screen, flipped with the remote. It needs the token itself.
+    smarttv: [{ id: 'smarttv', label: 'Smart TV browser', value: `${base}/?ui=tv${t ? `&${t.slice(1)}` : ''}`, hasToken: withToken }],
     web: [
       { id: 'player', label: 'Web player', value: `${base}/` },
       { id: 'admin', label: 'Web admin', value: `${base}/admin/` },

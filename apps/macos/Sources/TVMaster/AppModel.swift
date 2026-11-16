@@ -126,15 +126,9 @@ final class AppModel {
                 return
             }
             let port = url.port ?? 8787
-            // Reachable from other devices means reachable by anyone on the network: always behind a token.
-            if shareOnNetwork && token.isEmpty {
-                token = Format.randomToken()
-                // The server is about to require it; the client must carry it too.
-                client = TVMasterClient.make(baseURL: url, token: token, pins: pins)
-            }
             let host = shareOnNetwork ? "0.0.0.0" : "127.0.0.1"
             let tlsArguments = serveHTTPS ? ["--tls", "--tls-bind", "\(host):\(port + 1)"] : []
-            await daemon.start(binary: binary, bind: "\(host):\(port)", dataDirectory: DaemonLocator.defaultDataDirectory, token: token.isEmpty ? nil : token, extraArguments: tlsArguments)
+            await daemon.start(binary: binary, bind: "\(host):\(port)", dataDirectory: DaemonLocator.defaultDataDirectory, token: nil, extraArguments: tlsArguments)
             var up = false
             for _ in 0..<40 {
                 reach = await client.reachability()
@@ -152,7 +146,16 @@ final class AppModel {
                 return
             }
             self.client = client
+            // Reachable from other devices means reachable by anyone on the network: the
+            // server this app runs is put behind a token (saved in its database, so it is kept).
+            if client.isLocal, shareOnNetwork, !auth.required, let made = try? await client.setSecurity(enabled: true), let t = made.token {
+                token = t
+                client = TVMasterClient.make(baseURL: url, token: t, pins: pins)
+                self.client = client
+            }
             if !token.isEmpty { tokens.set(token, for: url.absoluteString) }
+            await refreshSecurity()
+            await refreshMonitor()
             await refreshAll()
             startEvents()
             await applyTVRegistration()
@@ -203,6 +206,39 @@ final class AppModel {
         client = nil
         live = false
         phase = .needsServer(nil)
+    }
+
+    /// The server's access-token setting, for Settings.
+    var security: SecurityStatus?
+    /// What the server is keeping an eye on: its settings and any problems right now.
+    var monitor: MonitorState?
+
+    func refreshMonitor() async { monitor = try? await client?.monitor() }
+
+    func saveMonitor(_ s: MonitorSettings) async {
+        guard let client else { return }
+        if let m = await run({ try await client.setMonitor(s) }) { monitor = m }
+    }
+
+    func refreshSecurity() async {
+        security = try? await client?.security()
+    }
+
+    /// Turn the token on or off, replace it with a fresh or chosen one, and carry on with the new one.
+    func changeSecurity(enabled: Bool, token chosen: String? = nil, rotate: Bool = false) async {
+        guard let client, let url = serverURL else { return }
+        do {
+            let s = try await client.setSecurity(enabled: enabled, token: chosen, rotate: rotate)
+            security = s
+            token = s.token ?? ""
+            tokens.set(s.token, for: url.absoluteString)
+            self.client = TVMasterClient.make(baseURL: url, token: token, pins: pins)
+            eventTask?.cancel()
+            startEvents()
+            system = try? await self.client?.system()
+        } catch {
+            lastError = error.localizedDescription
+        }
     }
 
     func forgetToken() {
@@ -303,6 +339,7 @@ final class AppModel {
         case .channelNow(let id, let now, let next):
             if let i = channels.firstIndex(where: { $0.id == id }) { channels[i].now = now; channels[i].next = next }
         case .scheduleChanged: Task { await refreshChannels() }
+        case .monitorChanged: Task { await refreshMonitor(); await refreshAll() }
         }
     }
 

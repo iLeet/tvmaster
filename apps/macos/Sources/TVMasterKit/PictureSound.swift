@@ -83,6 +83,8 @@ public struct PictureSoundSettings: Equatable, Sendable {
 
     public var bugEnabled = false
     public var bugText = ""
+    /// A logo picture on the server, shown instead of the text.
+    public var bugImage = ""
     public var bugCorner = "top_right"
     public var titleEnabled = false
     public var titleSeconds = 8
@@ -139,6 +141,7 @@ public struct PictureSoundSettings: Equatable, Sendable {
         deinterlace = str(["video", "deinterlace"], "auto")
         bugEnabled = bool(["overlay", "bug", "enabled"], false)
         bugText = str(["overlay", "bug", "text"], "")
+        bugImage = options?.get(["overlay", "bug", "image"])?.stringValue ?? ""
         bugCorner = str(["overlay", "bug", "position"], "top_right")
         titleEnabled = bool(["overlay", "show_title", "enabled"], false)
         titleSeconds = options?.get(["overlay", "show_title", "seconds"])?.intValue ?? 8
@@ -175,6 +178,7 @@ public struct PictureSoundSettings: Equatable, Sendable {
         o.set(["video", "deinterlace"], .string(deinterlace))
         o.set(["overlay", "bug", "enabled"], .bool(bugEnabled))
         o.set(["overlay", "bug", "text"], .string(bugText))
+        o.set(["overlay", "bug", "image"], bugImage.isEmpty ? .null : .string(bugImage))
         o.set(["overlay", "bug", "position"], .string(bugCorner))
         o.set(["overlay", "show_title", "enabled"], .bool(titleEnabled))
         o.set(["overlay", "show_title", "seconds"], .number(Double(titleSeconds)))

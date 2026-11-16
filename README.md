@@ -2,7 +2,7 @@
 
 Self-hosted retro TV station and IPTV engine. Add your TV collections, and TVMaster runs real-feeling channels: complete chaos or scheduled time slots, retro commercials placed at natural breaks, "Up Next / Later Today" bumpers, a guide channel, and a phone/web remote. Runs headless or with a GUI on Windows, macOS and Linux (x64 and arm64).
 
-**Status:** milestone 13 complete (off-air screens, test-pattern channels and per-show audio/subtitle settings, on top of M1-M12). See [docs/PLAN.md](docs/PLAN.md) for the full design and roadmap, and [docs/API.md](docs/API.md) for the API.
+**Status:** milestone 14 complete (a far more configurable guide channel with a live video window, an optional access token, picture uploads, a smart-TV player, watched folders and alerts, on top of M1-M13). See [docs/PLAN.md](docs/PLAN.md) for the full design and roadmap, and [docs/API.md](docs/API.md) for the API.
 
 ## What works today
 
@@ -15,8 +15,11 @@ Self-hosted retro TV station and IPTV engine. Add your TV collections, and TVMas
 - Multiple audio tracks and subtitles: every channel chooses a language order (Japanese audio for anime, English for sitcoms, per show if you like), skips commentary tracks, and burns subtitles in (from the file or a `.srt` beside it) always, only when the audio is foreign, forced-only, or for the hard of hearing. See [docs/CHANNEL-OPTIONS.md](docs/CHANNEL-OPTIONS.md).
 - What shows when nothing is on air is yours to choose (a station card with your words, colour bars with a tone, snow, black, or a picture of your own), and a test-pattern channel airs only that. Audio and subtitle settings can be set once per show on the Shows page and follow it onto every channel, with a per-channel override.
 - TV-style channel options: volume levelling and night mode, 480p/720p/1080p, screen shape, deinterlacing, retro looks (CRT, VHS, film, black and white, sepia), a channel logo, a now-playing card, a clock, and signing off for the night with colour bars and a tone.
-- Optional access token for the whole server.
-- Channel 3, the guide channel: a live Prevue-style scrolling grid of every channel with a clock, a "now on" ticker and background music. Always accurate because it reads the same schedule as everything else.
+- Optional access token for the whole server: switch it on, off or replace it from Settings while the server runs (or fix it with `--token`).
+- The guide channel: a live scrolling listing of your channels with a clock, a ticker and background music, always accurate because it reads the same schedule as everything else. Ten colour themes (or two colours of your own), a time grid or big "now and next" rows, 3-10 channels at once, paged or smooth rolling, 12- or 24-hour times, a logo, an optional ticker, a chosen list of channels, and a live picture-in-picture window that shows one channel or flips through several (with a card saying what is on, and either the music or the channel's own sound). Both the web admin and the Mac app edit it with a live preview. See [docs/GUIDE.md](docs/GUIDE.md).
+- Upload a picture instead of typing a path: your own off-air screen and your channel logo.
+- Smart TVs: a full-screen page for a TV's browser that works with CH ▲▼, number keys, OK for a channel list and Info, plus the IPTV and tuner routes. See [docs/SMART-TV.md](docs/SMART-TV.md).
+- Watched folders: libraries are re-read every few minutes (only what changed), so new episodes appear by themselves. Problems (a library that goes offline, a channel that keeps failing, FFmpeg missing) show up on the Home screen and can be sent to ntfy, Slack, Discord or any web address.
 - Many TVs can watch different channels at once; one encode per channel is shared by all viewers. Register each TV, and control it from a phone: the remote updates live over a WebSocket (channel, volume, mute, power, and whether the TV's player is connected).
 - Tuner mode: Plex, Jellyfin and Emby can add TVMaster as an HDHomeRun-style network tuner. Channels can be grouped (Kids, Movies, ...).
 - M3U playlist and XMLTV guide for VLC, Kodi, TiviMate and similar clients.
@@ -24,7 +27,7 @@ Self-hosted retro TV station and IPTV engine. Add your TV collections, and TVMas
 - Watchdog restarts a crashed channel; config and TV state persist in SQLite. Unplugged drives, deleted or corrupt files and killed FFmpeg processes are survived without taking a channel off the air (see [docs/RELEASE.md](docs/RELEASE.md)).
 - Service templates for launchd, systemd and Windows Task Scheduler.
 
-Not yet: Apple-notarized and Windows-trusted signing (you need the certificates), HTTPS (see the roadmap).
+Not yet: Apple-notarized and Windows-trusted signing (you need the certificates), and native Windows and Linux desktop apps (the web admin and the Mac app cover those jobs today).
 
 ## Quick start
 
@@ -52,9 +55,10 @@ For a real lineup (blocks, seasons, events), see the example in [docs/SCHEDULING
 - Make a screen a TV: open `http://<host>:8787/?tv=living-room` on it (smart-TV browser, tablet, laptop)
 - Phone remote for that TV: open `http://<host>:8787/?remote=living-room`
 - Plex/Jellyfin/Emby: add a network tuner at `<host>:8787` (HDHomeRun) and use `http://<host>:8787/iptv/guide.xml` for guide data. This follows the HDHomeRun API those servers speak; it has not been tested against a real one yet.
-- A guide channel: `POST /api/v1/channels` with `"kind": "guide"` (see [docs/API.md](docs/API.md)).
+- A guide channel: make one in the web admin (Channels, New channel) or `POST /api/v1/channels` with `"kind": "guide"` (see [docs/API.md](docs/API.md) and [docs/GUIDE.md](docs/GUIDE.md)).
+- A smart TV: open `http://<host>:8787/?ui=tv` in its browser, or use an IPTV app (see [docs/SMART-TV.md](docs/SMART-TV.md)).
 
-Protect it: `tvmaster serve --token $(tvmaster token)` (browsers sign in once; IPTV apps use the `?token=` that the playlist already contains).
+Protect it: turn the access token on in **Settings** (web admin or Mac app), or start the server with `tvmaster serve --token $(tvmaster token)`, which fixes it. Browsers sign in once; IPTV apps use the `?token=` that the playlist already contains. The packages start protected with a first-run token you can turn off or replace in Settings.
 
 Encrypt it: `tvmaster serve --tls` also serves HTTPS on port 8788 with a self-signed certificate made once (kept in the data folder; `--tls-bind`, `--no-http` to change ports or serve only HTTPS). Bring your own with `--tls-cert` and `--tls-key` (Let's Encrypt, `tailscale cert`): it is re-read every few hours so renewals are picked up. The Mac app and the web admin show the certificate fingerprint to compare. IPTV apps and Plex usually refuse self-signed certificates, so leave HTTP on for them unless you use a certificate from a real authority.
 
@@ -64,7 +68,7 @@ Run unattended: `tvmaster service launchd|systemd|windows` prints a definition t
 
 Hardware encoding: VideoToolbox is used automatically on macOS; use `--encoder nvenc|qsv|vaapi|amf` to opt in to the others, `--encoder software` for libx264. `tvmaster doctor` encodes a test clip with every encoder in your FFmpeg and tells you which work and how fast. A hardware encoder that fails its start-up test falls back to software.
 
-Install without Rust: a `.dmg` for macOS, a setup `.exe` for Windows, and `.deb`, `.rpm` and Arch packages for Linux, each of which sets up the server at boot with an access token and FFmpeg (details and what is tested in [docs/RELEASE.md](docs/RELEASE.md)). There is also a `tar.gz` with `install.sh`, and a `Dockerfile`.
+Install without Rust: a `.dmg` for macOS, a setup `.exe` for Windows, and `.deb`, `.rpm` and Arch packages for Linux, each of which sets up the server at boot with a first-run access token and FFmpeg (details and what is tested in [docs/RELEASE.md](docs/RELEASE.md)). There is also a `tar.gz` with `install.sh`, and a `Dockerfile`.
 
 ## Develop
 

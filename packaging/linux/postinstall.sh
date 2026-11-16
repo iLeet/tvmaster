@@ -14,8 +14,8 @@ for g in video render; do
   if getent group "$g" >/dev/null 2>&1; then usermod -aG "$g" tvmaster 2>/dev/null || true; fi
 done
 
-# An access token, made once. The service refuses to start without one so the
-# server is never open to the whole network by accident.
+# A first-run access token, made once, so the server is never open to the whole
+# network by accident. The admin UI (Settings) can turn it off or replace it.
 mkdir -p /etc/tvmaster
 if [ ! -s /etc/tvmaster/token ]; then
   ( umask 077; /usr/bin/tvmaster token > /etc/tvmaster/token )

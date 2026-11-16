@@ -1,6 +1,9 @@
 //! Writes one PPM frame per bumper to the directory given as the first
 //! argument: `cargo run -p tvmaster-render --example preview -- /tmp/out`.
-use tvmaster_render::{render, render_guide, GuideCell, GuideData, GuideRow, Scene, Theme};
+use tvmaster_render::{
+    render, render_guide, GuideCell, GuideData, GuideLook, GuideRow, GuideView, Palette, Placement,
+    Scene, Theme, WindowLook, WindowSize,
+};
 
 fn main() {
     let dir = std::env::args().nth(1).unwrap_or_else(|| ".".into());
@@ -58,6 +61,7 @@ fn main() {
     ];
     let rows = (0..8)
         .map(|r| GuideRow {
+            id: format!("ch{r}"),
             number: 4 + r as u32,
             name: ["Retro TV", "Toon Town", "Movie Vault", "Sitcom Central"][r % 4].into(),
             cells: (0..7)
@@ -65,6 +69,7 @@ fn main() {
                     start_ms: start - half + i * half,
                     end_ms: start + i * half,
                     title: shows[(r + i as usize) % shows.len()].into(),
+                    range: format!("{}:{:02} PM", 9 + i / 2, (i % 2) * 30),
                 })
                 .collect(),
         })
@@ -87,13 +92,65 @@ fn main() {
         rows,
         ticker: "Now on channel 4: Taxi * Up next: Cheers * Stay tuned".into(),
     };
-    for (name, t) in [("guide_a", 3.0), ("guide_b", 12.0)] {
+    let auto = Palette::from_theme(&theme);
+    let win = |placement, size| WindowLook {
+        placement,
+        size,
+        info: true,
+    };
+    let mut looks: Vec<(&str, GuideLook, GuideView)> = Vec::new();
+    looks.push(("guide_a", GuideLook::new(auto), GuideView::default()));
+    for (n, p) in [
+        ("prevue", Palette::prevue()),
+        ("amber", Palette::amber()),
+        ("phosphor", Palette::phosphor()),
+        ("neon", Palette::neon()),
+        ("sunset", Palette::sunset()),
+        ("ocean", Palette::ocean()),
+        ("slate", Palette::slate()),
+        ("paper", Palette::paper()),
+    ] {
+        looks.push((
+            Box::leak(format!("guide_{n}").into_boxed_str()),
+            GuideLook::new(p),
+            GuideView::default(),
+        ));
+    }
+    let mut nn = GuideLook::new(Palette::prevue());
+    nn.now_next = true;
+    nn.progress = true;
+    nn.rows = 5;
+    looks.push(("guide_nownext", nn, GuideView::default()));
+    let live = GuideView {
+        window_row: Some(1),
+        window_live: false,
+    };
+    for (n, pl, sz) in [
+        ("side_right", Placement::SideRight, WindowSize::Medium),
+        ("side_left_large", Placement::SideLeft, WindowSize::Large),
+        ("top_left", Placement::TopLeft, WindowSize::Medium),
+        ("top_right_small", Placement::TopRight, WindowSize::Small),
+    ] {
+        let mut l = GuideLook::new(Palette::prevue());
+        l.window = Some(win(pl, sz));
+        looks.push((
+            Box::leak(format!("guide_pip_{n}").into_boxed_str()),
+            l,
+            live,
+        ));
+    }
+    for (name, look, view) in &looks {
         std::fs::write(
             format!("{dir}/{name}.ppm"),
-            render_guide(&guide, &theme, t).to_ppm(),
+            render_guide(&guide, look, view, 3.0).to_ppm(),
         )
         .expect("write guide frame");
     }
+    std::fs::write(
+        format!("{dir}/guide_b.ppm"),
+        render_guide(&guide, &looks[0].1, &GuideView::default(), 12.0).to_ppm(),
+    )
+    .expect("write guide frame");
     for (file, scene) in scenes {
         let c = render(&scene, &theme, 2.0, 6.0);
         std::fs::write(format!("{dir}/{file}.ppm"), c.to_ppm()).expect("write frame");

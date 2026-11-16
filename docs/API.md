@@ -4,7 +4,7 @@ Base URL: `http://<host>:8787`. JSON unless noted.
 
 ## Authentication
 
-By default the server is open on the network. Start it with `tvmaster serve --token <token>` (or `TVMASTER_TOKEN`; `tvmaster token` prints a random one) and every request must carry the token, except the admin UI's static files, the web player shell, `/api/v1/health` and the auth endpoints. Send it as:
+By default the server is open on the network. The access token is optional and can be switched on, off or replaced while the server runs (`PUT /api/v1/security`, below); `tvmaster serve --token <token>` (or `TVMASTER_TOKEN`; `tvmaster token` prints a random one) fixes it instead. When it is on, every request must carry the token, except the admin UI's static files, the web player shell, `/api/v1/health` and the auth endpoints. Send it as:
 
 - `Authorization: Bearer <token>` (scripts),
 - `?token=<token>` (IPTV apps that cannot set headers: playlists, tuner lineups and HLS playlists include it in the URLs they hand out), or
@@ -15,10 +15,34 @@ By default the server is open on the network. Start it with `tvmaster serve --to
 | GET | `/api/v1/auth` | `{required, authenticated}`. |
 | POST | `/api/v1/auth/login` | `{"token": "…"}`: sets the cookie. Wrong tokens get 401 after a short delay. |
 | POST | `/api/v1/auth/logout` | Clears the cookie. |
+| GET | `/api/v1/security` | `{enabled, locked, token}`. `locked` means the token was given on the command line (`--token`, `--token-file`), so it cannot be changed here. Needs the token itself when one is on. |
+| PUT | `/api/v1/security` | `{"enabled": true}` makes a random token, `{"enabled": true, "token": "…"}` sets yours, `{"enabled": true, "rotate": true}` replaces it, `{"enabled": false}` switches it off. Returns the new state and sets (or clears) the caller's cookie. 409 when locked, 400 for a token that is not 8-128 characters of `A-Za-z0-9-_.~`. The choice is kept in the database across restarts. `tvmaster serve --initial-token-file F` starts with the token in `F` the first time only (what the packages do), after which the saved choice wins. |
 
 Tokens are 8-128 characters of letters, digits, `-`, `_`, `.`, `~`. Use HTTPS (a reverse proxy, or Tailscale) before exposing the server beyond your home network.
 
 Errors are `{"error": "message"}` with a suitable status code.
+
+### Pictures
+
+| Method | Path | Notes |
+|---|---|---|
+| POST | `/api/v1/assets?name=logo.png` | The picture as the request body (png, jpg, gif or webp, up to 12 MB; recognised by its first bytes, not its claimed type). Returns `{id, path, url, bytes}`. `path` is where it is on the server: put it in a channel's `options.off_air.image`, `options.overlay.bug.image` or a guide's `header.logo`. The same bytes uploaded twice are one file. |
+| GET | `/api/v1/assets` | What has been uploaded, newest first. |
+| GET | `/api/v1/assets/{id}` | The picture itself. |
+| DELETE | `/api/v1/assets/{id}` | Remove it (a channel still pointing at it falls back to its station card). |
+
+Uploads are kept in `<data dir>/assets/`.
+
+### Monitoring
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/api/v1/monitor` | `{settings, alerts, rescans, curl}`: the settings below, the problems right now, when each library was last re-read and what changed, and whether `curl` (used for the webhook) is installed. |
+| PUT | `/api/v1/monitor` | `{"watch_minutes": 15, "alerts": true, "webhook": "https://ntfy.sh/topic", "webhook_text": false, "notify_recovery": true}`. `watch_minutes` is 0 (only on request) or 5, 10, 15, 30, 60, 120, 360. |
+| POST | `/api/v1/monitor/rescan` | Re-read every library's folder now: `{added, removed, back, unreachable}`. Only files that are new, gone or back are touched; a new file waits until it has not changed for a minute; a folder that cannot be reached, or comes up empty, is left alone. |
+| POST | `/api/v1/monitor/test` | Send a test message to the webhook. |
+
+Alerts (`{id, severity, title, detail, since_ms}`) are raised when a condition has held for two checks 30 seconds apart: a library whose folder is unreachable (`library:<id>:offline`), a channel whose libraries have nothing playable (`channel:<id>:empty`), a channel whose playout failed three times in ten minutes (`channel:<id>:failing`), FFmpeg missing (`system:ffmpeg`, immediately). The WebSocket sends `alert.raised` (with `alert`), `alert.cleared` (with `id`) and `library.changed` (`library`, `added`, `removed`, `back`). The webhook gets a POST: JSON with `title`, `message`, `severity`, `id` and Slack's `text` and Discord's `content`, or with `webhook_text` the message as plain text and the title in a `Title` header (ntfy).
 
 ### HTTPS
 
@@ -85,6 +109,8 @@ A channel's `options` object holds audio-track, subtitle, picture and on-screen-
 ```
 
 `hours` is 2-6. `music_library_ids` are libraries of kind `music` (audio files are scanned like video; the music loops under the guide, silence if none). The ticker announces what is on now on every channel after your own lines.
+
+The guide also has themes, layouts, a heading, a ticker, a chosen list of channels and a live video window, all in the same `guide` object and all optional; see [GUIDE.md](GUIDE.md). `POST /api/v1/guide/preview` with `{"id": "guide", "name": "Retro", "guide": {…}, "t": 3}` returns one frame as a PNG without saving anything (the editors use it for their live preview). Changing a guide's settings restarts it so the change shows.
 
 ## Virtual TVs and remote
 

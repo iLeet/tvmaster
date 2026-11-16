@@ -1,0 +1,3 @@
+hls.min.js is hls.js 1.5.17 (https://github.com/video-dev/hls.js), Apache License 2.0,
+Copyright 2017 Dailymotion. It lets browsers without built-in HLS play TVMaster's channels,
+and is bundled so players work on a network with no internet access.

@@ -567,15 +567,47 @@ pub fn rendered_args(
 /// rate. Drawing fewer frames keeps the renderer comfortably ahead of real time.
 pub const GUIDE_FPS: u32 = 15;
 
-/// Arguments for the guide channel: an endless stream of raw RGB frames on
-/// stdin plus looping music (or silence) as the audio.
-pub fn guide_args(
-    src_w: usize,
-    src_h: usize,
-    music_list: Option<&Path>,
-    p: &OutputProfile,
-    enc: Encoder,
-) -> Vec<String> {
+/// A live video window inside the guide: another channel's stream, scaled to
+/// fit (with bars) at this place in the output picture.
+#[derive(Debug, Clone)]
+pub struct PipInput<'a> {
+    /// The channel's HLS playlist on disk.
+    pub playlist: &'a Path,
+    /// Output pixels.
+    pub x: i32,
+    pub y: i32,
+    pub w: i32,
+    pub h: i32,
+    /// Use the window's sound instead of the music.
+    pub audio: bool,
+}
+
+/// A logo picture (already sized, with its transparency) placed over the guide.
+#[derive(Debug, Clone)]
+pub struct LogoInput<'a> {
+    pub png: &'a Path,
+    pub x: i32,
+    pub y: i32,
+}
+
+/// One run of the guide's encoder.
+#[derive(Debug, Clone)]
+pub struct GuideRun<'a> {
+    pub src_w: usize,
+    pub src_h: usize,
+    /// Music for FFmpeg's concat demuxer; silence when `None`.
+    pub music_list: Option<&'a Path>,
+    pub pip: Option<PipInput<'a>>,
+    pub logo: Option<LogoInput<'a>>,
+    /// Stop after this long (`None` = until stdin ends).
+    pub duration_ms: Option<u64>,
+    /// Where this run's timestamps start, so runs join into one stream.
+    pub ts_offset_ms: u64,
+}
+
+/// Arguments for the guide channel: raw RGB frames on stdin plus looping music
+/// (or silence), optionally with a live video window and a logo laid over it.
+pub fn guide_run_args(run: &GuideRun, p: &OutputProfile, enc: Encoder) -> Vec<String> {
     let mut a: Vec<String> = ["-hide_banner", "-loglevel", "error"]
         .iter()
         .map(|s| s.to_string())
@@ -587,13 +619,13 @@ pub fn guide_args(
         "-pixel_format".into(),
         "rgb24".into(),
         "-video_size".into(),
-        format!("{src_w}x{src_h}"),
+        format!("{}x{}", run.src_w, run.src_h),
         "-framerate".into(),
         GUIDE_FPS.to_string(),
         "-i".into(),
         "pipe:0".into(),
     ]);
-    match music_list {
+    match run.music_list {
         Some(list) => a.extend([
             "-stream_loop".into(),
             "-1".into(),
@@ -611,20 +643,83 @@ pub fn guide_args(
             "anullsrc=r=48000:cl=stereo".into(),
         ]),
     }
-    a.extend([
-        "-map".into(),
-        "0:v:0".into(),
-        "-map".into(),
-        "1:a:0".into(),
-        "-vf".into(),
-        format!(
-            "scale={}:{}:flags=neighbor,setsar=1,fps={},{}",
-            p.width,
-            p.height,
-            p.fps,
-            pix_tail(enc)
-        ),
-    ]);
+    let mut next_input = 2;
+    let mut pip_input = None;
+    if let Some(pip) = &run.pip {
+        a.extend([
+            "-live_start_index".into(),
+            "-2".into(),
+            "-i".into(),
+            pip.playlist.to_string_lossy().to_string(),
+        ]);
+        pip_input = Some((next_input, pip));
+        next_input += 1;
+    }
+    let mut logo_input = None;
+    if let Some(logo) = &run.logo {
+        a.extend([
+            "-loop".into(),
+            "1".into(),
+            "-framerate".into(),
+            p.fps.to_string(),
+            "-i".into(),
+            logo.png.to_string_lossy().to_string(),
+        ]);
+        logo_input = Some((next_input, logo));
+    }
+
+    let base = format!(
+        "scale={}:{}:flags=neighbor,setsar=1,fps={}",
+        p.width, p.height, p.fps
+    );
+    if pip_input.is_none() && logo_input.is_none() {
+        a.extend([
+            "-map".into(),
+            "0:v:0".into(),
+            "-map".into(),
+            "1:a:0".into(),
+            "-vf".into(),
+            format!("{base},{}", pix_tail(enc)),
+        ]);
+    } else {
+        let mut g = format!("[0:v]{base}[g0]");
+        let mut last = "g0".to_string();
+        if let Some((i, pip)) = pip_input {
+            // Timestamps restart at zero so the window lines up with the guide's own frames.
+            g.push_str(&format!(
+                ";[{i}:v]setpts=PTS-STARTPTS,scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps={fps}[pip];[{last}][pip]overlay={x}:{y}:eof_action=pass:format=auto[g1]",
+                w = pip.w,
+                h = pip.h,
+                x = pip.x,
+                y = pip.y,
+                fps = p.fps,
+            ));
+            last = "g1".into();
+        }
+        if let Some((i, logo)) = logo_input {
+            g.push_str(&format!(
+                ";[{last}][{i}:v]overlay={}:{}:format=auto[g2]",
+                logo.x, logo.y
+            ));
+            last = "g2".into();
+        }
+        g.push_str(&format!(";[{last}]{}[vout]", pix_tail(enc)));
+        a.extend(["-filter_complex".into(), g, "-map".into(), "[vout]".into()]);
+        match pip_input {
+            Some((i, pip)) if pip.audio => {
+                a.extend([
+                    "-map".into(),
+                    format!("{i}:a:0?"),
+                    "-af".into(),
+                    "asetpts=PTS-STARTPTS,aresample=48000:async=1".into(),
+                ]);
+            }
+            _ => a.extend(["-map".into(), "1:a:0".into()]),
+        }
+    }
+    if let Some(ms) = run.duration_ms {
+        a.extend(["-t".into(), secs(ms)]);
+    }
     a.extend(video_args(enc, p));
     a.extend([
         "-c:a".into(),
@@ -635,6 +730,11 @@ pub fn guide_args(
         "48000".into(),
         "-ac".into(),
         "2".into(),
+    ]);
+    if run.ts_offset_ms > 0 {
+        a.extend(["-output_ts_offset".into(), secs(run.ts_offset_ms)]);
+    }
+    a.extend([
         "-muxdelay".into(),
         "0".into(),
         "-muxpreload".into(),
@@ -771,20 +871,101 @@ mod tests {
     #[test]
     fn guide_args_loop_music_or_fall_back_to_silence() {
         let p = OutputProfile::default();
-        let with = guide_args(
-            640,
-            360,
-            Some(Path::new("/c/list.txt")),
-            &p,
-            Encoder::Software,
-        );
+        let run = |music| GuideRun {
+            src_w: 640,
+            src_h: 360,
+            music_list: music,
+            pip: None,
+            logo: None,
+            duration_ms: None,
+            ts_offset_ms: 0,
+        };
+        let with = guide_run_args(&run(Some(Path::new("/c/list.txt"))), &p, Encoder::Software);
         assert!(has_pair(&with, "-stream_loop", "-1"));
         assert!(has_pair(&with, "-f", "concat"));
         assert!(has_pair(&with, "-framerate", "15"));
         assert!(!with.contains(&"-t".to_string()), "endless");
-        let without = guide_args(640, 360, None, &p, Encoder::Software);
+        assert!(!with.contains(&"-output_ts_offset".to_string()));
+        assert!(
+            !with.contains(&"-filter_complex".to_string()),
+            "no window, no graph"
+        );
+        let without = guide_run_args(&run(None), &p, Encoder::Software);
         assert!(without.iter().any(|x| x.starts_with("anullsrc")));
         assert_eq!(without.last().unwrap(), "pipe:1");
+    }
+
+    #[test]
+    fn a_video_window_is_laid_over_the_guide_at_its_place() {
+        let p = OutputProfile::default();
+        let list = Path::new("/c/list.txt");
+        let hls = Path::new("/hls/retro/index.m3u8");
+        let run = GuideRun {
+            src_w: 640,
+            src_h: 360,
+            music_list: Some(list),
+            pip: Some(PipInput {
+                playlist: hls,
+                x: 836,
+                y: 90,
+                w: 384,
+                h: 216,
+                audio: false,
+            }),
+            logo: None,
+            duration_ms: Some(30_000),
+            ts_offset_ms: 90_000,
+        };
+        let a = guide_run_args(&run, &p, Encoder::Software);
+        assert!(has_pair(&a, "-i", "/hls/retro/index.m3u8"));
+        assert!(
+            has_pair(&a, "-live_start_index", "-2"),
+            "start near the live edge"
+        );
+        let graph = &a[a.iter().position(|x| x == "-filter_complex").unwrap() + 1];
+        assert!(
+            graph.contains("setpts=PTS-STARTPTS"),
+            "the window's clock starts at zero: {graph}"
+        );
+        assert!(
+            graph.contains("scale=384:216:force_original_aspect_ratio=decrease,pad=384:216"),
+            "{graph}"
+        );
+        assert!(graph.contains("overlay=836:90"), "{graph}");
+        assert!(graph.ends_with("[vout]"));
+        assert!(
+            has_pair(&a, "-map", "[vout]") && has_pair(&a, "-map", "1:a:0"),
+            "music stays"
+        );
+        assert!(has_pair(&a, "-t", "30.000"));
+        assert!(has_pair(&a, "-output_ts_offset", "90.000"));
+
+        // The window's own sound, when asked for.
+        let mut loud = run.clone();
+        loud.pip.as_mut().unwrap().audio = true;
+        let a = guide_run_args(&loud, &p, Encoder::Software);
+        assert!(has_pair(&a, "-map", "2:a:0?") && !has_pair(&a, "-map", "1:a:0"));
+
+        // A logo goes on last, as the next input.
+        let mut both = run.clone();
+        both.logo = Some(LogoInput {
+            png: Path::new("/c/logo.png"),
+            x: 16,
+            y: 8,
+        });
+        let a = guide_run_args(&both, &p, Encoder::Software);
+        let graph = &a[a.iter().position(|x| x == "-filter_complex").unwrap() + 1];
+        assert!(graph.contains("[g1][3:v]overlay=16:8"), "{graph}");
+        let mut only_logo = run;
+        only_logo.pip = None;
+        only_logo.logo = Some(LogoInput {
+            png: Path::new("/c/logo.png"),
+            x: 16,
+            y: 8,
+        });
+        let a = guide_run_args(&only_logo, &p, Encoder::Software);
+        let graph = &a[a.iter().position(|x| x == "-filter_complex").unwrap() + 1];
+        assert!(graph.contains("[g0][2:v]overlay=16:8"), "{graph}");
     }
 
     #[test]

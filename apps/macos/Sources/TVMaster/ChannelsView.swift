@@ -87,27 +87,36 @@ struct ChannelEditorSheet: View {
     @State private var saving = false
     @State private var confirmDelete = false
     @State private var loaded = false
-    @State private var tab = ProcessInfo.processInfo.environment["TVM_EDIT_TAB"] == "picture" ? Tab.picture : Tab.general
+    @State private var tab: Tab = {
+        switch ProcessInfo.processInfo.environment["TVM_EDIT_TAB"] { case "picture": .picture; case "guide": .guide; default: .general }
+    }()
     /// The channel's picture and sound settings, read from the server's raw JSON.
     @State private var ps = PictureSoundSettings()
     @State private var psOriginal = PictureSoundSettings()
     @State private var rawOptions: JSONValue?
     @State private var rawLineup: JSONValue?
     @State private var loadingRaw = true
-    private enum Tab: String, CaseIterable { case general = "General", picture = "Picture & sound" }
+    /// A guide channel's look, read from the server's raw JSON.
+    @State private var gs = GuideSettings()
+    @State private var gsOriginal = GuideSettings()
+    @State private var rawGuide: JSONValue?
+    private enum Tab: String, CaseIterable { case general = "General", picture = "Picture & sound", guide = "Guide" }
+    private var tabs: [Tab] { isGuide ? [.general, .guide] : isNew ? [.general] : [.general, .picture] }
 
     private var isNew: Bool { channel == nil }
     private var numberTaken: Bool { model.channels.contains { $0.number == number && $0.id != id } }
-    private var valid: Bool { !name.trimmingCharacters(in: .whitespaces).isEmpty && Format.isValidID(id) && number > 0 && !numberTaken }
+    private var valid: Bool { !name.trimmingCharacters(in: .whitespaces).isEmpty && Format.isValidID(id) && number > 0 && !numberTaken && (!isGuide || gs.problem == nil) }
 
     var body: some View {
         VStack(spacing: 0) {
-            if !isGuide && !isNew {
-                Picker("", selection: $tab) { ForEach(Tab.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
+            if tabs.count > 1 {
+                Picker("", selection: $tab) { ForEach(tabs, id: \.self) { Text($0.rawValue).tag($0) } }
                     .pickerStyle(.segmented).labelsHidden().padding([.horizontal, .top], 16)
             }
             if tab == .picture && !isGuide && !isNew {
                 PictureSoundForm(ps: $ps, sys: model.system, testOnly: isTest, oldServer: rawOptions == nil && !loadingRaw)
+            } else if tab == .guide && isGuide {
+                GuideForm(gs: $gs, id: id, name: name, raw: rawGuide)
             } else {
             Form {
                 Section {
@@ -154,8 +163,11 @@ struct ChannelEditorSheet: View {
                             Task { if let c = model.client { _ = await model.run { try await c.reroll(channel: channel.id) } } }
                         }
                     }
-                } else if let channel, isGuide {
-                    Section("More") { Button("Design the guide in the web admin…") { model.openInBrowser("/admin/#/channels/\(channel.id)?tab=guide") } }
+                } else if isGuide {
+                    Section("The guide") {
+                        Text("Colours, layout, heading, ticker, a live video window and more are on the Guide tab.").font(.caption).foregroundStyle(.secondary)
+                        Button("Open the Guide tab") { tab = .guide }.glassButton()
+                    }
                 }
             }
             .formStyle(.grouped)
@@ -170,7 +182,7 @@ struct ChannelEditorSheet: View {
             }
             .padding(16)
         }
-        .frame(width: 560, height: 680)
+        .frame(width: 560, height: isGuide && tab == .guide ? 780 : 680)
         .confirmationDialog("Delete “\(name)”?", isPresented: $confirmDelete) {
             Button("Delete channel", role: .destructive) { Task { await delete() } }
         } message: { Text("TVs tuned to it will lose the channel. Your files are not touched.") }
@@ -181,10 +193,16 @@ struct ChannelEditorSheet: View {
                 name = c.name; id = c.id; number = c.number; group = c.group ?? ""; isGuide = c.isGuide; isTest = c.isTest
                 strategy = c.strategy; runOut = c.runOut; chaos = Double(c.chaos); autopilot = c.autopilot; alwaysOn = c.alwaysOn; libraryIDs = Set(c.libraryIds)
                 // Picture and sound live in parts of the channel the typed model does not carry: fetch it raw.
-                if !c.isGuide, let client = model.client, let raw = try? await client.channelRaw(c.id) {
-                    rawOptions = raw.get(["options"]); rawLineup = raw.get(["lineup"])
-                    ps = PictureSoundSettings(options: rawOptions, lineup: rawLineup)
-                    psOriginal = ps
+                if let client = model.client, let raw = try? await client.channelRaw(c.id) {
+                    if c.isGuide {
+                        rawGuide = raw.get(["guide"])
+                        gs = GuideSettings(guide: rawGuide)
+                        gsOriginal = gs
+                    } else {
+                        rawOptions = raw.get(["options"]); rawLineup = raw.get(["lineup"])
+                        ps = PictureSoundSettings(options: rawOptions, lineup: rawLineup)
+                        psOriginal = ps
+                    }
                 }
                 loadingRaw = false
             } else {
@@ -209,6 +227,11 @@ struct ChannelEditorSheet: View {
         if !isGuide && !isTest {
             f["strategy"] = .string(strategy.rawValue); f["run_out"] = .string(runOut.rawValue)
             f["chaos"] = .number(chaos); f["library_ids"] = .array(libraryIDs.sorted().map { .number(Double($0)) })
+        }
+        // A guide's look, when it was set up or changed.
+        if isGuide, isNew || gs != gsOriginal {
+            if let p = gs.problem { model.lastError = p; saving = false; return }
+            f["guide"] = gs.apply(to: rawGuide)
         }
         // Only touch options and the sign-off hours when the user changed them.
         if !isGuide, !isNew, ps != psOriginal, rawOptions != nil || rawLineup != nil || isTest {
@@ -249,7 +272,7 @@ struct PictureSoundForm: View {
             Section("When nothing is on air") {
                 Picker("Screen", selection: $ps.offAirScreen) { ForEach(PictureSoundSettings.screens, id: \.value) { Text($0.label).tag($0.value) } }
                 if ps.offAirScreen == "card" { TextField("Message", text: $ps.offAirMessage, prompt: Text("PLEASE STAND BY")) }
-                if ps.offAirScreen == "image" { TextField("Picture file", text: $ps.offAirImage, prompt: Text("/path/to/picture.png")).font(.body.monospaced()) }
+                if ps.offAirScreen == "image" { PictureChooser(title: "Picture", path: $ps.offAirImage) }
                 Toggle("Test tone (hiss with snow)", isOn: $ps.offAirTone)
             }
             if !testOnly {
@@ -280,7 +303,10 @@ struct PictureSoundForm: View {
             }
             Section("On-screen graphics") {
                 Toggle("Channel logo in a corner", isOn: $ps.bugEnabled)
-                if ps.bugEnabled { TextField("Logo text", text: $ps.bugText, prompt: Text("Channel number and name")) }
+                if ps.bugEnabled {
+                    TextField("Logo text", text: $ps.bugText, prompt: Text("Channel number and name"))
+                    PictureChooser(title: "Logo picture", path: $ps.bugImage, hint: "Optional. Shown instead of the text; a transparent png works best.")
+                }
                 Toggle("Now-playing card when a programme starts", isOn: $ps.titleEnabled)
                 Toggle("Clock (needs FFmpeg with drawtext)", isOn: $ps.clockEnabled)
             }

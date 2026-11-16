@@ -26,7 +26,7 @@ fn is_segment_name(name: &str) -> bool {
 
 /// Make sure `channel` is on air (starting it if needed) and count this
 /// request as a viewer. Returns the playout manager.
-fn ensure_on_air(s: &AppState, channel: &str, start: bool) -> ApiResult<Arc<Manager>> {
+pub(crate) fn ensure_on_air(s: &AppState, channel: &str, start: bool) -> ApiResult<Arc<Manager>> {
     let playout = s.playout.clone().ok_or_else(|| {
         ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -84,7 +84,7 @@ pub async fn hls(
 
     // Clients that cannot send headers (VLC, Plex) resolve segment URLs without
     // the playlist's query, so each segment line carries the token itself.
-    let bytes = if is_playlist && s.token.is_some() {
+    let bytes = if is_playlist && s.token().is_some() {
         let suffix = crate::auth::url_suffix(&s);
         String::from_utf8_lossy(&bytes)
             .lines()

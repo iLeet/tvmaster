@@ -46,6 +46,8 @@ public final class EventStream: @unchecked Sendable {
         case "schedule.changed":
             struct M: Decodable { var channel: String }
             return (try? decoder.decode(M.self, from: data)).map { .scheduleChanged(channel: $0.channel) }
+        case "alert.raised", "alert.cleared", "library.changed":
+            return .monitorChanged
         default:
             return nil
         }

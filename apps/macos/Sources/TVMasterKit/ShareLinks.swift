@@ -112,6 +112,9 @@ public struct ShareLinks: Sendable {
             link("playlist", "Channel playlist (M3U)", "Every channel, in channel-number order", "/iptv/playlist.m3u"),
             link("guide", "Programme guide (XMLTV)", "What is on, 24 hours ahead", "/iptv/guide.xml"),
         ]))
+        out.append(Section(id: "smarttv", title: "Smart TV", note: "Open this in the TV's own web browser. It fills the screen and follows the remote: CH up/down or the arrow keys flip channels, number keys jump to a channel, OK opens the channel list, Info says what is on, Left goes back to the last channel.", links: [
+            Link(id: "smarttv", title: "Smart TV browser", detail: "Samsung, LG, Android TV, Fire TV browsers", url: origin + "/?ui=tv" + (hasToken ? "&" + String(t.dropFirst()) : ""), qr: true, hasToken: hasToken),
+        ]))
         out.append(Section(id: "tuner", title: "Plex, Jellyfin and Emby tuner", note: "Add a network tuner (HDHomeRun) and enter this address, then use the XMLTV guide above. These servers use plain HTTP.", links: [
             Link(id: "tuner", title: "Tuner address", detail: "Enter this as the device address", url: tunerAddress(o), qr: false, hasToken: false),
             link("discover", "Tuner discovery", "For apps that ask for a full URL", "/discover.json"),

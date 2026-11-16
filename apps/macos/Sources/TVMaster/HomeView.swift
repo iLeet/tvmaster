@@ -12,6 +12,14 @@ struct HomeView: View {
                 if let system = model.system, system.ffmpeg == nil {
                     FFmpegBanner()
                 }
+                ForEach(model.monitor?.alerts.filter { $0.id != "system:ffmpeg" } ?? []) { alert in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Label(alert.title, systemImage: alert.isError ? "exclamationmark.octagon.fill" : "exclamationmark.triangle.fill")
+                            .font(.headline).foregroundStyle(alert.isError ? .red : .orange)
+                        Text(alert.detail).foregroundStyle(.secondary)
+                    }
+                    .padding(16).frame(maxWidth: .infinity, alignment: .leading).glassCard()
+                }
 
                 GlassGroup {
                     HStack(spacing: 14) {

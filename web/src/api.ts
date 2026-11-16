@@ -51,5 +51,40 @@ export const api = {
   del: <T = void,>(path: string) => request<T>('DELETE', path),
 };
 
+export interface Asset {
+  id: string;
+  /** Where the file is on the server: what a channel's picture option stores. */
+  path: string;
+  /** Preview address (needs the same sign-in as the rest of the API). */
+  url: string;
+  bytes: number;
+}
+
+/** Upload a picture (png, jpg, gif, webp; up to 12 MB). */
+export async function uploadAsset(file: File): Promise<Asset> {
+  let res: Response;
+  try {
+    res = await fetch(`/api/v1/assets?name=${encodeURIComponent(file.name)}`, {
+      method: 'POST',
+      headers: { 'content-type': file.type || 'application/octet-stream' },
+      body: file,
+      credentials: 'same-origin',
+    });
+  } catch {
+    throw new ApiError(0, 'Cannot reach the TVMaster server');
+  }
+  if (res.status === 401) unauthorized.dispatchEvent(new Event('unauthorized'));
+  const data = (await res.json().catch(() => undefined)) as (Asset & { error?: string }) | undefined;
+  if (!res.ok) throw new ApiError(res.status, data?.error ?? (res.status === 413 ? 'That picture is over 12 MB' : `${res.status} ${res.statusText}`));
+  return data as Asset;
+}
+
+/** The preview address of an uploaded picture, from the path stored in a channel's options. */
+export function assetUrlForPath(path: string | null | undefined): string | null {
+  if (!path) return null;
+  const m = /[\\/]assets[\\/]([A-Za-z0-9_.-]+\.(?:png|jpg|gif|webp))$/.exec(path);
+  return m ? `/api/v1/assets/${m[1]}` : null;
+}
+
 export const errorMessage = (e: unknown): string =>
   e instanceof Error ? e.message : String(e);

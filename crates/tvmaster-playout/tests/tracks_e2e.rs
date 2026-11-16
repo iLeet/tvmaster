@@ -558,6 +558,62 @@ async fn the_channel_bug_the_programme_card_and_the_look_are_on_the_picture() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_logo_picture_replaces_the_text_logo() {
+    let Some(rig) = rig("logo") else { return };
+    let black = make_media(&rig.media, "black.mkv", true, false);
+    // A wide red JPEG, as someone would upload.
+    let logo = rig.media.join("logo.jpg");
+    assert!(
+        ffmpeg(&[
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=red:s=400x200:d=1",
+            "-frames:v",
+            "1",
+            logo.to_str().unwrap(),
+        ]),
+        "make the logo picture"
+    );
+
+    let mut opts = ChannelOptions::default();
+    opts.overlay.bug.enabled = true;
+    opts.overlay.bug.image = Some(logo.to_string_lossy().to_string());
+    opts.overlay.bug.opacity = 100;
+    let (_, playlist) = rig
+        .air(
+            vec![show_item(&black, 1500, 12)],
+            opts,
+            SignOffStyle::Bars,
+            9,
+        )
+        .await;
+    // The picture sits in the top-right corner, well beyond where the text logo would be.
+    let area = brightness_series(&playlist, "crop=120:60:1060:50");
+    assert!(
+        area.iter().filter(|b| **b >= 20).count() >= 4,
+        "the red logo should be on screen: {area:?}"
+    );
+    rig.manager.stop("t");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // A picture that is gone falls back to the text logo instead of breaking the channel.
+    let mut opts = ChannelOptions::default();
+    opts.overlay.bug.enabled = true;
+    opts.overlay.bug.text = "ANIME 7".into();
+    opts.overlay.bug.image = Some("/no/such/logo.png".into());
+    let (_, playlist) = rig
+        .air(vec![show_item(&black, 0, 12)], opts, SignOffStyle::Bars, 8)
+        .await;
+    let text = brightness_series(&playlist, "crop=124:28:1132:24");
+    assert!(
+        text.iter().filter(|b| **b >= 6).count() >= 4,
+        "the text logo is used instead: {text:?}"
+    );
+    rig.finish();
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_channels_quality_sets_the_size_of_what_it_streams() {
     let Some(rig) = rig("quality") else { return };
     let file = make_media(&rig.media, "q.mkv", false, false);

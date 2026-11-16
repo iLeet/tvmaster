@@ -36,7 +36,7 @@ export function emptyOptions(): ChannelOptions {
     subtitles: { mode: 'off', languages: [], size: 'medium', style: 'outline' },
     video: { aspect: 'fit', deinterlace: 'auto', quality: '720', fps: null, kbps: null, look: 'none' },
     overlay: {
-      bug: { enabled: false, text: '', position: 'top_right', opacity: 60 },
+      bug: { enabled: false, text: '', image: null, position: 'top_right', opacity: 60 },
       clock: { enabled: false, position: 'bottom_right', hour12: true },
       show_title: { enabled: false, seconds: 8 },
     },

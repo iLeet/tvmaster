@@ -179,6 +179,76 @@ public struct TVMasterClient: Sendable {
     }
 
     public func auth() async throws -> AuthStatus { try await get("/auth") }
+    public func security() async throws -> SecurityStatus { try await get("/security") }
+
+    // MARK: monitoring
+
+    public func monitor() async throws -> MonitorState { try await get("/monitor") }
+
+    @discardableResult
+    public func setMonitor(_ s: MonitorSettings) async throws -> MonitorState {
+        var body: [String: JSONValue] = [
+            "watch_minutes": .number(Double(s.watchMinutes)), "alerts": .bool(s.alerts),
+            "webhook_text": .bool(s.webhookText), "notify_recovery": .bool(s.notifyRecovery),
+        ]
+        body["webhook"] = (s.webhook?.isEmpty ?? true) ? .null : .string(s.webhook!)
+        let data = try await send("PUT", "/monitor", body: .object(body))
+        do { return try Self.decoder.decode(MonitorState.self, from: data) } catch { throw TVMasterError.invalidResponse }
+    }
+
+    public func testWebhook() async throws { try await send("POST", "/monitor/test", body: .object([:])) }
+
+    public func rescanAllLibraries() async throws { try await send("POST", "/monitor/rescan", body: .object([:])) }
+
+    // MARK: pictures
+
+    /// Upload a png, jpg, gif or webp (up to 12 MB); the result's `path` goes into a channel's options.
+    public func uploadAsset(_ data: Data, name: String) async throws -> Asset {
+        var req = try makeRequest("POST", "/assets", query: [URLQueryItem(name: "name", value: name)])
+        req.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+        req.httpBody = data
+        req.timeoutInterval = 120
+        let (body, response): (Data, URLResponse)
+        do { (body, response) = try await session.data(for: req) } catch { throw mapped(error) }
+        guard let http = response as? HTTPURLResponse else { throw TVMasterError.invalidResponse }
+        if http.statusCode == 401 { throw TVMasterError.unauthorized }
+        guard (200..<300).contains(http.statusCode) else {
+            let message = (try? JSONDecoder().decode([String: String].self, from: body))?["error"] ?? "Server error \(http.statusCode)"
+            throw TVMasterError.http(http.statusCode, message)
+        }
+        do { return try Self.decoder.decode(Asset.self, from: body) } catch { throw TVMasterError.invalidResponse }
+    }
+
+    public func assets() async throws -> [Asset] { try await get("/assets") }
+
+    // MARK: guide preview
+
+    /// A PNG of a guide as it would look with these settings (nothing needs saving).
+    public func guidePreview(id: String, name: String, guide: JSONValue) async throws -> Data {
+        try await send("POST", "/guide/preview", body: .object(["id": .string(id), "name": .string(name), "guide": guide, "t": .number(3)]))
+    }
+
+    /// The bytes of an uploaded picture, for a preview.
+    public func assetData(id: String) async throws -> Data { try await send("GET", "/assets/\(id)") }
+
+    /// The id of an uploaded picture from the path stored in a channel's options (nil for any other file).
+    public static func assetID(forPath path: String) -> String? {
+        let comps = path.split(whereSeparator: { $0 == "/" || $0 == "\\" })
+        guard comps.count >= 2, comps[comps.count - 2] == "assets", let last = comps.last else { return nil }
+        let id = String(last)
+        let ok = id.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || "-_.".contains($0)) }
+        guard ok, !id.contains(".."), ["png", "jpg", "gif", "webp"].contains(id.split(separator: ".").last.map(String.init) ?? "") else { return nil }
+        return id
+    }
+
+    /// Turn the access token on or off, or replace it. Returns the state after the change.
+    @discardableResult
+    public func setSecurity(enabled: Bool, token: String? = nil, rotate: Bool = false) async throws -> SecurityStatus {
+        var body: [String: JSONValue] = ["enabled": .bool(enabled), "rotate": .bool(rotate)]
+        if let token, !token.isEmpty { body["token"] = .string(token) }
+        let data = try await send("PUT", "/security", body: .object(body))
+        do { return try Self.decoder.decode(SecurityStatus.self, from: data) } catch { throw TVMasterError.invalidResponse }
+    }
     public func system() async throws -> SystemInfo { try await get("/system") }
 
     public func channels() async throws -> [Channel] { try await get("/channels") }

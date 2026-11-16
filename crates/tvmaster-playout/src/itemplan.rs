@@ -119,6 +119,72 @@ async fn graphic(cfg: &EngineConfig, what: &str, name: &str, png: &[u8]) -> Opti
     Some(path)
 }
 
+/// A logo picture of any common format, fitted into a corner-sized box with
+/// the channel's logo opacity, as a PNG FFmpeg can overlay. Made once per
+/// picture (changing the file or the settings makes a new one); `None` when the
+/// file is missing or FFmpeg cannot read it, so the text logo is used instead.
+async fn logo_png(cfg: &EngineConfig, src: &Path, opacity: u8) -> Option<PathBuf> {
+    let (w, h) = (cfg.profile.width * 22 / 100, cfg.profile.height * 16 / 100);
+    fit_picture(cfg, src, w, h, opacity).await
+}
+
+/// `src` (any common picture format) fitted inside `w` x `h` pixels, with the
+/// given opacity, as a PNG in the cache. `None` when it cannot be read.
+pub(crate) async fn fit_picture(
+    cfg: &EngineConfig,
+    src: &Path,
+    w: u32,
+    h: u32,
+    opacity: u8,
+) -> Option<PathBuf> {
+    let meta = tokio::fs::metadata(src)
+        .await
+        .ok()
+        .filter(|m| m.is_file())?;
+    let stamp = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(0, |d| d.as_secs());
+    let key = format!("{}|{}|{stamp}|{opacity}|{w}x{h}", src.display(), meta.len());
+    let dir = cache_dir(cfg, "logos");
+    tokio::fs::create_dir_all(&dir).await.ok()?;
+    let path = dir.join(format!("{:016x}.png", fnv1a(&key)));
+    if path.exists() {
+        return Some(path);
+    }
+    let tmp = path.with_extension("part.png");
+    let alpha = f64::from(opacity.clamp(10, 100)) / 100.0;
+    let out = Command::new(&cfg.ffmpeg)
+        .args(["-v", "error", "-y", "-i"])
+        .arg(src)
+        .args([
+            "-vf",
+            &format!(
+                "scale=w={w}:h={h}:force_original_aspect_ratio=decrease:flags=lanczos,format=rgba,colorchannelmixer=aa={alpha}"
+            ),
+            "-frames:v",
+            "1",
+            "-update",
+            "1",
+        ])
+        .arg(&tmp)
+        .output()
+        .await
+        .ok()?;
+    if !out.status.success() {
+        tracing::warn!(
+            "logo picture {} could not be used: {}",
+            src.display(),
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+        let _ = tokio::fs::remove_file(&tmp).await;
+        return None;
+    }
+    tokio::fs::rename(&tmp, &path).await.ok()?;
+    Some(path)
+}
+
 /// Everything about how this item should look and sound.
 pub(crate) async fn plan_item(
     cfg: &EngineConfig,
@@ -188,7 +254,19 @@ pub(crate) async fn plan_item(
 
     // Graphics over the picture.
     let ov = &opts.overlay;
-    if ov.bug.enabled {
+    let logo = match ov.bug.image.as_deref().filter(|p| !p.trim().is_empty()) {
+        Some(src) if ov.bug.enabled => logo_png(cfg, Path::new(src), ov.bug.opacity).await,
+        _ => None,
+    };
+    if let Some(png) = logo {
+        let (x, y) = corner_xy(ov.bug.position, 24);
+        plan.overlays.push(OverlayInput {
+            png,
+            x,
+            y,
+            enable: None,
+        });
+    } else if ov.bug.enabled {
         let text = if ov.bug.text.trim().is_empty() {
             format!("{} {}", spec.number, spec.name)
         } else {

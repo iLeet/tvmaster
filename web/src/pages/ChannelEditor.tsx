@@ -2,11 +2,13 @@ import { useEffect, useMemo, useState } from 'react';
 import { api, errorMessage } from '../api';
 import { emptyLineup, lineupSummary, nextFreeNumber, slugify, validateId } from '../lib';
 import { useQuery } from '../live';
+import { emptyGuide, guideProblem, withGuideDefaults } from '../guide';
 import { emptyOptions, langName, withDefaults } from '../options';
 import { href, navigate } from '../router';
 import type { Channel, ChannelOptions, ChannelView, GuideConfig, Library, RunOut, ShowSummary, Strategy, System } from '../types';
 import { Badge, Btn, Card, Chips, ConfirmBtn, Field, Segmented, Spinner, Toggle, useToast } from '../ui';
 import { AdsEditor } from './AdsEditor';
+import { GuideEditor } from './GuideEditor';
 import { LineupEditor } from './LineupEditor';
 import { PictureSound } from './PictureSound';
 
@@ -51,7 +53,7 @@ const RUN_OUT: { value: RunOut; label: string; help: string }[] = [
 
 const fromChannel = (c: Channel): Draft => ({
   id: c.id, number: c.number, name: c.name, group: c.group ?? '', kind: c.kind, strategy: c.strategy, run_out: c.run_out,
-  chaos: c.chaos, autopilot: c.autopilot, always_on: c.always_on, library_ids: c.library_ids, lineup: { ...c.lineup, signoff: c.lineup.signoff ?? null }, guide: c.guide, options: withDefaults(c.options),
+  chaos: c.chaos, autopilot: c.autopilot, always_on: c.always_on, library_ids: c.library_ids, lineup: { ...c.lineup, signoff: c.lineup.signoff ?? null }, guide: withGuideDefaults(c.guide), options: withDefaults(c.options),
 });
 
 export function ChannelEditor({ id, tab }: { id: string; tab: string }) {
@@ -76,7 +78,7 @@ export function ChannelEditor({ id, tab }: { id: string; tab: string }) {
       const d: Draft = {
         id: '', number: nextFreeNumber(all.data.map((c) => c.number)), name: '', group: '', kind: 'programming', strategy: 'sequential',
         run_out: 'keep_going', chaos: 0, autopilot: true, always_on: false, library_ids: [], lineup: emptyLineup(sys.data.timezone),
-        guide: { hours: 3, title: null, ticker: [], music_library_ids: [] }, options: emptyOptions(),
+        guide: emptyGuide(), options: emptyOptions(),
       };
       setDraft(d);
       setSaved(JSON.stringify(d));
@@ -105,7 +107,8 @@ export function ChannelEditor({ id, tab }: { id: string; tab: string }) {
   const showLibs = (libs.data ?? []).filter((l) => l.kind === 'shows');
   const idError = isNew ? validateId(draft.id) : null;
   const numberTaken = (all.data ?? []).some((c) => c.number === draft.number && c.id !== draft.id);
-  const canSave = dirty && !saving && draft.name.trim() !== '' && !idError && draft.number > 0 && !numberTaken;
+  const problem = draft.kind === 'guide' ? guideProblem(draft.guide) : null;
+  const canSave = dirty && !saving && draft.name.trim() !== '' && !idError && draft.number > 0 && !numberTaken && !problem;
 
   const save = async () => {
     setSaving(true);
@@ -154,6 +157,7 @@ export function ChannelEditor({ id, tab }: { id: string; tab: string }) {
       </div>
 
       {error && <div className="err-banner">{error}</div>}
+      {!error && problem && <div className="err-banner">{problem}</div>}
 
       <div className="tabs" role="tablist">
         {tabs.map(([t, label]) => (
@@ -253,30 +257,7 @@ export function ChannelEditor({ id, tab }: { id: string; tab: string }) {
       )}
 
       {shownTab === 'guide' && draft.kind === 'guide' && (
-        <Card className="stack">
-          <h2>Guide channel</h2>
-          <p className="small dim">A live, scrolling listing of every programming channel with a clock and a "now on" ticker. It needs no libraries.</p>
-          <div className="row wrap" style={{ alignItems: 'flex-start' }}>
-            <Field label="Hours shown">
-              <select className="select" style={{ width: 120 }} value={draft.guide.hours} onChange={(e) => set({ guide: { ...draft.guide, hours: Number(e.target.value) } })}>
-                {[2, 3, 4, 5, 6].map((h) => <option key={h} value={h}>{h} hours</option>)}
-              </select>
-            </Field>
-            <Field label="Heading" hint="Blank = “<name> GUIDE”">
-              <input className="input" style={{ width: 280 }} value={draft.guide.title ?? ''} onChange={(e) => set({ guide: { ...draft.guide, title: e.target.value || null } })} />
-            </Field>
-          </div>
-          <Field label="Ticker lines" hint="One per line. They scroll along the bottom, followed by what is on now on every channel.">
-            <textarea className="input" value={draft.guide.ticker.join('\n')} onChange={(e) => set({ guide: { ...draft.guide, ticker: e.target.value.split('\n').filter((l) => l.trim() !== '') } })} />
-          </Field>
-          <Field label="Background music" hint={(libs.data ?? []).some((l) => l.kind === 'music') ? 'Loops under the guide.' : 'Add a library of kind "Music" to play music under the guide.'}>
-            <Chips
-              options={(libs.data ?? []).filter((l) => l.kind === 'music').map((l) => ({ value: l.id, label: `${l.path.split(/[\\/]/).filter(Boolean).pop() ?? l.path} (${l.items})` }))}
-              value={draft.guide.music_library_ids}
-              onToggle={(lid) => set({ guide: { ...draft.guide, music_library_ids: draft.guide.music_library_ids.includes(lid) ? draft.guide.music_library_ids.filter((x) => x !== lid) : [...draft.guide.music_library_ids, lid] } })}
-            />
-          </Field>
-        </Card>
+        <GuideEditor id={draft.id} name={draft.name} guide={draft.guide} onChange={(guide) => set({ guide })} channels={all.data ?? []} libs={libs.data ?? []} />
       )}
     </div>
   );

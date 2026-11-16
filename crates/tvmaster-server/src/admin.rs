@@ -219,7 +219,7 @@ pub async fn system(State(s): State<AppState>) -> Json<Value> {
         "timezone": crate::channels::system_timezone(),
         "ffmpeg": ffmpeg,
         "on_air": s.playout.as_ref().map(|p| p.running()).unwrap_or_default(),
-        "auth_required": s.token.is_some(),
+        "auth_required": s.token().is_some(),
         "network": network_json(&s.network),
     }))
 }

@@ -111,18 +111,49 @@ export interface ChannelOptions {
   subtitles: { mode: SubMode; languages: string[]; size: 'small' | 'medium' | 'large'; style: 'outline' | 'box' };
   video: { aspect: Aspect; deinterlace: 'auto' | 'off' | 'always'; quality: '480' | '720' | '1080'; fps: number | null; kbps: number | null; look: Look };
   overlay: {
-    bug: { enabled: boolean; text: string; position: Corner; opacity: number };
+    bug: { enabled: boolean; text: string; image: string | null; position: Corner; opacity: number };
     clock: { enabled: boolean; position: Corner; hour12: boolean };
     show_title: { enabled: boolean; seconds: number };
   };
   shows: Record<string, ShowOptions>;
 }
 
+export type GuideTheme = 'auto' | 'prevue' | 'amber' | 'phosphor' | 'neon' | 'sunset' | 'ocean' | 'slate' | 'paper' | 'custom';
+export type PipMode = 'off' | 'channel' | 'rotate';
+export type PipPlacement = 'top_left' | 'top_right' | 'side_left' | 'side_right';
+
 export interface GuideConfig {
   hours: number;
   title: string | null;
   ticker: string[];
   music_library_ids: number[];
+  theme: GuideTheme;
+  colors: { primary: string | null; accent: string | null };
+  layout: {
+    style: 'grid' | 'now_next';
+    rows: number;
+    scroll: 'page' | 'smooth';
+    page_seconds: number;
+    time_step: 15 | 30 | 60;
+    channel_numbers: boolean;
+    channel_names: boolean;
+    progress: boolean;
+    scanlines: boolean;
+  };
+  header: { title: boolean; clock: boolean; date: boolean; hour12: boolean; logo: string | null };
+  ticker_options: { enabled: boolean; speed: 'slow' | 'normal' | 'fast'; now_on: boolean };
+  /** Only these channels, in this order; empty = every programming channel. */
+  channels: string[];
+  pip: {
+    mode: PipMode;
+    channel: string | null;
+    channels: string[];
+    seconds: number;
+    placement: PipPlacement;
+    size: 'small' | 'medium' | 'large';
+    audio: 'music' | 'channel';
+    info: boolean;
+  };
 }
 
 export type Strategy = 'sequential' | 'shuffle' | 'chaos' | 'block_grid';
@@ -238,6 +269,37 @@ export interface ScheduleItem {
 export interface Cursor {
   reserved: number;
   committed: number;
+}
+
+export interface Alert {
+  id: string;
+  severity: 'error' | 'warning';
+  title: string;
+  detail: string;
+  since_ms: number;
+}
+
+export interface MonitorSettings {
+  watch_minutes: number;
+  alerts: boolean;
+  webhook: string | null;
+  webhook_text: boolean;
+  notify_recovery: boolean;
+}
+
+export interface MonitorState {
+  settings: MonitorSettings;
+  alerts: Alert[];
+  rescans: Record<string, { at_ms: number; added: number; removed: number; back: number }>;
+  /** `curl` is available to send the webhook. */
+  curl: boolean;
+}
+
+export interface SecurityStatus {
+  enabled: boolean;
+  /** Set with --token on the command line, so it cannot be changed here. */
+  locked: boolean;
+  token: string | null;
 }
 
 export interface AuthStatus {

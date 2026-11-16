@@ -52,15 +52,44 @@
   body.tv #side, body.tv #bar { display: none; }
   body.tv { padding: 0; } body.tv #stage { border-radius: 0; }
   @media (max-width: 760px) { body:not(.remote) { flex-direction: column; } #side { width: 100%; max-height: 40vh; } }
+  /* Overlays: the channel banner, number entry and channel list. Used on every screen, sized for the couch on a TV. */
+  #banner { position: absolute; left: 4%; right: 4%; bottom: 6%; display: none; gap: 22px; align-items: center; padding: 18px 26px;
+    border-radius: 22px; background: rgba(8,10,16,.82); border: 1px solid var(--edge); color: #fff; }
+  #banner.show { display: flex; }
+  #banner .b-num { font-size: 56px; font-weight: 800; color: var(--accent); min-width: 2.2ch; text-align: center; }
+  #banner .b-name { font-size: 28px; font-weight: 700; } #banner .b-now { font-size: 22px; } #banner .b-next { font-size: 18px; color: var(--dim); }
+  #entry { position: absolute; top: 5%; right: 5%; padding: 10px 24px; border-radius: 16px; background: rgba(8,10,16,.82); color: #fff;
+    font-size: 64px; font-weight: 800; letter-spacing: .08em; display: none; font-variant-numeric: tabular-nums; }
+  #entry.show { display: block; } #entry small { display: block; font-size: 16px; font-weight: 500; letter-spacing: 0; color: var(--dim); }
+  #picker { position: absolute; top: 0; bottom: 0; left: 0; width: min(560px, 80%); display: none; flex-direction: column; padding: 22px 18px;
+    background: linear-gradient(90deg, rgba(6,8,14,.94), rgba(6,8,14,.80) 85%, rgba(6,8,14,0)); color: #fff; }
+  #picker.show { display: flex; } #picker h1 { color: #cbd3e1; font-size: 15px; margin: 0 8px 10px; }
+  #plist { overflow: hidden; flex: 1; }
+  #plist .row { display: flex; gap: 16px; align-items: center; padding: 10px 14px; border-radius: 14px; font-size: 22px; border: 2px solid transparent; }
+  #plist .row.sel { background: color-mix(in srgb, var(--accent) 30%, rgba(0,0,0,.4)); border-color: var(--accent); }
+  #plist .row.cur .num::after { content: " ●"; font-size: 12px; vertical-align: middle; }
+  #plist .num { min-width: 2.4ch; font-weight: 800; color: var(--accent); font-size: 26px; }
+  #plist .nm { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #plist .nw { font-size: 16px; color: #aab3c4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #plist .col { min-width: 0; }
+  #hint { position: absolute; bottom: 14px; left: 20px; right: 20px; text-align: center; color: #9aa3b2; font-size: 15px; }
+  #start { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.6); color: #fff; font-size: 30px; font-weight: 700; text-align: center; padding: 0 8%; }
+  #start.show { display: flex; }
+  body.tvui { padding: 0; cursor: none; overflow: hidden; } body.tvui #side, body.tvui #bar { display: none; } body.tvui #stage { border-radius: 0; }
+  body.tvui #screen { gap: 0; }
 </style>
 </head>
 <body>
 <div id="screen">
-  <div id="stage"><video id="v" autoplay playsinline></video><div id="osd"></div><div id="off">Off</div></div>
+  <div id="stage"><video id="v" autoplay playsinline></video><div id="osd"></div><div id="off">Off</div>
+    <div id="banner"><div class="b-num"></div><div><div class="b-name"></div><div class="b-now"></div><div class="b-next"></div></div></div>
+    <div id="entry"></div>
+    <div id="picker"><h1>Channels</h1><div id="plist"></div><div id="hint">▲▼ choose · OK watch · Back close</div></div>
+    <div id="start">Press OK to start</div></div>
   <div id="bar" class="glass"><div><div class="t" id="t">TVMaster</div><div class="s" id="s">Pick a channel</div></div></div>
 </div>
 <aside id="side" class="glass"><h1>Channels</h1><div id="list"></div>
-  <div class="hint">↑ / ↓ change channel · F fullscreen</div></aside>
+  <div class="hint">↑ / ↓ or PageUp / PageDown change channel · type a number · Enter list · F fullscreen</div></aside>
 <div id="remote" class="glass">
   <h1 id="rtitle">Remote</h1>
   <div class="row"><button class="big" id="rup">Ch ▲</button><button class="big" id="rdown">Ch ▼</button></div>
@@ -68,15 +97,27 @@
   <div class="row"><button class="big" id="rpower">Power</button></div>
   <div id="rlist"></div>
 </div>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.17/hls.min.js"></script>
+<script src="/admin/vendor/hls.min.js"></script>
 <script>
 const q = new URLSearchParams(location.search);
 const tvId = q.get('tv'), remoteId = q.get('remote');
 const $ = id => document.getElementById(id);
 const v = $('v');
-let channels = [], current = null, hls = null, osdTimer = null, tvState = null, ws = null, wsOk = false;
+let channels = [], current = null, previous = null, hls = null, osdTimer = null, tvState = null, ws = null, wsOk = false;
+// A TV's own browser (Samsung, LG, Android TV, Fire TV, ...) or ?ui=tv gets the full-screen, remote-friendly screen.
+const TV_UA = /Tizen|Web0S|webOS|SMART-TV|SmartTV|VIDAA|HbbTV|BRAVIA|AFTM|AFTT|AFTS|Android.*(TV|AFT)|CrKey|NetCast|Hisense|Roku/i;
+const tvui = q.get('ui') === 'tv' || (q.get('ui') !== 'off' && TV_UA.test(navigator.userAgent));
+const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, x) { try { localStorage.setItem(k, x); } catch {} } };
 
-const api = (p, opt) => fetch('/api/v1' + p, opt).then(r => r.ok ? r.json() : Promise.reject(r));
+// A server with an access token: the address carries it once (?token=), the page remembers it and presents
+// it everywhere, including to a TV's own video player, which cannot use a browser sign-in.
+let token = q.get('token') || '';
+if (token) { try { localStorage.setItem('tvmaster.token', token); } catch {} history.replaceState(null, '', location.pathname + location.hash); }
+else { try { token = localStorage.getItem('tvmaster.token') || ''; } catch {} }
+const tq = token ? `?token=${encodeURIComponent(token)}` : '';
+const auth = opt => token ? { ...(opt || {}), headers: { ...((opt && opt.headers) || {}), authorization: 'Bearer ' + token } } : opt;
+const needToken = () => { $('start').textContent = token ? 'That access token is not right' : 'This server needs its access token. Open this page once with ?token=YOUR_TOKEN on the end.'; $('start').classList.add('show'); };
+const api = (p, opt) => fetch('/api/v1' + p, auth(opt)).then(r => r.ok ? r.json() : (r.status === 401 && needToken(), Promise.reject(r)));
 const post = (p, body) => api(p, { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify(body) });
 const fmt = ms => new Date(ms).toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
 const label = p => p ? (p.show ? `${p.show} — ${p.title}` : p.title) : '—';
@@ -88,16 +129,20 @@ function osd(text) {
 
 function play(ch) {
   if (!ch || (current && current.id === ch.id && !v.paused)) return;
+  if (current && current.id !== ch.id) previous = current;
   current = ch;
-  const url = `/stream/${ch.id}/index.m3u8`;
+  if (!tvId && !remoteId) store.set('tvmaster.channel', ch.id);
+  const url = `/stream/${ch.id}/index.m3u8${tq}`;
   if (hls) { hls.destroy(); hls = null; }
+  // hls.js where the browser can run it (it is forgiving of small timestamp wobbles at the joins
+  // between programmes, which strict built-in HLS players are not); the browser's own HLS otherwise (iPhone, iPad).
   if (window.Hls && Hls.isSupported()) {
     hls = new Hls({ liveSyncDurationCount: 3, maxBufferLength: 20 });
     hls.loadSource(url); hls.attachMedia(v);
     hls.on(Hls.Events.ERROR, (_, d) => { if (d.fatal) setTimeout(() => { const c = current; current = null; play(c); }, 3000); });
   } else { v.src = url; }   // Safari plays HLS natively
-  v.play().catch(() => {});
-  osd(`${ch.number}  ${ch.name}`);
+  v.play().then(() => $('start').classList.remove('show')).catch(() => $('start').classList.add('show'));
+  tvui ? banner() : osd(`${ch.number}  ${ch.name}`);
   render();
 }
 
@@ -166,7 +211,7 @@ function sendTv(fields) {
 function connect() {
   if (!tvId && !remoteId) { /* the plain player still listens for programme changes */ }
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  ws = new WebSocket(`${proto}://${location.host}/api/v1/ws`);
+  ws = new WebSocket(`${proto}://${location.host}/api/v1/ws${tq}`);
   ws.onopen = () => {
     wsOk = true;
     if (tvId) ws.send(JSON.stringify({ type: 'hello', tv: tvId }));
@@ -226,12 +271,113 @@ function renderRemote() {
   }));
 }
 
+// ---- The remote: channel keys, number entry, the channel list ----
+let entry = '', entryTimer = null, bannerTimer = null, pickerOpen = false, pickIndex = 0, pickerTimer = null;
+
+function banner() {
+  const c = current && (channels.find(x => x.id === current.id) || current);
+  if (!c) return;
+  const b = $('banner');
+  b.querySelector('.b-num').textContent = c.number;
+  b.querySelector('.b-name').textContent = c.name;
+  b.querySelector('.b-now').textContent = c.kind === 'guide' ? 'Live guide' : c.now ? `Now: ${label(c.now)}` : '';
+  b.querySelector('.b-next').textContent = c.next ? `Next ${fmt(c.next.start_ms)}: ${label(c.next)}` : '';
+  b.classList.add('show');
+  clearTimeout(bannerTimer); bannerTimer = setTimeout(() => b.classList.remove('show'), 4500);
+}
+
+function goTo(ch) { if (ch) selectChannel(ch); }
+
+function typeDigit(d) {
+  entry = (entry + d).slice(0, 4);
+  const e = $('entry'); e.innerHTML = `${entry}<small>${(channels.find(c => String(c.number) === entry) || {}).name || 'Channel'}</small>`; e.classList.add('show');
+  clearTimeout(entryTimer); entryTimer = setTimeout(commitEntry, 1600);
+}
+function commitEntry() {
+  clearTimeout(entryTimer);
+  const n = entry; entry = ''; $('entry').classList.remove('show');
+  if (!n) return;
+  const ch = channels.find(c => String(c.number) === String(Number(n)));
+  if (ch) goTo(ch); else { const o = $('osd'); o.textContent = `No channel ${Number(n)}`; o.classList.add('show'); clearTimeout(osdTimer); osdTimer = setTimeout(() => o.classList.remove('show'), 2000); }
+}
+
+function renderPicker() {
+  const l = $('plist'); l.innerHTML = '';
+  // Show a window of rows around the highlighted one so a long list stays on screen.
+  const rows = Math.max(5, Math.floor(($('stage').clientHeight - 120) / 72));
+  const first = Math.max(0, Math.min(pickIndex - Math.floor(rows / 2), channels.length - rows));
+  channels.slice(first, first + rows).forEach((c, i) => {
+    const r = document.createElement('div');
+    r.className = 'row' + (first + i === pickIndex ? ' sel' : '') + (current && current.id === c.id ? ' cur' : '');
+    r.innerHTML = '<span class="num"></span><span class="col"><div class="nm"></div><div class="nw"></div></span>';
+    r.querySelector('.num').textContent = c.number;
+    r.querySelector('.nm').textContent = c.name;
+    r.querySelector('.nw').textContent = c.kind === 'guide' ? 'Live guide' : c.now ? label(c.now) : '';
+    r.onclick = () => { pickIndex = first + i; pickerSelect(); };
+    l.appendChild(r);
+  });
+}
+function openPicker() {
+  if (!channels.length) return;
+  pickerOpen = true; pickIndex = Math.max(0, current ? channels.findIndex(c => c.id === current.id) : 0);
+  $('banner').classList.remove('show'); $('picker').classList.add('show'); renderPicker(); touchPicker();
+}
+function closePicker() { pickerOpen = false; $('picker').classList.remove('show'); clearTimeout(pickerTimer); }
+function touchPicker() { clearTimeout(pickerTimer); pickerTimer = setTimeout(closePicker, 15000); }
+function pickerSelect() { const c = channels[pickIndex]; closePicker(); goTo(c); }
+
+function keyName(e) {
+  const k = e.key, c = e.keyCode;
+  if (/^[0-9]$/.test(k)) return 'digit';
+  if (k === 'ChannelUp' || c === 427 || c === 166 || k === 'PageUp' || c === 33) return 'chup';
+  if (k === 'ChannelDown' || c === 428 || c === 167 || k === 'PageDown' || c === 34) return 'chdown';
+  if (k === 'ArrowUp' || c === 38) return 'up';
+  if (k === 'ArrowDown' || c === 40) return 'down';
+  if (k === 'ArrowLeft' || c === 37) return 'left';
+  if (k === 'ArrowRight' || c === 39) return 'right';
+  if (k === 'Enter' || c === 13 || c === 29443) return 'ok';
+  if (k === 'Escape' || k === 'GoBack' || k === 'BrowserBack' || c === 10009 || c === 461 || c === 27) return 'back';
+  if (k === 'Info' || c === 457 || k === 'i' || c === 405) return 'info';
+  if (k === 'ColorF0Red' || c === 403) return 'list';
+  if (k === 'ColorF1Green' || c === 404) return 'guide';
+  if (k === 'MediaPlayPause' || k === 'MediaPlay' || k === 'MediaPause' || c === 415 || c === 19 || c === 179 || c === 10252) return 'playpause';
+  if (k === 'f' || c === 406) return 'fullscreen';
+  return '';
+}
+
 addEventListener('keydown', e => {
-  if (remoteId) return;
-  if (e.key === 'ArrowUp') step('up');
-  else if (e.key === 'ArrowDown') step('down');
-  else if (e.key === 'f') (document.fullscreenElement ? document.exitFullscreen() : $('stage').requestFullscreen());
+  if (remoteId || e.altKey || e.ctrlKey || e.metaKey) return;
+  const key = keyName(e);
+  if (!key) return;
+  // On a computer the side list keeps Enter, Left, Right and Escape for itself.
+  if (!tvui && !pickerOpen && ['ok', 'left', 'right', 'list', 'back'].includes(key) && !$('start').classList.contains('show')) return;
+  if ($('start').classList.contains('show') && key === 'ok') { e.preventDefault(); v.muted = false; v.play().then(() => $('start').classList.remove('show')).catch(() => {}); return; }
+  if (pickerOpen) {
+    e.preventDefault(); touchPicker();
+    if (key === 'up' || key === 'chup') pickIndex = (pickIndex - 1 + channels.length) % channels.length;
+    else if (key === 'down' || key === 'chdown') pickIndex = (pickIndex + 1) % channels.length;
+    else if (key === 'ok' || key === 'right') return pickerSelect();
+    else if (key === 'back' || key === 'left' || key === 'list') return closePicker();
+    else if (key === 'digit') { closePicker(); return typeDigit(e.key); }
+    renderPicker(); return;
+  }
+  if (entry && key === 'ok') { e.preventDefault(); return commitEntry(); }
+  switch (key) {
+    case 'digit': e.preventDefault(); typeDigit(e.key); break;
+    case 'up': case 'chup': e.preventDefault(); step('up'); break;
+    case 'down': case 'chdown': e.preventDefault(); step('down'); break;
+    case 'left': if (previous) { e.preventDefault(); goTo(channels.find(c => c.id === previous.id)); } break;
+    case 'right': case 'ok': case 'list': e.preventDefault(); openPicker(); break;
+    case 'info': e.preventDefault(); banner(); break;
+    case 'guide': { const g = channels.find(c => c.kind === 'guide'); if (g) { e.preventDefault(); goTo(g); } break; }
+    case 'playpause': e.preventDefault(); v.paused ? v.play().catch(() => {}) : v.pause(); break;
+    case 'fullscreen': document.fullscreenElement ? document.exitFullscreen() : $('stage').requestFullscreen().catch(() => {}); break;
+    case 'back': if (entry) { entry = ''; $('entry').classList.remove('show'); e.preventDefault(); } break;
+  }
 });
+// Keep the TV awake while a channel is on.
+async function keepAwake() { try { if (navigator.wakeLock) await navigator.wakeLock.request('screen'); } catch {} }
+document.addEventListener('visibilitychange', () => { if (!document.hidden && tvui) keepAwake(); });
 
 (async function main() {
   if (remoteId) {
@@ -252,7 +398,14 @@ addEventListener('keydown', e => {
     await api(`/tvs/${tvId}`).catch(() => post('/tvs', { id: tvId, name: tvId }).catch(() => {}));
     connect(); await pollTv(); setInterval(pollTv, 5000);
     try { applyTv(await api(`/tvs/${tvId}`)); } catch {}
-  } else { connect(); if (channels.length) play(channels[0]); }
+  } else {
+    connect();
+    if (tvui) { document.body.classList.add('tvui'); keepAwake(); }
+    // Start where you left off (or on the channel in ?channel=), else the first.
+    const want = q.get('channel'), last = store.get('tvmaster.channel');
+    const start = channels.find(c => String(c.number) === want || c.id === want) || channels.find(c => c.id === last) || channels[0];
+    if (start) play(start);
+  }
   setInterval(refresh, 30000);
 })();
 </script>

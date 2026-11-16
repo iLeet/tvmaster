@@ -12,6 +12,41 @@ struct Runner {
     cancel: CancellationToken,
     last_access_ms: Arc<AtomicI64>,
     always_on: bool,
+    health: Arc<Health>,
+}
+
+/// How a channel's playout has been doing: failures it recovered from, and the last reason.
+#[derive(Default)]
+pub struct Health {
+    failures: Mutex<Vec<(i64, String)>>,
+}
+
+/// What [`Manager::health`] reports.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChannelHealth {
+    /// Times playout failed and had to restart in the last ten minutes.
+    pub recent_failures: usize,
+    /// Why it last failed.
+    pub last_error: Option<String>,
+}
+
+impl Health {
+    pub(crate) fn record_failure(&self, error: String) {
+        let now = now_ms();
+        let mut f = self.failures.lock().unwrap();
+        f.retain(|(t, _)| now - t < 10 * 60_000);
+        f.push((now, error));
+    }
+
+    fn snapshot(&self) -> ChannelHealth {
+        let now = now_ms();
+        let f = self.failures.lock().unwrap();
+        let recent: Vec<&(i64, String)> = f.iter().filter(|(t, _)| now - t < 10 * 60_000).collect();
+        ChannelHealth {
+            recent_failures: recent.len(),
+            last_error: recent.last().map(|(_, e)| e.clone()),
+        }
+    }
 }
 
 pub struct Manager {
@@ -70,6 +105,15 @@ impl Manager {
         }
     }
 
+    /// How a channel on air has been doing (`None` when it is not on air).
+    pub fn health(&self, channel_id: &str) -> Option<ChannelHealth> {
+        self.runners
+            .lock()
+            .unwrap()
+            .get(channel_id)
+            .map(|r| r.health.snapshot())
+    }
+
     pub fn is_running(&self, channel_id: &str) -> bool {
         self.runners.lock().unwrap().contains_key(channel_id)
     }
@@ -87,6 +131,7 @@ impl Manager {
             return false;
         }
         let cancel = CancellationToken::new();
+        let health = Arc::new(Health::default());
         let last_access_ms = Arc::new(AtomicI64::new(now_ms()));
         runners.insert(
             spec.id.clone(),
@@ -94,6 +139,7 @@ impl Manager {
                 cancel: cancel.clone(),
                 last_access_ms,
                 always_on: spec.always_on,
+                health: health.clone(),
             },
         );
         let dir = self.hls_dir(&spec.id);
@@ -101,7 +147,13 @@ impl Manager {
         // deleted, and a client that fetched it would get 404s.
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::create_dir_all(&dir);
-        tokio::spawn(run_forever(self.cfg.clone(), Arc::new(spec), dir, cancel));
+        tokio::spawn(run_forever(
+            self.cfg.clone(),
+            Arc::new(spec),
+            dir,
+            cancel,
+            health,
+        ));
         true
     }
 

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { SCREENS, setShowOption, showOverride } from '../options';
 import type { ChannelOptions, Corner, Lineup, ShowSummary, SignOff, System } from '../types';
 import { Badge, Card, Field, Segmented, Toggle } from '../ui';
+import { PictureField } from '../PictureField';
 import { ASPECTS, LanguageList, LOOKS, ShowSettingsRow, SUB_MODES } from './ShowSettings';
 
 const CORNERS: { value: Corner; label: string }[] = [
@@ -42,8 +43,8 @@ export function PictureSound({
         <Field label="Message" hint="Blank = PLEASE STAND BY."><input className="input" style={{ maxWidth: 360 }} maxLength={60} placeholder="PLEASE STAND BY" value={o.off_air.message} onChange={(e) => patch('off_air', { message: e.target.value })} /></Field>
       )}
       {o.off_air.screen === 'image' && (
-        <Field label="Picture file" hint="The full path of a png, jpg, gif or webp on the machine running TVMaster. It is fitted to the screen.">
-          <input className="input mono" placeholder="/path/to/picture.png" value={o.off_air.image ?? ''} onChange={(e) => patch('off_air', { image: e.target.value || null })} />
+        <Field label="Picture" hint="A png, jpg, gif or webp, fitted to the screen. It is uploaded to the server, so it keeps working if you move files around.">
+          <PictureField value={o.off_air.image} onChange={(image) => patch('off_air', { image })} />
         </Field>
       )}
       <Toggle checked={o.off_air.tone} onChange={(tone) => patch('off_air', { tone })} label={<span>Test tone <span className="dim small">{o.off_air.screen === 'static' ? 'hiss with the snow' : 'a steady 1 kHz tone, like a real test pattern'}</span></span>} />
@@ -123,7 +124,8 @@ export function PictureSound({
         <Toggle checked={o.overlay.bug.enabled} onChange={(v) => patch('overlay', { bug: { ...o.overlay.bug, enabled: v } })} label={<span><strong>Channel logo</strong> <span className="dim">in a corner of the picture</span></span>} />
         {o.overlay.bug.enabled && (
           <div className="row wrap nest" style={{ alignItems: 'flex-end' }}>
-            <Field label="Text" hint="Blank = number and name."><input className="input" style={{ width: 200 }} maxLength={24} placeholder="4 Retro TV" value={o.overlay.bug.text} onChange={(e) => patch('overlay', { bug: { ...o.overlay.bug, text: e.target.value } })} /></Field>
+            <Field label="Text" hint="Blank = number and name. Ignored when a logo picture is set."><input className="input" style={{ width: 200 }} maxLength={24} placeholder="4 Retro TV" value={o.overlay.bug.text} onChange={(e) => patch('overlay', { bug: { ...o.overlay.bug, text: e.target.value } })} /></Field>
+            <Field label="Logo picture" hint="Optional. Shown instead of the text; a transparent png works best."><PictureField value={o.overlay.bug.image} onChange={(image) => patch('overlay', { bug: { ...o.overlay.bug, image } })} /></Field>
             <Field label="Corner"><select className="select" value={o.overlay.bug.position} onChange={(e) => patch('overlay', { bug: { ...o.overlay.bug, position: e.target.value as Corner } })}>{CORNERS.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}</select></Field>
             <Field label={`Opacity ${o.overlay.bug.opacity}%`}><input type="range" min={10} max={100} value={o.overlay.bug.opacity} onChange={(e) => patch('overlay', { bug: { ...o.overlay.bug, opacity: Number(e.target.value) } })} /></Field>
           </div>

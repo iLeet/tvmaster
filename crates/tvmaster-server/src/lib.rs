@@ -2,12 +2,16 @@
 //! and the web player. See docs/API.md.
 
 mod admin;
+mod assets;
 mod auth;
 mod autopilot;
 mod channels;
+mod guide_preview;
 mod hdhr;
 mod iptv;
 mod libraries;
+mod monitor;
+mod pip;
 mod plan;
 #[cfg(test)]
 mod soak;
@@ -46,13 +50,19 @@ pub struct AppState {
     /// Background break-detection progress per library.
     pub(crate) analysis: Arc<Mutex<HashMap<i64, libraries::Progress>>>,
     /// When set, every request except the UI shell must present it.
-    pub(crate) token: Option<Arc<String>>,
+    pub(crate) token: Arc<std::sync::RwLock<Option<String>>>,
+    /// True when the token came from the command line, so the UI may not change it.
+    pub(crate) token_locked: bool,
     /// JSON events pushed to WebSocket clients.
     pub(crate) events: broadcast::Sender<String>,
     /// How many connected players each TV has (online while > 0).
     presence: Arc<Mutex<HashMap<String, usize>>>,
     /// Which ports and certificate the listeners use, for `/api/v1/system`.
     network: Arc<NetworkInfo>,
+    /// Where uploaded pictures are kept (`None` = uploads are off).
+    pub(crate) assets_dir: Option<std::path::PathBuf>,
+    /// Problems being reported and what the folder watcher last saw.
+    pub(crate) monitor: Arc<Mutex<monitor::Book>>,
 }
 
 /// What the daemon is listening on, so clients can build links to it.
@@ -104,11 +114,20 @@ impl AppState {
             dirty: Arc::new(Mutex::new(HashSet::new())),
             wake: Arc::new(Notify::new()),
             analysis: Arc::new(Mutex::new(HashMap::new())),
-            token: None,
+            token: Arc::new(std::sync::RwLock::new(None)),
+            token_locked: false,
             events: broadcast::channel(256).0,
             presence: Arc::new(Mutex::new(HashMap::new())),
             network: Arc::new(NetworkInfo::default()),
+            assets_dir: None,
+            monitor: Arc::new(Mutex::new(monitor::Book::default())),
         }
+    }
+
+    /// Keep uploaded pictures in this folder.
+    pub fn with_assets_dir(mut self, dir: impl Into<std::path::PathBuf>) -> Self {
+        self.assets_dir = Some(dir.into());
+        self
     }
 
     pub fn with_network(mut self, network: NetworkInfo) -> Self {
@@ -117,10 +136,49 @@ impl AppState {
     }
 
     /// Require this token on every request (see [`auth`]). Must be 8-128
-    /// characters of letters, digits, `-`, `_`, `.` or `~`.
+    /// characters of letters, digits, `-`, `_`, `.` or `~`. A token given here
+    /// is fixed (the UI cannot change it); with `None` the token the admin UI
+    /// saved earlier, if any, is used and can be changed at runtime.
     pub fn with_token(mut self, token: Option<String>) -> Self {
-        self.token = token.map(Arc::new);
+        self.token_locked = token.is_some();
+        let saved = if token.is_none() {
+            tvmaster_db::meta_get(&self.db(), auth::META_KEY)
+                .ok()
+                .flatten()
+                .filter(|t| auth::valid_token(t))
+        } else {
+            None
+        };
+        *self.token.write().unwrap_or_else(|p| p.into_inner()) = token.or(saved);
         self
+    }
+
+    /// Use `token` the first time only: when the admin UI has never saved a
+    /// choice (on or off). Lets an installer start the service protected while
+    /// the owner can still turn it off or replace it later.
+    pub fn seed_token(&self, token: Option<String>) {
+        let Some(t) = token.filter(|t| auth::valid_token(t)) else {
+            return;
+        };
+        if self.token_locked
+            || tvmaster_db::meta_get(&self.db(), auth::META_KEY)
+                .ok()
+                .flatten()
+                .is_some()
+        {
+            return;
+        }
+        let _ = tvmaster_db::meta_set(&self.db(), auth::META_KEY, &t);
+        *self.token.write().unwrap_or_else(|p| p.into_inner()) = Some(t);
+    }
+
+    /// The access token in force right now, if authentication is on.
+    pub fn access_token(&self) -> Option<String> {
+        self.token()
+    }
+
+    pub(crate) fn token(&self) -> Option<String> {
+        self.token.read().unwrap_or_else(|p| p.into_inner()).clone()
     }
 
     /// In-memory database, no FFmpeg. For tests.
@@ -234,6 +292,10 @@ impl AppState {
             .into_iter()
             .map(|m| m.path.into())
             .collect(),
+            config: channel.guide.clone(),
+            pip_host: (channel.guide.pip.mode != tvmaster_core::PipMode::Off).then(|| {
+                Arc::new(pip::LocalChannels(self.clone())) as Arc<dyn tvmaster_playout::PipHost>
+            }),
         });
         ChannelSpec {
             guide,
@@ -413,7 +475,27 @@ fn build_router(state: AppState, https: bool) -> Router {
         .route("/api/v1/auth", get(auth::status))
         .route("/api/v1/auth/login", post(auth::login))
         .route("/api/v1/auth/logout", post(auth::logout))
+        .route(
+            "/api/v1/security",
+            get(auth::security).put(auth::put_security),
+        )
         .route("/api/v1/fs/list", get(admin::fs_list))
+        .route("/api/v1/guide/preview", post(guide_preview::preview))
+        .route("/api/v1/monitor", get(monitor::get).put(monitor::put))
+        .route("/api/v1/monitor/test", post(monitor::test))
+        .route("/api/v1/monitor/rescan", post(monitor::rescan_now))
+        .route(
+            "/api/v1/assets",
+            get(assets::list)
+                .post(assets::upload)
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    assets::MAX_BYTES + 1024,
+                )),
+        )
+        .route(
+            "/api/v1/assets/:id",
+            get(assets::get_one).delete(assets::delete_one),
+        )
         .route("/api/v1/shows", get(admin::shows))
         .route(
             "/api/v1/show-settings",
@@ -520,5 +602,38 @@ mod tests {
         let (status, html) = call_raw(&app, "GET", "/", "").await;
         assert_eq!(status, StatusCode::OK);
         assert!(html.contains("hls.js"));
+    }
+
+    #[tokio::test]
+    async fn the_player_works_offline_and_on_a_tv_remote() {
+        let app = router(AppState::in_memory());
+        let (_, html) = call_raw(&app, "GET", "/", "").await;
+        assert!(
+            html.contains("/admin/vendor/hls.min.js"),
+            "hls.js is served by the server, not a CDN"
+        );
+        assert!(
+            !html.contains("cdnjs"),
+            "a TV on a network without internet still plays"
+        );
+        for needle in [
+            "ChannelUp",
+            "427",
+            "428",
+            "Web0S",
+            "Tizen",
+            "ColorF0Red",
+            "GoBack",
+            "10009",
+            "461",
+        ] {
+            assert!(html.contains(needle), "remote support for {needle}");
+        }
+        let (status, js) = call_raw(&app, "GET", "/admin/vendor/hls.min.js", "").await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(
+            js.len() > 300_000 && js.contains("Hls"),
+            "the bundled player library"
+        );
     }
 }

@@ -312,12 +312,28 @@ fn probe_library(
     library_id: i64,
     kind: &str,
 ) -> (usize, Vec<NewMedia>) {
-    let music = kind == "music";
-    let files = if music {
+    let files = list_files(root, kind);
+    probe_files(root, &files, ffprobe, library_id, kind)
+}
+
+/// The media files under `root` for a library of this kind.
+pub(crate) fn list_files(root: &FsPath, kind: &str) -> Vec<PathBuf> {
+    if kind == "music" {
         find_audio(root)
     } else {
         find_videos(root)
-    };
+    }
+}
+
+/// Probe these files. Returns (files given, probed items).
+pub(crate) fn probe_files(
+    root: &FsPath,
+    files: &[PathBuf],
+    ffprobe: &FsPath,
+    library_id: i64,
+    kind: &str,
+) -> (usize, Vec<NewMedia>) {
+    let music = kind == "music";
     let next = AtomicUsize::new(0);
     let results: Mutex<Vec<(usize, NewMedia)>> = Mutex::new(Vec::new());
 

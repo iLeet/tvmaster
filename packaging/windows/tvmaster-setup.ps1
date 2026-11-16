@@ -29,7 +29,7 @@ function Install-Service {
   }
   & icacls $tokenFile /inheritance:r /grant:r 'Administrators:F' 'SYSTEM:F' | Out-Null
 
-  $serveArgs = "serve --bind $Bind --data-dir `"$DataDir`" --token-file `"$tokenFile`""
+  $serveArgs = "serve --bind $Bind --data-dir `"$DataDir`" --initial-token-file `"$tokenFile`""
   if ($Https) { $serveArgs += ' --tls' }
   $action = New-ScheduledTaskAction -Execute $Exe -Argument $serveArgs -WorkingDirectory $InstallDir
   $trigger = New-ScheduledTaskTrigger -AtStartup

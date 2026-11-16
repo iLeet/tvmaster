@@ -62,7 +62,7 @@ pub fn render(
             token_args = token
                 .as_deref()
                 .map(|t| format!(
-                    "\n    <string>--token-file</string><string>{}</string>",
+                    "\n    <string>--initial-token-file</string><string>{}</string>",
                     xml_escape(t)
                 ))
                 .unwrap_or_default(),
@@ -70,7 +70,7 @@ pub fn render(
         Kind::Systemd => {
             let token_arg = token
                 .as_deref()
-                .map(|t| format!(" --token-file {t}"))
+                .map(|t| format!(" --initial-token-file {t}"))
                 .unwrap_or_default();
             format!(
             "[Unit]\nDescription=TVMaster IPTV station\nAfter=network-online.target\nWants=network-online.target\n\n\
@@ -81,7 +81,7 @@ pub fn render(
         Kind::Windows => {
             let token_arg = token
                 .as_deref()
-                .map(|t| format!(" --token-file \\\"{t}\\\""))
+                .map(|t| format!(" --initial-token-file \\\"{t}\\\""))
                 .unwrap_or_default();
             format!(
             "schtasks /Create /TN \"TVMaster\" /SC ONSTART /RU SYSTEM /RL HIGHEST /F ^\n  /TR \"\\\"{bin}\\\" serve --bind {bind} --data-dir \\\"{data}\\\"{token_arg}{tls_arg}\"\n"
@@ -140,7 +140,7 @@ mod tests {
     }
 
     #[test]
-    fn the_token_comes_from_a_file_not_the_command_line() {
+    fn the_first_run_token_comes_from_a_file_not_the_command_line() {
         let t = std::path::Path::new("/home/me/token");
         let args = |k| {
             render(
@@ -152,10 +152,10 @@ mod tests {
                 false,
             )
         };
-        assert!(args(Kind::Systemd).contains("--token-file /home/me/token"));
+        assert!(args(Kind::Systemd).contains("--initial-token-file /home/me/token"));
         assert!(args(Kind::Launchd)
-            .contains("<string>--token-file</string><string>/home/me/token</string>"));
-        assert!(args(Kind::Windows).contains("--token-file"));
+            .contains("<string>--initial-token-file</string><string>/home/me/token</string>"));
+        assert!(args(Kind::Windows).contains("--initial-token-file"));
         assert!(!args(Kind::Systemd).contains("--token "));
     }
 

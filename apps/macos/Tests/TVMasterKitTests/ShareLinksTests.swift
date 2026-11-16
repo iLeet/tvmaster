@@ -57,7 +57,9 @@ struct ShareLinksTests {
         #expect(!url("remote").contains("token"))
         #expect(!url("player").contains("token"))
         #expect(!url("tuner").contains("token"))
-        #expect(all.filter(\.hasToken).map(\.id).sorted() == ["discover", "guide", "hls-retro", "playlist", "ts-retro"])
+        // a TV's browser cannot sign in with a keyboard, so its address carries the token once
+        #expect(url("smarttv") == "http://tv.local:8787/?ui=tv&token=secret-token-1")
+        #expect(all.filter(\.hasToken).map(\.id).sorted() == ["discover", "guide", "hls-retro", "playlist", "smarttv", "ts-retro"])
 
         let without = ShareLinks.Options(scheme: .http, host: "tv.local", includeToken: false)
         let plain = l.sections(without, channels: [try channel("retro", 4, "Retro")], tvs: []).flatMap(\.links)
@@ -208,5 +210,115 @@ struct PictureSoundTests {
         #expect(test.kind == .test)
         let future = try JSONDecoder().decode(Holder.self, from: Data(#"{"kind":"holodeck"}"#.utf8))
         #expect(future.kind == .programming, "one new kind must not break the whole channel list")
+    }
+}
+
+@Suite struct PicturesAndSecurityTests {
+    @Test func aLogoPictureIsKeptAndWrittenBack() {
+        var s = PictureSoundSettings(options: nil, lineup: nil)
+        s.bugEnabled = true
+        s.bugImage = "/var/lib/tvmaster/assets/0123abcd-logo.png"
+        let written = s.apply(to: nil)
+        #expect(written.get(["overlay", "bug", "image"])?.stringValue == "/var/lib/tvmaster/assets/0123abcd-logo.png")
+        #expect(PictureSoundSettings(options: written, lineup: nil).bugImage == s.bugImage)
+        s.bugImage = ""
+        #expect(s.apply(to: nil).get(["overlay", "bug", "image"]) == .null, "removing it sends null, not an empty path")
+    }
+
+    @Test func onlyUploadedPicturesGetAPreview() {
+        #expect(TVMasterClient.assetID(forPath: "/Users/me/Library/Application Support/TVMaster/assets/ab12-logo.png") == "ab12-logo.png")
+        #expect(TVMasterClient.assetID(forPath: "C:\\ProgramData\\TVMaster\\assets\\ff00-x.jpg") == "ff00-x.jpg")
+        #expect(TVMasterClient.assetID(forPath: "/home/me/cat.png") == nil)
+        #expect(TVMasterClient.assetID(forPath: "/data/assets/../x.png") == nil)
+        #expect(TVMasterClient.assetID(forPath: "/data/assets/run.sh") == nil)
+    }
+
+    @Test func theSecurityStateDecodes() throws {
+        let s: SecurityStatus = try decode(#"{"enabled":true,"locked":false,"token":"abcdef0123456789"}"#)
+        #expect(s.enabled && !s.locked && s.token == "abcdef0123456789")
+        let off: SecurityStatus = try decode(#"{"enabled":false,"locked":true,"token":null}"#)
+        #expect(!off.enabled && off.locked && off.token == nil)
+    }
+}
+
+@Suite struct GuideSettingsTests {
+    private func raw(_ json: String) throws -> JSONValue {
+        JSONValue(any: try JSONSerialization.jsonObject(with: Data(json.utf8)))
+    }
+
+    @Test func aGuideFromBeforeTheNewOptionsReadsAsTheOriginalLook() throws {
+        let s = GuideSettings(guide: try raw(#"{"hours":4,"title":"Retro","ticker":["hi"],"music_library_ids":[2]}"#))
+        #expect(s.hours == 4 && s.title == "Retro" && s.ticker == ["hi"] && s.musicLibraryIds == [2])
+        #expect(s.theme == "auto" && s.rows == 6 && s.style == "grid" && s.scanlines && s.tickerEnabled && s.hour12)
+        #expect(s.pipMode == "off" && s.pipPlacement == "side_right")
+        #expect(GuideSettings(guide: nil) == GuideSettings())
+    }
+
+    @Test func settingsAreWrittenWithTheServersKeysAndUnknownKeysSurvive() throws {
+        var s = GuideSettings(guide: try raw(#"{"hours":3,"future_option":{"x":1}}"#))
+        s.theme = "custom"; s.colorPrimary = "#2080ff"
+        s.style = "now_next"; s.rows = 8; s.scroll = "smooth"; s.timeStep = 15
+        s.hour12 = false; s.logo = "/data/assets/ab-logo.png"
+        s.tickerSpeed = "fast"; s.tickerNowOn = false
+        s.pipMode = "rotate"; s.pipChannels = ["a", "b"]; s.pipSeconds = 45; s.pipPlacement = "top_left"; s.pipAudio = "channel"
+        s.channels = ["b", "a"]
+        let out = s.apply(to: try raw(#"{"hours":3,"future_option":{"x":1}}"#))
+        #expect(out.get(["future_option", "x"])?.intValue == 1, "what the editor does not show is kept")
+        #expect(out.get(["theme"])?.stringValue == "custom")
+        #expect(out.get(["colors", "primary"])?.stringValue == "#2080ff")
+        #expect(out.get(["colors", "accent"]) == .null, "a blank colour is null, not an empty string")
+        #expect(out.get(["layout", "style"])?.stringValue == "now_next")
+        #expect(out.get(["layout", "page_seconds"])?.intValue == 9)
+        #expect(out.get(["layout", "time_step"])?.intValue == 15)
+        #expect(out.get(["header", "hour12"])?.boolValue == false)
+        #expect(out.get(["header", "logo"])?.stringValue == "/data/assets/ab-logo.png")
+        #expect(out.get(["ticker_options", "speed"])?.stringValue == "fast")
+        #expect(out.get(["pip", "placement"])?.stringValue == "top_left")
+        #expect(out.get(["pip", "channels"])?.stringArray == ["a", "b"])
+        #expect(out.get(["channels"])?.stringArray == ["b", "a"])
+        #expect(GuideSettings(guide: out) == s, "reading it back gives the same settings")
+    }
+
+    @Test func aVideoWindowNeedsAChannelAndCustomColoursMustBeValid() {
+        var s = GuideSettings()
+        #expect(s.problem == nil)
+        s.pipMode = "channel"
+        #expect(s.problem != nil)
+        s.pipChannel = "retro"
+        #expect(s.problem == nil)
+        s.theme = "custom"; s.colorAccent = "gold"
+        #expect(s.problem != nil)
+        s.colorAccent = "#ffcc00"
+        #expect(s.problem == nil)
+    }
+
+    @Test func channelListsKeepTheOrderTheyWerePickedIn() {
+        #expect(GuideSettings.toggled([], "b") == ["b"])
+        #expect(GuideSettings.toggled(["b"], "a") == ["b", "a"])
+        #expect(GuideSettings.toggled(["b", "a"], "b") == ["a"])
+    }
+
+    @Test func blankTickerLinesAreDropped() {
+        var s = GuideSettings()
+        s.ticker = ["Welcome", "  ", ""]
+        #expect(s.apply(to: nil).get(["ticker"])?.stringArray == ["Welcome"])
+    }
+}
+
+@Suite struct MonitorTests {
+    @Test func theMonitorStateDecodes() throws {
+        let json = #"{"settings":{"watch_minutes":15,"alerts":true,"webhook":null,"webhook_text":false,"notify_recovery":true},"alerts":[{"id":"library:3:offline","severity":"error","title":"The “Shows” library is offline","detail":"/mnt/nas cannot be reached","since_ms":1700000000000}],"rescans":{},"curl":true}"#
+        let d = JSONDecoder(); d.keyDecodingStrategy = .convertFromSnakeCase
+        let m = try d.decode(MonitorState.self, from: Data(json.utf8))
+        #expect(m.settings.watchMinutes == 15 && m.settings.alerts && m.settings.webhook == nil)
+        #expect(m.alerts.count == 1 && m.alerts[0].isError && m.alerts[0].id == "library:3:offline")
+        #expect(m.curl)
+    }
+
+    @Test func alertAndLibraryEventsTellTheAppToRefresh() {
+        for type in ["alert.raised", "alert.cleared", "library.changed"] {
+            #expect(EventStream.parse(Data(#"{"type":"\#(type)","id":"x"}"#.utf8)) == .monitorChanged)
+        }
+        #expect(EventStream.parse(Data(#"{"type":"something.else"}"#.utf8)) == nil)
     }
 }
