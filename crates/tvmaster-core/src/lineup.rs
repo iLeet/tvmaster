@@ -62,6 +62,14 @@ pub struct Block {
     /// Local "HH:MM" ("24:00" allowed). An end before the start runs overnight.
     pub end: String,
     pub source: Source,
+    /// Air one episode at the start time, then leave the rest of the slot to the
+    /// gap policy (the test screen, say) instead of running episodes back to back.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub once: bool,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -147,6 +155,8 @@ pub struct SignOff {
 
 /// The label sign-off items carry in the schedule.
 pub const SIGNOFF_LABEL: &str = "Sign-off";
+/// Label on time the channel spends on its off-air screen because nothing is scheduled or a show ran out.
+pub const OFF_AIR_LABEL: &str = "Off air";
 
 impl Default for Lineup {
     fn default() -> Self {
@@ -171,10 +181,25 @@ pub(crate) struct CBlock<'a> {
     days: [bool; 7],
     start: u32,
     end: u32,
+    pub once: bool,
     pub source: &'a Source,
 }
 
 impl CBlock<'_> {
+    /// UTC start of the showing of this slot that contains `local` (call only while it is active).
+    pub fn showing_start(&self, zone: &Zone, local: NaiveDateTime) -> i64 {
+        let m = local.hour() * 60 + local.minute();
+        let date = if self.start < self.end || m >= self.start {
+            local.date()
+        } else {
+            local.date() - chrono::Duration::days(1)
+        };
+        let at = date
+            .and_hms_opt(self.start / 60, self.start % 60, 0)
+            .unwrap_or(local);
+        zone.to_utc_ms(at)
+    }
+
     pub fn active(&self, local: NaiveDateTime) -> bool {
         let m = local.hour() * 60 + local.minute();
         let wd = local.weekday().num_days_from_monday() as usize;
@@ -327,6 +352,7 @@ fn compile_block<'a>(b: &'a Block) -> Result<CBlock<'a>, String> {
         days,
         start,
         end,
+        once: b.once,
         source: &b.source,
     })
 }

@@ -188,3 +188,11 @@ The web player (`/?tv=…` and `/?remote=…`) uses this and falls back to polli
 | GET | `/api/v1/system` | Version, OS/arch, time zone, FFmpeg capabilities (`encoder` is the one in use: `software`, `videotoolbox`, `nvenc`, `qsv`, `vaapi` or `amf`; `encoders` lists every H.264 encoder the build has), whether a token is required. |
 
 The daemon also runs an autopilot loop (every minute) that tops up every channel's schedule to 72 hours, commits aired episodes and trims history. There is nothing to call.
+
+
+## Live control
+
+- `GET /api/v1/live`: `{overrides: [{channel, mode, title, message, started_ms, until_ms}], samples: [{id, name, event, text}]}`.
+- `POST /api/v1/live` `{channels: ["all"] | [ids], mode: "test_screen"|"off_air"|"black"|"static"|"alert", title?, message?, sample?, minutes?}`: take channels over. `alert` needs `title` and `message`, or a `sample` id. Channels that are on air restart so it shows within seconds; the takeover is saved until cleared (or `minutes` pass).
+- `POST /api/v1/live/clear` `{channels?: [...]}`: give channels (all when none are named) back to their programming.
+- `POST /api/v1/server/restart`: stop the server cleanly. Docker, systemd and the Windows task start it again.

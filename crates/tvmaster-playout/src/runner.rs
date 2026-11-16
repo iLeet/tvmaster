@@ -44,6 +44,10 @@ const MAX_LEAD_MS: i64 = 45_000;
 const EMPTY_SLATE_MS: u64 = 5_000;
 /// Longest single slate piece (keeps the schedule re-checked regularly).
 const MAX_SLATE_MS: u64 = 30_000;
+/// An override is aired in pieces this long, so clearing or changing it is noticed promptly.
+const LIVE_CHUNK_MS: u64 = 5_000;
+/// How long an alert's attention tone sounds.
+const ALERT_TONE_MS: i64 = 8_000;
 /// Consecutive unplayable items before giving up and letting the watchdog
 /// restart (with backoff) instead of spinning.
 const MAX_CONSECUTIVE_FAILURES: u32 = 5;
@@ -138,7 +142,9 @@ async fn run_once(
         stdin.shutdown().await.ok();
         Ok::<(), std::io::Error>(())
     });
-    let mut producer = if spec.guide.is_some() {
+    // A guide channel the operator has taken over is aired like any other channel until it is given back.
+    let taken_over = spec.source.live_override(&spec.id).is_some();
+    let mut producer = if spec.guide.is_some() && !taken_over {
         tokio::spawn(crate::guide::produce_guide(cfg.clone(), spec.clone(), tx))
     } else {
         tokio::spawn(produce(cfg.clone(), spec.clone(), tx))
@@ -193,6 +199,21 @@ async fn produce(
 
         if vt > wall + MAX_LEAD_MS {
             tokio::time::sleep(Duration::from_millis((vt - wall - MAX_LEAD_MS) as u64)).await;
+            continue;
+        }
+
+        // The operator has taken the channel over (test screen, emergency alert...).
+        let live = {
+            let (source, id) = (spec.source.clone(), spec.id.clone());
+            tokio::task::spawn_blocking(move || source.live_override(&id))
+                .await
+                .map_err(|e| anyhow!("override lookup failed: {e}"))?
+        };
+        if let Some(ov) = live {
+            let chunk = LIVE_CHUNK_MS;
+            live_screen(&cfg, &spec, &ov, chunk, ts_offset_ms, &tx, &mut fixer).await?;
+            ts_offset_ms += chunk;
+            vt += chunk as i64;
             continue;
         }
 
@@ -504,6 +525,141 @@ async fn report_unplayable(spec: &Arc<ChannelSpec>, media_id: Option<i64>) {
 
 /// Hold the air with whatever the channel shows when nothing is on: its off-air
 /// screen (a station card unless the owner chose bars, snow, black or a picture).
+/// One piece of an operator override.
+async fn live_screen(
+    cfg: &EngineConfig,
+    spec: &ChannelSpec,
+    ov: &crate::LiveOverride,
+    duration_ms: u64,
+    ts_offset_ms: u64,
+    tx: &mpsc::Sender<Vec<u8>>,
+    fixer: &mut ContinuityFixer,
+) -> Result<()> {
+    use crate::LiveMode;
+    use tvmaster_core::Screen;
+    match &ov.mode {
+        LiveMode::TestScreen => {
+            off_air_screen(
+                cfg,
+                spec,
+                Screen::Bars,
+                true,
+                duration_ms,
+                ts_offset_ms,
+                tx,
+                fixer,
+            )
+            .await
+        }
+        LiveMode::OffAir => slate(cfg, spec, duration_ms, ts_offset_ms, tx, fixer).await,
+        LiveMode::Black => {
+            off_air_screen(
+                cfg,
+                spec,
+                Screen::Black,
+                false,
+                duration_ms,
+                ts_offset_ms,
+                tx,
+                fixer,
+            )
+            .await
+        }
+        LiveMode::Static => {
+            off_air_screen(
+                cfg,
+                spec,
+                Screen::Static,
+                true,
+                duration_ms,
+                ts_offset_ms,
+                tx,
+                fixer,
+            )
+            .await
+        }
+        LiveMode::Alert { event, text } => {
+            let into = (now_ms() - ov.started_ms).max(0);
+            let tone_left = (ALERT_TONE_MS - into).max(0) as u64;
+            let audio = crate::attention_tone_source(tone_left);
+            let scene = Scene::Alert {
+                event: event.clone(),
+                text: text.clone(),
+            };
+            let total_secs = (into as u64 + duration_ms) as f32 / 1000.0;
+            let frames = (duration_ms as f64 / 1000.0 * FPS as f64).ceil() as u64;
+            let args = crate::rendered_args_with_audio(
+                WIDTH,
+                HEIGHT,
+                duration_ms,
+                ts_offset_ms,
+                &cfg.profile,
+                cfg.encoder,
+                &audio,
+            );
+            let mut child = Command::new(&cfg.ffmpeg)
+                .args(args)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::inherit())
+                .kill_on_drop(true)
+                .spawn()
+                .with_context(|| format!("starting {}", cfg.ffmpeg.display()))?;
+            let mut stdin = child.stdin.take().context("encoder has no stdin")?;
+            let mut out = child.stdout.take().context("encoder has no stdout")?;
+            let theme = Theme::for_channel(&spec.id);
+            let offset_s = into as f32 / 1000.0;
+            let writer = tokio::spawn(async move {
+                let chunk = tokio::task::spawn_blocking(move || {
+                    let mut buf = Vec::with_capacity(frames as usize * WIDTH * HEIGHT * 3);
+                    for k in 0..frames {
+                        let t = offset_s + k as f32 / FPS as f32;
+                        buf.extend_from_slice(&render(&scene, &theme, t, total_secs).px);
+                    }
+                    buf
+                })
+                .await
+                .map_err(std::io::Error::other)?;
+                stdin.write_all(&chunk).await?;
+                stdin.shutdown().await.ok();
+                Ok::<(), std::io::Error>(())
+            });
+            let mut buf = vec![0u8; 64 * 1024];
+            let mut bytes = 0u64;
+            loop {
+                let n = out.read(&mut buf).await?;
+                if n == 0 {
+                    break;
+                }
+                bytes += n as u64;
+                let packets = fixer.process(&buf[..n]);
+                if !packets.is_empty() {
+                    tx.send(packets)
+                        .await
+                        .map_err(|_| anyhow!("segmenter writer closed"))?;
+                }
+            }
+            let _ = child.wait().await;
+            writer.abort();
+            if bytes == 0 {
+                tracing::warn!(channel = %spec.id, "alert failed to render, airing the test screen");
+                return off_air_screen(
+                    cfg,
+                    spec,
+                    Screen::Bars,
+                    true,
+                    duration_ms,
+                    ts_offset_ms,
+                    tx,
+                    fixer,
+                )
+                .await;
+            }
+            Ok(())
+        }
+    }
+}
+
 async fn slate(
     cfg: &EngineConfig,
     spec: &ChannelSpec,

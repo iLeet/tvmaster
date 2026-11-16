@@ -11,7 +11,7 @@ struct ChannelsView: View {
         @Bindable var model = model
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                PageHeader(title: "Channels", subtitle: "Your stations. Lineups, ads and the guide are designed in the web admin.") {
+                PageHeader(title: "Channels", subtitle: "Your stations: what they air, when, and how it looks.") {
                     Button { model.showNewChannel = true } label: { Label("New channel", systemImage: "plus") }.glassButton(prominent: true)
                         .keyboardShortcut("n", modifiers: .command)
                 }
@@ -89,7 +89,7 @@ struct ChannelEditorSheet: View {
     @State private var confirmProgressReset = false
     @State private var loaded = false
     @State private var tab: Tab = {
-        switch ProcessInfo.processInfo.environment["TVM_EDIT_TAB"] { case "picture": .picture; case "guide": .guide; default: .general }
+        switch ProcessInfo.processInfo.environment["TVM_EDIT_TAB"] { case "picture": .picture; case "guide": .guide; case "programming": .programming; default: .general }
     }()
     /// The channel's picture and sound settings, read from the server's raw JSON.
     @State private var ps = PictureSoundSettings()
@@ -101,8 +101,12 @@ struct ChannelEditorSheet: View {
     @State private var gs = GuideSettings()
     @State private var gsOriginal = GuideSettings()
     @State private var rawGuide: JSONValue?
-    private enum Tab: String, CaseIterable { case general = "General", picture = "Picture & sound", guide = "Guide" }
-    private var tabs: [Tab] { isGuide ? [.general, .guide] : isNew ? [.general] : [.general, .picture] }
+    /// The channel's time slots, specials, ads and so on, read from the server's raw JSON.
+    @State private var ls = LineupSettings()
+    @State private var lsOriginal = LineupSettings()
+    @State private var showNames: [String] = []
+    private enum Tab: String, CaseIterable { case general = "General", programming = "Programming", picture = "Picture & sound", guide = "Guide" }
+    private var tabs: [Tab] { isGuide ? [.general, .guide] : (isNew || isTest) ? [.general] : [.general, .programming, .picture] }
 
     private var isNew: Bool { channel == nil }
     private var numberTaken: Bool { model.channels.contains { $0.number == number && $0.id != id } }
@@ -114,7 +118,13 @@ struct ChannelEditorSheet: View {
                 Picker("", selection: $tab) { ForEach(tabs, id: \.self) { Text($0.rawValue).tag($0) } }
                     .pickerStyle(.segmented).labelsHidden().padding([.horizontal, .top], 16)
             }
-            if tab == .picture && !isGuide && !isNew {
+            if tab == .programming && !isGuide && !isNew && !isTest {
+                if rawLineup == nil && !loadingRaw {
+                    Text("This server did not send the channel's lineup. Update the TVMaster server.").foregroundStyle(.secondary).padding(30)
+                } else {
+                    ProgrammingForm(ls: $ls, shows: showNames, libraries: model.libraries)
+                }
+            } else if tab == .picture && !isGuide && !isNew {
                 PictureSoundForm(ps: $ps, sys: model.system, testOnly: isTest, oldServer: rawOptions == nil && !loadingRaw)
             } else if tab == .guide && isGuide {
                 GuideForm(gs: $gs, id: id, name: name, raw: rawGuide)
@@ -178,8 +188,8 @@ struct ChannelEditorSheet: View {
                 }
                 if let channel, !isGuide {
                     Section("More") {
-                        Button("Edit lineup, seasons and events in the web admin…") { model.openInBrowser("/admin/#/channels/\(channel.id)?tab=programming") }
-                        Button("Ads and bumpers in the web admin…") { model.openInBrowser("/admin/#/channels/\(channel.id)?tab=ads") }
+                        Button("Edit time slots, specials and ads (Programming tab)") { tab = .programming }
+                        Button("Seasons and rotations in the web admin…") { model.openInBrowser("/admin/#/channels/\(channel.id)?tab=programming") }
                         Button("Re-roll the schedule now") {
                             Task { if let c = model.client { _ = await model.run { try await c.reroll(channel: channel.id) } } }
                         }
@@ -203,7 +213,7 @@ struct ChannelEditorSheet: View {
             }
             .padding(16)
         }
-        .frame(width: 560, height: isGuide && tab == .guide ? 780 : 680)
+        .frame(width: 600, height: (isGuide && tab == .guide) || tab == .programming ? 780 : 680)
         .confirmationDialog("Delete “\(name)”?", isPresented: $confirmDelete) {
             Button("Delete channel", role: .destructive) { Task { await delete() } }
         } message: { Text("TVs tuned to it will lose the channel. Your files are not touched.") }
@@ -223,6 +233,9 @@ struct ChannelEditorSheet: View {
                         rawOptions = raw.get(["options"]); rawLineup = raw.get(["lineup"])
                         ps = PictureSoundSettings(options: rawOptions, lineup: rawLineup)
                         psOriginal = ps
+                        ls = LineupSettings(lineup: rawLineup)
+                        lsOriginal = ls
+                        showNames = ((try? await client.shows()) ?? []).map(\.name).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
                     }
                 }
                 loadingRaw = false
@@ -258,6 +271,13 @@ struct ChannelEditorSheet: View {
         if !isGuide, !isNew, ps != psOriginal, rawOptions != nil || rawLineup != nil || isTest {
             f["options"] = ps.apply(to: rawOptions)
             f["lineup"] = ps.apply(toLineup: rawLineup)
+        }
+        // Time slots, specials, ads and timing, when they were changed.
+        if !isGuide, !isTest, !isNew, ls != lsOriginal, rawLineup != nil {
+            if let p = ls.problem { model.lastError = p; saving = false; return }
+            f["lineup"] = ls.apply(to: f["lineup"] ?? rawLineup)
+            // A channel with time slots is a TV-schedule channel.
+            if !ls.slots.isEmpty { f["strategy"] = .string(Strategy.blockGrid.rawValue) }
         }
         let ok = await model.run { try await client.saveChannel(f) } != nil
         saving = false

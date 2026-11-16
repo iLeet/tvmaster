@@ -27,6 +27,8 @@ export interface Block {
   start: string;
   end: string;
   source: Source;
+  /** Air one episode at the start time, then the gap policy (test screen...) for the rest of the slot. */
+  once?: boolean;
 }
 
 export interface Season {
@@ -329,4 +331,27 @@ export interface SecurityStatus {
 export interface AuthStatus {
   required: boolean;
   authenticated: boolean;
+}
+
+export type LiveMode = 'test_screen' | 'off_air' | 'black' | 'static' | 'alert';
+
+export interface LiveOverride {
+  channel: string;
+  mode: LiveMode;
+  title: string;
+  message: string;
+  started_ms: number;
+  until_ms: number | null;
+}
+
+export interface LiveSample {
+  id: string;
+  name: string;
+  event: string;
+  text: string;
+}
+
+export interface LiveState {
+  overrides: LiveOverride[];
+  samples: LiveSample[];
 }

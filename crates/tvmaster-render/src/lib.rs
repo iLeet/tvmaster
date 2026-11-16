@@ -234,6 +234,12 @@ pub enum Scene {
         evening: bool,
         items: Vec<(String, String)>,
     },
+    /// An emergency-alert screen that takes over the channel: a flashing red
+    /// header, the event, the message, and the message again as a crawl.
+    Alert {
+        event: String,
+        text: String,
+    },
 }
 
 const WHITE: Rgb = [255, 255, 255];
@@ -335,6 +341,54 @@ fn background(c: &mut Canvas, th: &Theme, t: f32) {
     c.rect(0, 344, WIDTH as i32, 2, WHITE);
 }
 
+/// The emergency-alert screen. Steady (no fades), because it stays up for as long as the alert does.
+fn alert(c: &mut Canvas, event: &str, text: &str, t: f32) {
+    const RED: Rgb = [200, 16, 24];
+    const DARK_RED: Rgb = [120, 8, 14];
+    const YELLOW: Rgb = [255, 214, 0];
+    c.vgradient([26, 0, 4], [6, 0, 2]);
+    // Flashing header band.
+    let flash = (t * 2.0) as i64 % 2 == 0;
+    c.rect(0, 0, WIDTH as i32, 56, if flash { RED } else { DARK_RED });
+    c.rect(0, 56, WIDTH as i32, 3, WHITE);
+    c.text_centered(18, "EMERGENCY ALERT SYSTEM", 3, WHITE);
+    // The event, as large as fits.
+    let (scale, ls) = layout_title(event, 600, 2);
+    let mut y = 74;
+    for l in &ls {
+        c.text_centered(y, l, scale.min(5), YELLOW);
+        y += scale.min(5) * 10;
+    }
+    // The message; the crawl below carries all of it when it does not fit.
+    let room = (((312 - y - 6) / 20).max(1)) as usize;
+    let mut body = match wrap(text, 37, room) {
+        Some(b) => b,
+        None => {
+            let mut b = wrap(text, 37, usize::MAX).unwrap_or_default();
+            b.truncate(room);
+            if let Some(last) = b.last_mut() {
+                *last = truncate(&format!("{last}..."), 37);
+            }
+            b
+        }
+    };
+    body.retain(|l| !l.is_empty());
+    let mut y = y + 6;
+    for l in &body {
+        c.text_centered(y, l, 2, WHITE);
+        y += 20;
+    }
+    // The crawl.
+    c.rect(0, 322, WIDTH as i32, 38, RED);
+    c.rect(0, 320, WIDTH as i32, 2, WHITE);
+    let crawl = format!("{}      ***      ", text.replace('\n', " "));
+    let w = text_width(&crawl, 2).max(1);
+    let x = -(((t * 110.0) as i32) % w);
+    for k in 0..=(WIDTH as i32 / w + 1) {
+        c.text(x + k * w, 331, &crawl, 2, WHITE);
+    }
+}
+
 fn header(c: &mut Canvas, th: &Theme, name: &str, t: f32) {
     let x = 24 - slide(t, 0.0);
     c.rect(x - 8, 18, 6, 22, th.accent);
@@ -363,6 +417,10 @@ fn lines(
 /// Render one frame of a bumper `dur` seconds long, `t` seconds in.
 pub fn render(scene: &Scene, th: &Theme, t: f32, dur: f32) -> Canvas {
     let mut c = Canvas::new(WIDTH, HEIGHT);
+    if let Scene::Alert { event, text } = scene {
+        alert(&mut c, event, text, t);
+        return c;
+    }
     background(&mut c, th, t);
     match scene {
         Scene::StationId { name } => {
@@ -438,6 +496,7 @@ pub fn render(scene: &Scene, th: &Theme, t: f32, dur: f32) -> Canvas {
                 y += 44;
             }
         }
+        Scene::Alert { .. } => {}
     }
     c.scanlines(0.16);
     // Fade in from black and out to black.
@@ -449,6 +508,24 @@ pub fn render(scene: &Scene, th: &Theme, t: f32, dur: f32) -> Canvas {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_alert_screen_flashes_and_crawls_without_fading() {
+        let sc = Scene::Alert {
+            event: "Tornado warning".into(),
+            text: "SAMPLE ONLY. Take shelter now. This is only a test.".into(),
+        };
+        let th = Theme::from_hue(0.5);
+        let a = render(&sc, &th, 0.1, 5.0);
+        let b = render(&sc, &th, 0.6, 5.0);
+        let c = render(&sc, &th, 4.9, 5.0);
+        assert_ne!(a.px, b.px, "the header flashes and the crawl moves");
+        assert!(
+            c.px.iter().map(|v| *v as u32).sum::<u32>() > 1_000_000,
+            "no fade to black at the end"
+        );
+        assert_eq!(a.px.len(), WIDTH * HEIGHT * 3);
+    }
 
     fn scenes() -> Vec<Scene> {
         let name = "Retro TV".to_string();

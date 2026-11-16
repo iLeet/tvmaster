@@ -4,15 +4,17 @@ import Observation
 import TVMasterKit
 
 enum SidebarItem: String, CaseIterable, Identifiable, Hashable {
-    case home, watch, channels, schedule, libraries, tvs, share
+    case home, watch, live, channels, schedule, libraries, shows, tvs, share
     var id: String { rawValue }
     var title: String {
         switch self {
         case .home: "Home"
         case .watch: "Watch"
+        case .live: "Live control"
         case .channels: "Channels"
         case .schedule: "Schedule"
         case .libraries: "Libraries"
+        case .shows: "Shows"
         case .tvs: "TVs"
         case .share: "Share"
         }
@@ -21,9 +23,11 @@ enum SidebarItem: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .home: "house"
         case .watch: "play.tv"
+        case .live: "dot.radiowaves.left.and.right"
         case .channels: "list.bullet.rectangle"
         case .schedule: "calendar"
         case .libraries: "folder"
+        case .shows: "film.stack"
         case .tvs: "tv"
         case .share: "square.and.arrow.up"
         }
@@ -59,6 +63,8 @@ final class AppModel {
     var tvs: [Tv] = []
     var libraries: [Library] = []
     var system: SystemInfo?
+    /// What has been put on channels in place of their programming.
+    var liveState = LiveState()
     var live = false
     var lastError: String?
     var daemonState: DaemonSupervisor.State = .stopped
@@ -333,6 +339,8 @@ final class AppModel {
         async let t = try? client.tvs()
         async let l = try? client.libraries()
         async let s = try? client.system()
+        async let lv = try? client.live()
+        if let v = await lv { liveState = v }
         if let v = await c { channels = v.sorted { $0.number < $1.number } }
         if let v = await t { tvs = v }
         if let v = await l { libraries = v }
@@ -354,6 +362,8 @@ final class AppModel {
     @discardableResult
     func run<T>(_ action: () async throws -> T) async -> T? {
         do { return try await action() } catch {
+            // The view that asked has gone away or asked again: nothing went wrong.
+            if error is CancellationError || (error as? URLError)?.code == .cancelled { return nil }
             if let e = error as? TVMasterError, e == .unauthorized { phase = .needsToken("Your session expired.") }
             lastError = error.localizedDescription
             return nil
@@ -386,6 +396,7 @@ final class AppModel {
         case .channelNow(let id, let now, let next):
             if let i = channels.firstIndex(where: { $0.id == id }) { channels[i].now = now; channels[i].next = next }
         case .scheduleChanged: Task { await refreshChannels() }
+        case .liveChanged: Task { if let client, let v = try? await client.live() { liveState = v }; await refreshChannels() }
         case .monitorChanged: Task { await refreshMonitor(); await refreshAll() }
         }
     }

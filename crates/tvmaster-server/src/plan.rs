@@ -91,6 +91,8 @@ pub fn programs(
             }
             // Later acts, commercials, bumpers and filler belong to the slot
             // before them, as a printed guide would show it.
+            // Off-air time (a finished show, an empty slot, sign-off) is not part of the show before it.
+            (_, _, _) if is_off_air(&it) => {}
             (is_show, _, Some(last)) if last.end_ms == it.start_ms => {
                 last.end_ms = it.end_ms;
                 if is_show {
@@ -102,6 +104,47 @@ pub fn programs(
     }
     out.retain(|p| p.end_ms > from_ms && p.start_ms < to_ms);
     Ok(out)
+}
+
+fn is_off_air(it: &tvmaster_core::ScheduledItem) -> bool {
+    it.kind == ItemKind::Filler
+        && matches!(
+            it.label.as_deref(),
+            Some(tvmaster_core::SIGNOFF_LABEL) | Some(tvmaster_core::OFF_AIR_LABEL)
+        )
+}
+
+/// Stretches of `[from, to)` that no programme covers, as "Off air" cells.
+fn with_off_air_gaps(
+    cells: Vec<GuideCell>,
+    from: i64,
+    to: i64,
+    zone: &Zone,
+    hour12: bool,
+) -> Vec<GuideCell> {
+    let mut out = Vec::with_capacity(cells.len() + 2);
+    let mut at = from;
+    let gap = |out: &mut Vec<GuideCell>, a: i64, b: i64| {
+        if b - a >= 60_000 {
+            out.push(GuideCell {
+                start_ms: a,
+                end_ms: b,
+                range: range_label(zone, a, b, hour12),
+                title: "Off air".to_string(),
+            });
+        }
+    };
+    for c in cells {
+        if c.start_ms > at {
+            gap(&mut out, at, c.start_ms.min(to));
+        }
+        at = at.max(c.end_ms);
+        out.push(c);
+    }
+    if at < to {
+        gap(&mut out, at, to);
+    }
+    out
 }
 
 /// The programme on air at `now_ms` and the one after it.
@@ -120,6 +163,7 @@ pub struct DbSchedule {
     pub(crate) db: Arc<Mutex<Connection>>,
     pub(crate) dirty: Arc<Mutex<HashSet<String>>>,
     pub(crate) wake: Arc<Notify>,
+    pub(crate) live: Arc<Mutex<crate::live::Book>>,
 }
 
 /// "8:30 PM", or "20:30" on a 24-hour clock.
@@ -226,15 +270,21 @@ pub fn build_guide_with(
             id: ch.id.clone(),
             number: ch.number,
             name: ch.name.clone(),
-            cells: progs
-                .into_iter()
-                .map(|p| GuideCell {
-                    start_ms: p.start_ms,
-                    end_ms: p.end_ms,
-                    range: range_label(&zone, p.start_ms, p.end_ms, hour12),
-                    title: p.show.unwrap_or(p.title),
-                })
-                .collect(),
+            cells: with_off_air_gaps(
+                progs
+                    .into_iter()
+                    .map(|p| GuideCell {
+                        start_ms: p.start_ms,
+                        end_ms: p.end_ms,
+                        range: range_label(&zone, p.start_ms, p.end_ms, hour12),
+                        title: p.show.unwrap_or(p.title),
+                    })
+                    .collect(),
+                start,
+                start + window_ms,
+                &zone,
+                hour12,
+            ),
         });
     }
     let title = cfg
@@ -321,6 +371,11 @@ impl ScheduleSource for DbSchedule {
         })
     }
 
+    fn live_override(&self, channel: &str) -> Option<tvmaster_playout::LiveOverride> {
+        let book = self.live.lock().unwrap_or_else(|p| p.into_inner());
+        crate::live::current(&book, channel, now_ms())
+    }
+
     fn show_defaults(&self, _channel: &str, show: &str) -> Option<tvmaster_core::ShowOptions> {
         let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
         tvmaster_db::get_show_settings(&db, show).ok().flatten()
@@ -389,6 +444,101 @@ mod tests {
             runtime_end_ms: end,
             label: None,
         }
+    }
+
+    #[test]
+    fn off_air_time_after_a_show_is_not_part_of_the_show_in_the_guide() {
+        use tvmaster_core::{ScheduledItem, OFF_AIR_LABEL};
+        let conn = tvmaster_db::open_in_memory().unwrap();
+        let lib = tvmaster_db::add_library(&conn, "/x", "shows").unwrap();
+        let media = tvmaster_db::upsert_media(
+            &conn,
+            &tvmaster_db::NewMedia {
+                library_id: lib.id,
+                path: "/x/a.mkv".into(),
+                show: Some("Mickey".into()),
+                season: Some(1),
+                episode: Some(1),
+                title: Some("One".into()),
+                duration_ms: 1_380_000,
+                width: None,
+                height: None,
+                vcodec: None,
+                acodec: None,
+                year: None,
+                breaks_json: None,
+                tracks_json: None,
+            },
+        )
+        .unwrap();
+        let item = |kind, start, end, label: Option<&str>| ScheduledItem {
+            kind,
+            media_id: (kind == ItemKind::Show).then_some(media),
+            start_ms: start,
+            end_ms: end,
+            cursor_key: (kind == ItemKind::Show).then(|| "show:mickey".to_string()),
+            cursor_pos: (kind == ItemKind::Show).then_some(0),
+            label: label.map(str::to_string),
+            in_ms: 0,
+            bumper: None,
+        };
+        let h = 3_600_000;
+        tvmaster_db::upsert_channel(
+            &conn,
+            &Channel {
+                id: "c".into(),
+                number: 1,
+                name: "C".into(),
+                strategy: tvmaster_core::Strategy::BlockGrid,
+                run_out: tvmaster_core::RunOutPolicy::OffAir,
+                autopilot: true,
+                chaos: 0,
+                seed: 1,
+                epoch_ms: 0,
+                always_on: false,
+                library_ids: vec![lib.id],
+                lineup: Default::default(),
+                kind: Default::default(),
+                group: None,
+                guide: Default::default(),
+                options: Default::default(),
+            },
+        )
+        .unwrap();
+        tvmaster_db::insert_schedule(
+            &conn,
+            "c",
+            &[
+                item(ItemKind::Show, 0, 23 * 60_000, Some("Mickey")),
+                // padding to the half hour stays with the show...
+                item(ItemKind::Filler, 23 * 60_000, 30 * 60_000, Some("Mickey")),
+                // ...but the time after it, spent on the off-air screen, does not
+                item(ItemKind::Filler, 30 * 60_000, h, Some(OFF_AIR_LABEL)),
+            ],
+        )
+        .unwrap();
+        let progs = programs(&conn, "c", 0, h).unwrap();
+        assert_eq!(progs.len(), 1);
+        assert_eq!(
+            progs[0].end_ms,
+            30 * 60_000,
+            "the show's slot ends where its padding does"
+        );
+        let cells = with_off_air_gaps(
+            vec![GuideCell {
+                start_ms: 0,
+                end_ms: 30 * 60_000,
+                range: String::new(),
+                title: "Mickey".into(),
+            }],
+            0,
+            h,
+            &Zone::utc(),
+            true,
+        );
+        assert_eq!(cells.len(), 2);
+        assert_eq!(cells[1].title, "Off air");
+        assert_eq!((cells[1].start_ms, cells[1].end_ms), (30 * 60_000, h));
     }
 
     #[test]

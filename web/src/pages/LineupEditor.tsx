@@ -139,6 +139,7 @@ export function BlockEditor({ block, onChange, onRemove, shows }: { block: Block
         <span className="small dim" style={{ alignSelf: 'flex-end', paddingBottom: 9 }}>{mins ? formatDuration(mins * 60_000) : 'Start and end must differ'}</span>
       </div>
       <Field label="Airs"><SourceEditor value={block.source} onChange={(s) => onChange({ ...block, source: s })} shows={shows} /></Field>
+      <Toggle checked={!!block.once} onChange={(once) => onChange({ ...block, once })} label={<span>One episode only <span className="dim small">air one at the start time, then the rest of the slot is a gap (the test screen, if that is your run-out choice) instead of more episodes</span></span>} />
     </div>
   );
 }

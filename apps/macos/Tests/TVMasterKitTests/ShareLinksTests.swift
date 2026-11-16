@@ -446,3 +446,37 @@ struct PictureSoundTests {
         #expect(old.openViewing == nil, "an older server does not say")
     }
 }
+
+@Suite struct LineupSettingsTests {
+    @Test func timeSlotsRoundTripAndLeaveUnknownPartsAlone() throws {
+        let json = #"{"timezone":"America/Toronto","grid_minutes":null,"blocks":[{"name":"Mickey","days":[0,1,2,3,4,5,6],"start":"15:30","end":"19:00","source":{"type":"show","show":"Mickey Mouse Clubhouse"}}],"seasons":[{"name":"Summer","from":"06-01","to":"08-31","blocks":[]}],"events":[],"fill":null,"catch_up":"resume","ads":null,"signoff":null,"future_field":7}"#
+        let raw = try JSONDecoder().decode(JSONValue.self, from: Data(json.utf8))
+        var s = LineupSettings(lineup: raw)
+        #expect(s.slots.count == 1 && s.slots[0].source.show == "Mickey Mouse Clubhouse" && s.slots[0].days.count == 7)
+        #expect(s.seasonCount == 1 && s.ads == nil && s.problem == nil)
+        s.slots[0].once = true
+        s.slots.append({ var t = TimeSlot(); t.source.kind = .pool; t.source.shows = ["A", "B"]; return t }())
+        s.ads = AdSettings()
+        let out = s.apply(to: raw)
+        #expect(out.get(["blocks"])?.arrayValue?.count == 2)
+        #expect(out.get(["blocks"])?.arrayValue?[0].get(["once"])?.boolValue == true)
+        #expect(out.get(["seasons"])?.arrayValue?.count == 1, "seasons are kept")
+        #expect(out.get(["future_field"])?.intValue == 7, "unknown fields are kept")
+        #expect(out.get(["timezone"])?.stringValue == "America/Toronto")
+        #expect(out.get(["ads", "pod_seconds"])?.intValue == 120)
+        let back = LineupSettings(lineup: out)
+        #expect(back.slots.count == 2 && back.slots[0].once && back.slots[1].source.shows == ["A", "B"] && back.ads == s.ads)
+    }
+
+    @Test func aSlotNeedsAShowAndALength() {
+        var s = LineupSettings()
+        var t = TimeSlot(); t.source.kind = .show
+        s.slots = [t]
+        #expect(s.problem != nil)
+        s.slots[0].source.show = "Cheers"; s.slots[0].end = s.slots[0].start
+        #expect(s.problem != nil)
+        s.slots[0].end = "22:00"
+        #expect(s.problem == nil)
+        #expect(LineupSettings.daysLabel([0, 1, 2, 3, 4]) == "Weekdays" && LineupSettings.daysLabel([]) == "Every day")
+    }
+}

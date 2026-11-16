@@ -22,7 +22,7 @@ pub use clock::Zone;
 pub use cursor::EpisodeCursor;
 pub use lineup::{
     Advance, Block, CatchUp, Event, Lineup, Order, Season, SignOff, SignOffStyle, Source,
-    SIGNOFF_LABEL,
+    OFF_AIR_LABEL, SIGNOFF_LABEL,
 };
 pub use model::{
     parse_hex_color, BackgroundStyle, Channel, ChannelKind, GuideAppearance, GuideBackground,

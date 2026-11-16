@@ -226,6 +226,28 @@ api -XPUT "$H/api/v1/security" -d '{"open_viewing":true}' >/dev/null
 [[ "$(curl -s -o /dev/null -w '%{http_code}' "$H/api/v1/libraries")" == 401 && "$(curl -s -o /dev/null -w '%{http_code}' -XPOST -H 'content-type: application/json' -d '{"id":"x","number":99,"name":"X"}' "$H/api/v1/channels")" == 401 ]] && ok "but managing still needs it" || bad "managing was left open"
 api -XPUT "$H/api/v1/security" -d '{"open_viewing":false}' >/dev/null
 
+# live control: the whole station to the test screen, one channel to an emergency alert, then back
+grab() { # grab channel out.png : wait for fresh segments, then save a frame from the newest one
+  sleep 9; local seg; seg="$(curl -fsS "$H/stream/$1/index.m3u8?token=$TOKEN" | grep 'seg_.*\.ts' | tail -1)"
+  curl -fsS -o "$W/grab.ts" "$H/stream/$1/${seg#/}" && ffmpeg -hide_banner -loglevel error -y -i "$W/grab.ts" -frames:v 1 "$2" 2>&1
+}
+meanrgb() { ffmpeg -hide_banner -loglevel error -i "$1" -vf "scale=1:1,format=rgb24" -f rawvideo - | od -An -tu1 | tr -s ' ' | sed 's/^ //'; }
+api -XPOST "$H/api/v1/live" -d '{"channels":["all"],"mode":"test_screen"}' >/dev/null
+[[ "$(api "$H/api/v1/live" | json "len(d['overrides'])")" -ge 3 ]] && ok "every channel can be taken to the test screen at once" || bad "live all"
+api -XPOST "$H/api/v1/live" -d '{"channels":["chaos"],"mode":"alert","sample":"eas_test"}' >/dev/null
+OUT="$(grab retro "$W/live-bars.png")"; [[ -z "$OUT" && -s "$W/live-bars.png" ]] && ok "a channel that was on air now shows the bars" || bad "bars frame" "$OUT"
+OUT="$(grab chaos "$W/live-alert.png")"
+RGB="$(ffmpeg -hide_banner -loglevel error -i "$W/live-alert.png" -vf "crop=1:1:3:710,format=rgb24" -f rawvideo - | od -An -tu1 | tr -s ' ' | sed 's/^ //')"; set -- $RGB
+[[ -s "$W/live-alert.png" && "${1:-0}" -gt 150 && "${2:-255}" -lt 60 ]] && ok "an emergency alert on one channel has the red crawl bar (pixel rgb: $RGB)" || bad "alert frame" "rgb=$RGB $OUT"
+ffmpeg -hide_banner -loglevel error -t 3 -i "$H/stream/retro/index.m3u8?token=$TOKEN" -af astats=metadata=1 -f null - 2>&1 | head -1 >/dev/null
+VOL="$(ffmpeg -hide_banner -i "$H/stream/retro/index.m3u8?token=$TOKEN" -t 3 -af volumedetect -f null - 2>&1 | grep -o 'mean_volume: [-0-9.]*' | head -1)"
+[[ -n "$VOL" && "$VOL" != "mean_volume: -91.0" ]] && ok "and the test screen has its tone ($VOL dB)" || bad "tone missing" "$VOL"
+api -XPOST "$H/api/v1/live/clear" -d '{}' >/dev/null
+[[ "$(api "$H/api/v1/live" | json "len(d['overrides'])")" == 0 ]] && ok "everything can be given back to the schedule" || bad "live clear"
+OUT="$(grab retro "$W/live-back.png")"
+RGB="$(meanrgb "$W/live-back.png")"
+[[ -s "$W/live-back.png" ]] && ok "and the channel carries on with its programming ($RGB)" || bad "back to programming" "$OUT"
+
 # docker stop and systemd send SIGTERM: it must stop cleanly, like Ctrl-C does
 "$BIN" serve --bind "127.0.0.1:$HP2" --data-dir "$W/data3" >"$W/server4.log" 2>&1 &
 PID2=$!

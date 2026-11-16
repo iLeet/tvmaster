@@ -199,6 +199,22 @@ pub async fn stream_control(
     Ok(Json(json!({ "on_air": on_air })))
 }
 
+/// `POST /api/v1/server/restart`: stop the server cleanly. Docker, systemd and the Windows service
+/// start it again by themselves; a server started by hand just stops.
+pub async fn server_restart(State(s): State<AppState>) -> Json<Value> {
+    tracing::warn!("restart requested through the API");
+    let playout = s.playout.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+        if let Some(p) = playout {
+            p.stop_all();
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        std::process::exit(0);
+    });
+    Json(json!({ "restarting": true }))
+}
+
 #[cfg(test)]
 mod tests {
     use crate::test_util::call;

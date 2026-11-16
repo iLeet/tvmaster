@@ -85,6 +85,8 @@ struct Active<'l> {
     /// Set for events: gives them their own cursors.
     scope: Option<String>,
     label: String,
+    /// For a "one episode" slot: when this showing of it began.
+    once_from: Option<i64>,
 }
 
 fn resolve<'l>(c: &Compiled<'l>, t_ms: i64) -> Option<Active<'l>> {
@@ -94,6 +96,7 @@ fn resolve<'l>(c: &Compiled<'l>, t_ms: i64) -> Option<Active<'l>> {
                 source: e.source,
                 scope: Some(format!("event:{}", e.name.to_lowercase())),
                 label: e.name.to_string(),
+                once_from: None,
             });
         }
     }
@@ -103,6 +106,7 @@ fn resolve<'l>(c: &Compiled<'l>, t_ms: i64) -> Option<Active<'l>> {
             source: b.source,
             scope: None,
             label: b.name.to_string(),
+            once_from: b.once.then(|| b.showing_start(&c.zone, local)),
         })
     };
     for s in c.seasons.iter().filter(|s| s.active(local)) {
@@ -385,7 +389,17 @@ pub fn generate(
 
         let mut pick = None;
         // "Test screen" policy: time outside your time slots is the off-air screen, not more programmes.
-        let leave_empty = active.is_none()
+        // A "one episode" slot airs only at its start; the rest of the slot is a gap.
+        let spent = active
+            .as_ref()
+            .and_then(|a| a.once_from)
+            .is_some_and(|from| t - from >= 60_000);
+        let (src, scope, label) = if spent {
+            (&fill, None, None)
+        } else {
+            (src, scope, label)
+        };
+        let leave_empty = (active.is_none() || spent)
             && cfg.run_out == RunOutPolicy::OffAir
             && cfg.lineup.fill.is_none()
             && !cfg.lineup.blocks.is_empty();
@@ -414,7 +428,7 @@ pub fn generate(
                 end_ms: end,
                 cursor_key: None,
                 cursor_pos: None,
-                label,
+                label: Some(crate::lineup::OFF_AIR_LABEL.to_string()),
                 in_ms: 0,
                 bumper: None,
             });
@@ -815,6 +829,48 @@ mod tests {
             at("UTC", "2026-11-17 01:00"),
         );
         assert!(shows(&kept).len() > aired.len());
+    }
+
+    #[test]
+    fn a_one_episode_slot_airs_once_then_the_gap_policy_takes_over() {
+        let l = lineup(
+            r#"{"blocks":[{"start":"15:30","end":"19:00","once":true,"source":{"type":"show","show":"Alpha"}}]}"#,
+        );
+        let mut s = Setup::new(catalog(&[("Alpha", 40), ("Beta", 20)]), l);
+        s.run_out = RunOutPolicy::OffAir;
+        let items = s.gen(
+            &mut Cursors::new(),
+            at("UTC", "2026-11-16 15:30"),
+            at("UTC", "2026-11-18 00:00"),
+        );
+        // one episode on each of the two afternoons, nothing between
+        let aired = shows(&items);
+        assert_eq!(
+            aired.len(),
+            2,
+            "{:?}",
+            aired.iter().map(|i| i.start_ms).collect::<Vec<_>>()
+        );
+        assert_eq!(aired[0].start_ms, at("UTC", "2026-11-16 15:30"));
+        assert_eq!(aired[1].start_ms, at("UTC", "2026-11-17 15:30"));
+        assert!(items
+            .iter()
+            .filter(|i| i.kind != ItemKind::Show)
+            .all(|i| i.media_id.is_none()));
+        // with the ordinary policy the slot fills with the channel's fill programming instead
+        let mut k = Setup::new(
+            catalog(&[("Alpha", 40), ("Beta", 20)]),
+            lineup(
+                r#"{"blocks":[{"start":"15:30","end":"19:00","once":true,"source":{"type":"show","show":"Alpha"}}]}"#,
+            ),
+        );
+        k.run_out = RunOutPolicy::KeepGoing;
+        let kept = k.gen(
+            &mut Cursors::new(),
+            at("UTC", "2026-11-16 15:30"),
+            at("UTC", "2026-11-16 19:00"),
+        );
+        assert!(shows(&kept).len() > 1);
     }
 
     #[test]

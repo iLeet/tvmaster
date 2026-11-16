@@ -152,3 +152,9 @@ Add an `ads` section to the lineup and each slot's spare time becomes breaks, co
 - Show names in `show` sources match the show name parsed from your folders, case-insensitively.
 - Rotation `finale` only works with `show` items.
 - Shows added to a library shift episode positions for that show; the cursor keeps its numeric position.
+
+## One episode per time slot
+
+A time slot normally fills its hours: when an episode ends, the next one starts, until the slot's end time. Turn on **One episode only** for a slot (`"once": true` in the lineup) to air a single episode at the start time and leave the rest of the slot to the gap policy: with **When a show runs out → Test screen** that is the channel's off-air screen (colour bars and tone, if you chose them). The guide shows the show for its own time and "Off air" after it.
+
+The short "please stand by" between back-to-back episodes is the padding that brings each episode up to its half-hour (or hour) slot, not the end of the show; commercials and bumpers fill it when the channel has them.

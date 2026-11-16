@@ -7,6 +7,7 @@ import { Btn, Card, Field, Icon, Spinner, ToastProvider, useToast } from './ui';
 import { Channels } from './pages/Channels';
 import { ChannelEditor } from './pages/ChannelEditor';
 import { Dashboard } from './pages/Dashboard';
+import { LiveControl } from './pages/LiveControl';
 import { Libraries } from './pages/Libraries';
 import { Remote } from './pages/Remote';
 import { Shows } from './pages/Shows';
@@ -16,6 +17,7 @@ import { Tvs } from './pages/Tvs';
 
 const NAV: { path: string; label: string; icon: string }[] = [
   { path: 'dashboard', label: 'Home', icon: 'home' },
+  { path: 'live', label: 'Live control', icon: 'live' },
   { path: 'channels', label: 'Channels', icon: 'channels' },
   { path: 'schedule', label: 'Schedule', icon: 'calendar' },
   { path: 'libraries', label: 'Libraries', icon: 'folder' },
@@ -72,6 +74,9 @@ function Shell() {
       break;
     case 'schedule':
       page = <Schedule channelId={route.parts[1]} />;
+      break;
+    case 'live':
+      page = <LiveControl />;
       break;
     case 'libraries':
       page = <Libraries />;

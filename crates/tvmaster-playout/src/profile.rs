@@ -502,6 +502,35 @@ pub fn rendered_args(
     p: &OutputProfile,
     enc: Encoder,
 ) -> Vec<String> {
+    rendered_args_with_audio(
+        src_w,
+        src_h,
+        duration_ms,
+        ts_offset_ms,
+        p,
+        enc,
+        "anullsrc=r=48000:cl=stereo",
+    )
+}
+
+/// The emergency-alert attention signal: the two tones (853 Hz and 960 Hz) every
+/// alert starts with, for `tone_ms`, then quiet.
+pub fn attention_tone_source(tone_ms: u64) -> String {
+    let t = format!("{:.3}", tone_ms as f64 / 1000.0);
+    let e = format!("if(lt(t\\,{t})\\,0.30*sin(2*PI*853*t)+0.30*sin(2*PI*960*t)\\,0)");
+    format!("aevalsrc={e}|{e}:s=48000")
+}
+
+/// [`rendered_args`] with a chosen lavfi audio source.
+pub fn rendered_args_with_audio(
+    src_w: usize,
+    src_h: usize,
+    duration_ms: u64,
+    ts_offset_ms: u64,
+    p: &OutputProfile,
+    enc: Encoder,
+    audio_source: &str,
+) -> Vec<String> {
     let dur = secs(duration_ms);
     let mut a: Vec<String> = ["-hide_banner", "-loglevel", "error"]
         .iter()
@@ -524,7 +553,7 @@ pub fn rendered_args(
         "-t".into(),
         dur.clone(),
         "-i".into(),
-        "anullsrc=r=48000:cl=stereo".into(),
+        audio_source.to_string(),
         "-map".into(),
         "0:v:0".into(),
         "-map".into(),

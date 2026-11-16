@@ -221,7 +221,32 @@ public struct ShowSummary: Codable, Sendable, Hashable, Identifiable {
     public var name: String
     public var episodes: Int
     public var totalMs: Int64
+    /// Audio languages found in the show's files (three-letter codes); absent on older servers.
+    public var audioLanguages: [String]?
+    public var subtitleLanguages: [String]?
+    /// Settings that follow the show onto every channel.
+    public var defaults: ShowDefaults?
     public var id: String { name }
+}
+
+/// A show's own audio, subtitle and picture settings (blank = whatever the channel says).
+public struct ShowDefaults: Codable, Sendable, Hashable {
+    public var audioLanguages: [String]?
+    public var subtitles: String?
+    public var subtitleLanguages: [String]?
+    public var look: String?
+    public var aspect: String?
+    public init(audioLanguages: [String]? = nil, subtitles: String? = nil, subtitleLanguages: [String]? = nil, look: String? = nil, aspect: String? = nil) {
+        self.audioLanguages = audioLanguages; self.subtitles = subtitles; self.subtitleLanguages = subtitleLanguages; self.look = look; self.aspect = aspect
+    }
+    public var isEmpty: Bool { (audioLanguages ?? []).isEmpty && subtitles == nil && (subtitleLanguages ?? []).isEmpty && look == nil && aspect == nil }
+
+    var json: JSONValue {
+        func list(_ v: [String]?) -> JSONValue { (v ?? []).isEmpty ? .null : .array(v!.map { .string($0) }) }
+        return .object(["audio_languages": list(audioLanguages), "subtitles": subtitles.map { .string($0) } ?? .null,
+                        "subtitle_languages": list(subtitleLanguages), "look": look.map { .string($0) } ?? .null,
+                        "aspect": aspect.map { .string($0) } ?? .null])
+    }
 }
 
 public struct SystemInfo: Codable, Sendable, Hashable {
@@ -336,6 +361,60 @@ public struct ScheduleItem: Codable, Sendable, Hashable, Identifiable {
 }
 
 /// What the web player and remote both listen to.
+/// A channel the operator has taken over (test screen, blank, emergency alert...).
+public struct LiveOverride: Codable, Sendable, Hashable, Identifiable {
+    public var channel: String
+    public var mode: String
+    public var title: String
+    public var message: String
+    public var startedMs: Int64
+    public var untilMs: Int64?
+    public var id: String { channel }
+
+    public var modeLabel: String {
+        switch mode {
+        case "alert": "Emergency alert"
+        case "test_screen": "Test screen"
+        case "off_air": "Off air"
+        case "black": "Black"
+        case "static": "Snow"
+        default: mode
+        }
+    }
+}
+
+/// A ready-made alert to try or start from.
+public struct LiveSample: Codable, Sendable, Hashable, Identifiable {
+    public var id: String
+    public var name: String
+    public var event: String
+    public var text: String
+}
+
+public struct LiveState: Codable, Sendable, Hashable {
+    public var overrides: [LiveOverride]
+    public var samples: [LiveSample]
+    public init(overrides: [LiveOverride] = [], samples: [LiveSample] = []) { self.overrides = overrides; self.samples = samples }
+    public func override(for channel: String) -> LiveOverride? { overrides.first { $0.channel == channel } }
+}
+
+/// The ways to take a channel over, in the order they are offered.
+public enum LiveMode: String, CaseIterable, Identifiable, Sendable {
+    case testScreen = "test_screen", offAir = "off_air", black, snow = "static"
+    public var id: String { rawValue }
+    public var label: String {
+        switch self { case .testScreen: "Test screen"; case .offAir: "Off air"; case .black: "Black"; case .snow: "Snow" }
+    }
+    public var help: String {
+        switch self {
+        case .testScreen: "Colour bars and a steady tone"
+        case .offAir: "The channel's own off-air screen"
+        case .black: "A black screen, no sound"
+        case .snow: "Static and hiss"
+        }
+    }
+}
+
 public enum ServerEvent: Sendable, Equatable {
     case snapshot(tvs: [Tv])
     case tvState(Tv)
@@ -344,6 +423,8 @@ public enum ServerEvent: Sendable, Equatable {
     case scheduleChanged(channel: String)
     /// A problem was raised or went away, or a watched folder changed.
     case monitorChanged
+    /// A channel was taken over or given back.
+    case liveChanged
     /// The live connection came up or went down.
     case connection(Bool)
 }

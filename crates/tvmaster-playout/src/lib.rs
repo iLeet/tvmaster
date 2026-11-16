@@ -19,8 +19,9 @@ pub use looks::{audio_chain, AudioFx, Burn, ClockFx, ItemPlan, OverlayInput};
 pub use manager::{ChannelHealth, Manager};
 pub use probe::{probe_encoder, EncoderProbe};
 pub use profile::{
-    guide_run_args, item_args, rendered_args, screen_args, segmenter_args, slate_args, GuideRun,
-    ItemJob, LogoInput, OutputProfile, PipInput, ScreenInput,
+    attention_tone_source, guide_run_args, item_args, rendered_args, rendered_args_with_audio,
+    screen_args, segmenter_args, slate_args, GuideRun, ItemJob, LogoInput, OutputProfile, PipInput,
+    ScreenInput,
 };
 pub use tvmaster_render::GuideData;
 
@@ -66,6 +67,29 @@ pub struct PlayItem {
     pub tracks: Option<tvmaster_core::Tracks>,
 }
 
+/// What the operator has put on a channel in place of its programming.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LiveMode {
+    /// Colour bars and a 1 kHz tone.
+    TestScreen,
+    /// The channel's own off-air screen (its card, picture, bars or snow).
+    OffAir,
+    Black,
+    Static,
+    /// An emergency-alert screen with the attention tones.
+    Alert {
+        event: String,
+        text: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiveOverride {
+    pub mode: LiveMode,
+    /// When it went on air, so an alert plays its tone once at the start.
+    pub started_ms: i64,
+}
+
 /// The programmes coming up, formatted for on-screen graphics.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Upcoming {
@@ -91,6 +115,10 @@ pub trait ScheduleSource: Send + Sync + 'static {
     /// Settings for `show` that apply on every channel (its audio language,
     /// subtitles, look), read when the show airs so a change takes effect on the next item.
     fn show_defaults(&self, _channel: &str, _show: &str) -> Option<tvmaster_core::ShowOptions> {
+        None
+    }
+    /// What the operator has put on this channel instead of its programming, if anything.
+    fn live_override(&self, _channel: &str) -> Option<LiveOverride> {
         None
     }
     /// The listing to draw on a guide channel at `now_ms`.

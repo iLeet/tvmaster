@@ -138,6 +138,10 @@ public struct TVMasterClient: Sendable {
         do {
             (data, response) = try await session.data(for: req)
         } catch {
+            // A request the app itself abandoned (the view changed under it) is not a server problem.
+            if error is CancellationError || (error as? URLError)?.code == .cancelled && trust?.lastRejected == nil {
+                throw CancellationError()
+            }
             throw mapped(error)
         }
         guard let http = response as? HTTPURLResponse else { throw TVMasterError.invalidResponse }
@@ -201,6 +205,34 @@ public struct TVMasterClient: Sendable {
     /// `start`, `stop` or `restart` a channel's stream.
     public func stream(channel id: String, action: String) async throws {
         try await send("POST", "/channels/\(id)/stream", body: .object(["action": .string(action)]))
+    }
+
+    /// Stop the server cleanly. Docker, systemd and the Windows service start it again; a server started by hand just stops.
+    public func restartServer() async throws { try await send("POST", "/server/restart", body: .object([:])) }
+
+    // MARK: live control
+
+    public func live() async throws -> LiveState { try await get("/live") }
+
+    /// Put `channels` (empty = all) on the test screen, a blank, or an emergency alert.
+    @discardableResult
+    public func takeOver(channels: [String], mode: String, title: String? = nil, message: String? = nil,
+                         sample: String? = nil, minutes: Int? = nil) async throws -> LiveState {
+        var body: [String: JSONValue] = ["channels": .array((channels.isEmpty ? ["all"] : channels).map { .string($0) }), "mode": .string(mode)]
+        if let title { body["title"] = .string(title) }
+        if let message { body["message"] = .string(message) }
+        if let sample { body["sample"] = .string(sample) }
+        if let minutes, minutes > 0 { body["minutes"] = .number(Double(minutes)) }
+        let data = try await send("POST", "/live", body: .object(body))
+        do { return try Self.decoder.decode(LiveState.self, from: data) } catch { throw TVMasterError.invalidResponse }
+    }
+
+    /// Give `channels` (empty = all) back to their programming.
+    @discardableResult
+    public func giveBack(channels: [String]) async throws -> LiveState {
+        let body: JSONValue = .object(["channels": .array((channels.isEmpty ? ["all"] : channels).map { .string($0) })])
+        let data = try await send("POST", "/live/clear", body: body)
+        do { return try Self.decoder.decode(LiveState.self, from: data) } catch { throw TVMasterError.invalidResponse }
     }
 
     public func setOpenViewing(_ open: Bool) async throws {
@@ -376,4 +408,9 @@ public struct TVMasterClient: Sendable {
     public func deleteLibrary(_ id: Int) async throws { try await send("DELETE", "/libraries/\(id)") }
 
     public func shows() async throws -> [ShowSummary] { try await get("/shows") }
+
+    /// Save the settings that follow `show` onto every channel (all blank = remove them).
+    public func setShowSettings(show: String, _ settings: ShowDefaults) async throws {
+        try await send("PUT", "/show-settings", body: .object(["show": .string(show), "settings": settings.json]))
+    }
 }

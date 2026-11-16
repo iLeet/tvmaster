@@ -24,6 +24,28 @@ const COOKIE: &str = "tvmaster_token";
 /// Where a token set from the admin UI is kept.
 pub const META_KEY: &str = "access_token";
 /// Whether watching needs no token even when managing does.
+/// What a stopped (or running) server has saved about access: the token, if any, and whether watching is open.
+/// Read straight from the database, so it works whether or not the server is running.
+pub fn saved_access(data_dir: &std::path::Path) -> Result<(Option<String>, bool), String> {
+    let db_path = data_dir.join("tvmaster.db");
+    if !db_path.is_file() {
+        return Err(format!(
+            "no TVMaster database in {} (use --data-dir, or run this where the server's data is)",
+            data_dir.display()
+        ));
+    }
+    let conn = tvmaster_db::open(&db_path).map_err(|e| format!("opening the database: {e}"))?;
+    let token = tvmaster_db::meta_get(&conn, META_KEY)
+        .ok()
+        .flatten()
+        .filter(|t| valid_token(t));
+    let open = tvmaster_db::meta_get(&conn, OPEN_VIEWING_KEY)
+        .ok()
+        .flatten()
+        .is_some_and(|v| v == "1");
+    Ok((token, open))
+}
+
 pub const OPEN_VIEWING_KEY: &str = "open_viewing";
 
 /// Tokens go into cookies and URLs, so only unreserved characters are allowed.

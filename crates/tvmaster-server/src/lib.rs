@@ -10,6 +10,7 @@ mod guide_preview;
 mod hdhr;
 mod iptv;
 mod libraries;
+mod live;
 mod monitor;
 mod pip;
 mod plan;
@@ -68,6 +69,8 @@ pub struct AppState {
     pub(crate) data_dir: Option<std::path::PathBuf>,
     /// Problems being reported and what the folder watcher last saw.
     pub(crate) monitor: Arc<Mutex<monitor::Book>>,
+    /// What the operator has put on each channel in place of its programming.
+    pub(crate) live: Arc<Mutex<live::Book>>,
 }
 
 /// What the daemon is listening on, so clients can build links to it.
@@ -112,7 +115,9 @@ impl AppState {
         ffmpeg: Option<FfmpegInfo>,
         playout: Option<Arc<Manager>>,
     ) -> Self {
+        let live = live::load(&conn);
         Self {
+            live: Arc::new(Mutex::new(live)),
             db: Arc::new(Mutex::new(conn)),
             playout,
             ffmpeg: ffmpeg.map(Arc::new),
@@ -334,6 +339,7 @@ impl AppState {
                 db: self.db.clone(),
                 dirty: self.dirty.clone(),
                 wake: self.wake.clone(),
+                live: self.live.clone(),
             }),
         }
     }
@@ -366,6 +372,15 @@ impl AppState {
         // (Two database guards in one expression would wait on each other forever.)
         let zone = station::effective_timezone(&state.db());
         autopilot::fill_blank_timezones(&state.db(), &zone);
+        // A timed override ends by itself.
+        let ticker = state.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                let s = ticker.clone();
+                let _ = tokio::task::spawn_blocking(move || live::expire(&s)).await;
+            }
+        });
         tokio::spawn(async move {
             let mut last_revive = std::time::Instant::now();
             loop {
@@ -432,7 +447,7 @@ impl IntoResponse for ApiError {
 
 pub(crate) type ApiResult<T> = Result<T, ApiError>;
 
-pub use auth::{generate_token, valid_token};
+pub use auth::{generate_token, saved_access, valid_token};
 
 /// The plain-HTTP router.
 pub fn router(state: AppState) -> Router {
@@ -512,6 +527,9 @@ fn build_router(state: AppState, https: bool) -> Router {
             "/api/v1/timezone",
             get(station::get_timezone).put(station::put_timezone),
         )
+        .route("/api/v1/server/restart", post(station::server_restart))
+        .route("/api/v1/live", get(live::get_live).post(live::set_live))
+        .route("/api/v1/live/clear", post(live::clear_live))
         .route("/api/v1/channels/:id/reset", post(station::reset))
         .route("/api/v1/channels/:id/stream", post(station::stream_control))
         .route("/api/v1/monitor", get(monitor::get).put(monitor::put))

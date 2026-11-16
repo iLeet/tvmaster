@@ -9,6 +9,7 @@ struct SettingsView: View {
     @State private var tzApplyAll = true
     @State private var webhookText = ""
     @State private var confirmRotate = false
+    @State private var confirmServerRestart = false
 
     var body: some View {
         @Bindable var model = model
@@ -31,12 +32,28 @@ struct SettingsView: View {
                         }
                         Button(model.scanning ? "Looking…" : "Look for servers") { model.findServers() }.glassButton().disabled(model.scanning)
                     }
-                    SecureField("Access token", text: $tokenText, prompt: Text(model.token.isEmpty ? "None" : "Saved in your Keychain"))
+                    SecureField("Access token", text: $tokenText, prompt: Text(model.token.isEmpty ? "None" : "Saved on this Mac"))
                     HStack {
                         Button("Connect") { Task { if !tokenText.isEmpty { model.token = tokenText; tokenText = "" }; await model.connect() } }.glassButton(prominent: true)
                         Button("Forget token") { model.forgetToken() }.glassButton()
                         Spacer()
                         HStack(spacing: 6) { StatusDot(on: model.live); Text(model.live ? "Connected" : "Not connected").foregroundStyle(.secondary) }
+                    }
+                }
+                Section("Control the server") {
+                    Text("Works on whichever server you are connected to, here or across the network. Streams start and stop from Live control.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    HStack {
+                        Button("Restart the server…") { confirmServerRestart = true }.glassButton().disabled(!model.live)
+                        Button("Open the web admin") { model.openInBrowser("/admin/") }.glassButton()
+                        Button("Live control") { model.selection = .live }.glassButton()
+                    }
+                    Text("A restart stops every channel for about ten seconds. The server comes back by itself in Docker, as a service, or as the Linux or Windows package; one started by hand just stops.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                .confirmationDialog("Restart the server?", isPresented: $confirmServerRestart) {
+                    Button("Restart", role: .destructive) {
+                        Task { if let c = model.client { _ = await model.run { try await c.restartServer() }; try? await Task.sleep(nanoseconds: 6_000_000_000); await model.connect() } }
                     }
                 }
                 Section("Access token") {

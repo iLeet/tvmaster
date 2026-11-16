@@ -243,8 +243,8 @@ struct DaemonTests {
         #expect(parts.filter { $0 == "/opt/homebrew/bin" }.count == 1)
     }
 
-    @Test func tokensRoundTripThroughTheKeychain() {
-        let store = TokenStore(service: "app.tvmaster.tests.\(UUID().uuidString)")
+    @Test func tokensAreKeptInAPrivateFileNotTheKeychain() {
+        let store = TokenStore(service: "app.tvmaster.tests.\(UUID().uuidString)", directory: FileManager.default.temporaryDirectory.appendingPathComponent("tvm-tokens-\(UUID().uuidString)"))
         let server = "http://tv.local:8787"
         #expect(store.token(for: server) == nil)
         #expect(store.set("first-token-123", for: server))

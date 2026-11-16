@@ -228,7 +228,10 @@ export function Settings() {
             </tbody>
           </table>
         )}
-        {auth.data?.required && <div><Btn onClick={() => attempt(() => api.post('/auth/logout')).then(() => location.reload())}>Sign out</Btn></div>}
+        <div className="row wrap">
+          {auth.data?.required && <Btn onClick={() => attempt(() => api.post('/auth/logout')).then(() => location.reload())}>Sign out</Btn>}
+          <ConfirmBtn label="Restart the server" confirm="Restart the server now? Every channel stops for about ten seconds. It comes back by itself when it runs in Docker, as a service, or as the Linux or Windows package; started by hand it just stops." onConfirm={() => attempt(() => api.post('/server/restart'), 'Restarting… the page reconnects in a moment')} />
+        </div>
       </Card>
     </div>
   );

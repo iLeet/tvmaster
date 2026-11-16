@@ -77,6 +77,12 @@ enum Command {
     },
     /// Print a new random access token to use with --token.
     Token,
+    /// Show the access token this server is using (read from its data folder, so the server need not be running).
+    Access {
+        /// The server's data folder.
+        #[arg(long, default_value = "tvmaster-data", env = "TVMASTER_DATA_DIR")]
+        data_dir: PathBuf,
+    },
     /// Check FFmpeg and test every video encoder on this machine.
     Doctor {
         /// ffmpeg binary (name on PATH or full path).
@@ -168,6 +174,23 @@ async fn main() -> Result<()> {
         Command::Doctor { ffmpeg, ffprobe } => doctor(&ffmpeg, &ffprobe),
         Command::Token => {
             println!("{}", tvmaster_server::generate_token());
+            Ok(())
+        }
+        Command::Access { data_dir } => {
+            let (token, open) =
+                tvmaster_server::saved_access(&data_dir).map_err(anyhow::Error::msg)?;
+            match token {
+                Some(t) => {
+                    println!("Access token: {t}");
+                    if open {
+                        println!(
+                            "Watching is open: streams, playlists and the player need no token."
+                        );
+                    }
+                }
+                None => println!("No access token is saved: the server is open to your network."),
+            }
+            println!("(A server started with --token uses that instead; the one above is what the admin saved.)");
             Ok(())
         }
         Command::Service {

@@ -169,9 +169,11 @@ struct MainView: View {
                     switch model.selection {
                     case .home: HomeView()
                     case .watch: WatchView()
+                    case .live: LiveControlView()
                     case .channels: ChannelsView()
                     case .schedule: ScheduleView()
                     case .libraries: LibrariesView()
+                    case .shows: ShowsView()
                     case .tvs: TVsView()
                     case .share: ShareView()
                     }
