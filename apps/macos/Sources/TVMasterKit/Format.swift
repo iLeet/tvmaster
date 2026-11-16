@@ -1,4 +1,5 @@
 import Foundation
+import Security
 
 public enum Format {
     /// "22m", "1h 05m", "45s"
@@ -39,5 +40,14 @@ public enum Format {
         var n = start
         while taken.contains(n) { n += 1 }
         return n
+    }
+
+    /// A random access token: 32 hex characters, which the server accepts.
+    public static func randomToken() -> String {
+        var bytes = [UInt8](repeating: 0, count: 16)
+        guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {
+            return UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+        }
+        return bytes.map { String(format: "%02x", $0) }.joined()
     }
 }

@@ -155,6 +155,17 @@ export interface System {
   };
   on_air: string[];
   auth_required: boolean;
+  network?: Network;
+}
+
+/** Where the server can be reached, as it reports itself. */
+export interface Network {
+  hostname: string;
+  /** Names first (they survive an address change), then IPv4 addresses. */
+  hosts: string[];
+  http_port: number | null;
+  https_port: number | null;
+  tls: { enabled: boolean; self_signed: boolean; fingerprint: string | null };
 }
 
 export interface FsList {

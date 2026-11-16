@@ -14,6 +14,8 @@ struct RootView: View {
                 ConnectView(mode: .server, message: message)
             case .needsToken(let message):
                 ConnectView(mode: .token, message: message)
+            case .needsTrust(let host, let fingerprint):
+                TrustView(host: host, fingerprint: fingerprint)
             case .ready:
                 MainView()
             }
@@ -65,6 +67,46 @@ struct ConnectView: View {
     }
 }
 
+/// "Do you trust this server?" for a self-signed HTTPS certificate: shows the
+/// fingerprint to compare against what the server itself reports.
+struct TrustView: View {
+    @Environment(AppModel.self) private var model
+    var host: String
+    var fingerprint: String
+
+    /// Eight bytes to a line so it can be read aloud and compared.
+    private var lines: [String] {
+        let bytes = fingerprint.split(separator: ":").map(String.init)
+        return stride(from: 0, to: bytes.count, by: 8).map { bytes[$0..<min($0 + 8, bytes.count)].joined(separator: " ") }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 12) {
+                Image(systemName: "lock.trianglebadge.exclamationmark").font(.system(size: 30)).foregroundStyle(.orange)
+                VStack(alignment: .leading) {
+                    Text("Trust this server?").font(.title.bold())
+                    Text(host).foregroundStyle(.secondary)
+                }
+            }
+            Text("This server uses a certificate it made for itself, so nothing like a certificate authority can vouch for it. If this is your own TVMaster, check that the fingerprint below matches the one your server shows (its Settings page, or its log when it starts), then trust it. The app will remember this exact certificate and ask again if it ever changes.")
+                .font(.callout).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("SHA-256 fingerprint").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                ForEach(lines, id: \.self) { Text($0).font(.system(.callout, design: .monospaced)).textSelection(.enabled) }
+            }
+            .padding(12).frame(maxWidth: .infinity, alignment: .leading).glassCard(cornerRadius: 14)
+            HStack {
+                Button("Cancel") { Task { await model.disconnect() } }.glassButton()
+                Spacer()
+                Button("Trust and connect") { Task { await model.trustServer(host: host, fingerprint: fingerprint) } }
+                    .glassButton(prominent: true).keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(26).frame(width: 500).glassCard(cornerRadius: 28)
+    }
+}
+
 struct MainView: View {
     @Environment(AppModel.self) private var model
 
@@ -93,6 +135,7 @@ struct MainView: View {
                     case .schedule: ScheduleView()
                     case .libraries: LibrariesView()
                     case .tvs: TVsView()
+                    case .share: ShareView()
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

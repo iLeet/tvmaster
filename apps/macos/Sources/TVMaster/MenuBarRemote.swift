@@ -35,10 +35,21 @@ struct MenuBarRemote: View {
                 }
             }
             Divider()
+            Button("Copy playlist link") { copyPlaylistLink() }.buttonStyle(.plain)
             Button("Open TVMaster") { NSApp.activate(ignoringOtherApps: true); openWindow(id: "main") }.buttonStyle(.plain)
             Button("Quit") { NSApp.terminate(nil) }.buttonStyle(.plain)
         }
         .padding(14).frame(width: 260)
+    }
+
+    /// The M3U link other apps need, built the same way as on the Share screen.
+    private func copyPlaylistLink() {
+        guard let client = model.client else { return }
+        let links = ShareLinks(network: model.system?.network, token: client.token, baseURL: client.baseURL)
+        let sections = links.sections(links.defaultOptions, channels: [], tvs: [])
+        guard let url = sections.flatMap(\.links).first(where: { $0.id == "playlist" })?.url else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(url, forType: .string)
     }
 
     private func status(_ tv: Tv) -> String {

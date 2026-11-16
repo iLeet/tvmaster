@@ -19,6 +19,14 @@ license = "UNLICENSED"
 publish = false
 
 [workspace.dependencies]
+axum-server = { version = "0.7", default-features = false, features = ["tls-rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-pemfile = "2"
+rcgen = { version = "0.13", default-features = false, features = ["crypto", "pem", "ring"] }
+sha2 = "0.10"
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
+if-addrs = "0.13"
+gethostname = "0.5"
 anyhow = "1"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 chrono-tz = "0.10"

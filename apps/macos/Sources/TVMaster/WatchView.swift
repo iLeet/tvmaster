@@ -32,12 +32,12 @@ final class PlayerController {
     private var channelID: String?
     private var observers: Set<AnyCancellable> = []
 
-    func play(channel: Channel, client: TVMasterClient) {
+    func play(channel: Channel, url: URL) {
         if channelID == channel.id, player != nil, status != .idle { return }
         channelID = channel.id
         stop(keepChannel: true)
         status = .loading
-        let item = AVPlayerItem(url: client.streamURL(channel: channel.id))
+        let item = AVPlayerItem(url: url)
         item.preferredForwardBufferDuration = 6
         let p = AVPlayer(playerItem: item)
         p.automaticallyWaitsToMinimizeStalling = true
@@ -60,9 +60,9 @@ final class PlayerController {
         if !keepChannel { channelID = nil; status = .idle }
     }
 
-    func retry(channel: Channel, client: TVMasterClient) {
+    func retry(channel: Channel, url: URL) {
         channelID = nil
-        play(channel: channel, client: client)
+        play(channel: channel, url: url)
     }
 }
 
@@ -103,8 +103,12 @@ struct WatchView: View {
     }
 
     private func start() {
-        guard let client = model.client, let ch = model.watching else { controller.stop(); return }
-        controller.play(channel: ch, client: client)
+        guard model.client != nil, let ch = model.watching else { controller.stop(); return }
+        Task {
+            guard let url = await model.playableURL(for: ch) else { return }
+            // The channel may have changed while the relay started.
+            if model.watching?.id == ch.id { controller.play(channel: ch, url: url) }
+        }
     }
 
     @ViewBuilder private var overlay: some View {
@@ -130,7 +134,7 @@ struct WatchView: View {
                 VStack(spacing: 10) {
                     Label("This channel isn't available", systemImage: "exclamationmark.triangle").font(.headline)
                     Text(message).font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                    Button("Try again") { if let c = model.client, let ch = model.watching { controller.retry(channel: ch, client: c) } }.glassButton()
+                    Button("Try again") { if let ch = model.watching { Task { if let url = await model.playableURL(for: ch) { controller.retry(channel: ch, url: url) } } } }.glassButton()
                 }
                 .padding(20).frame(maxWidth: 360).glassCard(cornerRadius: 20)
                 Spacer()

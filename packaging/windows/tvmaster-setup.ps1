@@ -9,7 +9,8 @@ param(
   [Parameter(Mandatory)][ValidateSet('Service', 'Ffmpeg', 'Firewall', 'Remove')][string]$Action,
   [Parameter(Mandatory)][string]$InstallDir,
   [string]$DataDir = (Join-Path $env:ProgramData 'TVMaster'),
-  [string]$Bind = '0.0.0.0:8787'
+  [string]$Bind = '0.0.0.0:8787',
+  [switch]$Https
 )
 $ErrorActionPreference = 'Stop'
 $TaskName = 'TVMaster'
@@ -29,6 +30,7 @@ function Install-Service {
   & icacls $tokenFile /inheritance:r /grant:r 'Administrators:F' 'SYSTEM:F' | Out-Null
 
   $serveArgs = "serve --bind $Bind --data-dir `"$DataDir`" --token-file `"$tokenFile`""
+  if ($Https) { $serveArgs += ' --tls' }
   $action = New-ScheduledTaskAction -Execute $Exe -Argument $serveArgs -WorkingDirectory $InstallDir
   $trigger = New-ScheduledTaskTrigger -AtStartup
   $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest

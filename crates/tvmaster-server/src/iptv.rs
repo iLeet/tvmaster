@@ -19,7 +19,7 @@ fn base_url(headers: &HeaderMap) -> String {
         .get(header::HOST)
         .and_then(|h| h.to_str().ok())
         .unwrap_or("localhost:8787");
-    format!("http://{host}")
+    format!("{}://{host}", crate::request_scheme(headers))
 }
 
 fn xml_escape(s: &str) -> String {

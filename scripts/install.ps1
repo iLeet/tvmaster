@@ -1,6 +1,7 @@
 # Installs the TVMaster daemon on Windows from the unpacked zip (the setup .exe does
 # the same with a wizard). Run from an elevated PowerShell:
 #   .\install.ps1                 install to Program Files, start at boot, open the firewall, get FFmpeg
+#   .\install.ps1 -Https           also serve HTTPS (self-signed certificate, port 8788)
 #   .\install.ps1 -NoFfmpeg -NoFirewall -Bind 127.0.0.1:8787 -DataDir D:\TVMaster
 param(
   [string]$Prefix = (Join-Path $env:ProgramFiles 'TVMaster'),
@@ -8,7 +9,8 @@ param(
   [string]$Bind = '0.0.0.0:8787',
   [switch]$NoService,
   [switch]$NoFirewall,
-  [switch]$NoFfmpeg
+  [switch]$NoFfmpeg,
+  [switch]$Https
 )
 $ErrorActionPreference = 'Stop'
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -31,7 +33,7 @@ $setup = Join-Path $Prefix 'tvmaster-setup.ps1'
 if (-not $NoFfmpeg)   { & $setup -Action Ffmpeg   -InstallDir $Prefix -DataDir $DataDir -Bind $Bind }
 if (-not $NoFirewall) { & $setup -Action Firewall -InstallDir $Prefix -DataDir $DataDir -Bind $Bind }
 if (-not $NoService)  {
-  & $setup -Action Service -InstallDir $Prefix -DataDir $DataDir -Bind $Bind
+  & $setup -Action Service -InstallDir $Prefix -DataDir $DataDir -Bind $Bind -Https:$Https
   Write-Host "Open http://localhost:$($Bind.Split(':')[-1])/admin/  (the access token is in $DataDir\token)"
 } else {
   Write-Host "Run it with:  & '$Prefix\tvmaster.exe' serve --data-dir '$DataDir'"

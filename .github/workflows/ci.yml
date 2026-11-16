@@ -40,6 +40,9 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace
+      - name: System test (real daemon, real FFmpeg, HTTP and HTTPS)
+        if: runner.os != 'Windows'
+        run: cargo build -p tvmaster-cli && scripts/system-test.sh target/debug/tvmaster
 
   swift:
     name: macOS app

@@ -22,8 +22,16 @@ iana-time-zone.workspace = true
 getrandom.workspace = true
 rust-embed.workspace = true
 chrono.workspace = true
+axum-server.workspace = true
+rustls.workspace = true
+rustls-pemfile.workspace = true
+rcgen.workspace = true
+sha2.workspace = true
+if-addrs.workspace = true
+gethostname.workspace = true
 
 [dev-dependencies]
+tokio-rustls.workspace = true
 futures-util.workspace = true
 tokio-tungstenite.workspace = true
 http-body-util.workspace = true

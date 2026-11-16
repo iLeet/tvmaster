@@ -7,9 +7,10 @@ public final class EventStream: @unchecked Sendable {
     private let lock = NSLock()
     private var playerOf: String?
 
-    public init(client: TVMasterClient, session: URLSession = .shared) {
+    /// Uses the client's own session, so a pinned certificate is honoured on `wss://` too.
+    public init(client: TVMasterClient, session: URLSession? = nil) {
         self.client = client
-        self.session = session
+        self.session = session ?? client.urlSession
     }
 
     /// Announce that this connection is the player for TV `id`, so the server

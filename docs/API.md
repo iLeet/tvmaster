@@ -20,6 +20,10 @@ Tokens are 8-128 characters of letters, digits, `-`, `_`, `.`, `~`. Use HTTPS (a
 
 Errors are `{"error": "message"}` with a suitable status code.
 
+### HTTPS
+
+`tvmaster serve --tls` adds an HTTPS listener (default `0.0.0.0:8788`) next to the HTTP one; both serve the same API. Over HTTPS the login cookie is `Secure`, and links the server writes (M3U, HDHomeRun, XMLTV) say `https://`. Behind a reverse proxy that sets `X-Forwarded-Proto: https` the same happens. `GET /api/v1/system` reports `network`: `hostname`, `hosts` (names then IPv4 addresses, for building links), `http_port`, `https_port` and `tls` (`enabled`, `self_signed`, `fingerprint` as `AA:BB:...` SHA-256 of the certificate).
+
 ## Streams (TVs and IPTV clients)
 
 | Method | Path | Status | Notes |

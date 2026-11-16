@@ -130,13 +130,24 @@ pub struct Login {
     token: String,
 }
 
-pub async fn login(State(s): State<AppState>, Json(body): Json<Login>) -> Response {
+pub async fn login(
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Login>,
+) -> Response {
     match &s.token {
         None => Json(json!({ "ok": true })).into_response(),
         Some(t) if constant_time_eq(&body.token, t) => {
             let mut res = Json(json!({ "ok": true })).into_response();
-            let cookie =
-                format!("{COOKIE}={t}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000");
+            // Over HTTPS the cookie is marked Secure, so a browser never sends it in the clear.
+            let secure = if crate::request_scheme(&headers) == "https" {
+                "; Secure"
+            } else {
+                ""
+            };
+            let cookie = format!(
+                "{COOKIE}={t}; Path=/; HttpOnly; SameSite=Strict{secure}; Max-Age=31536000"
+            );
             res.headers_mut().insert(
                 header::SET_COOKIE,
                 HeaderValue::from_str(&cookie).expect("token is cookie-safe"),

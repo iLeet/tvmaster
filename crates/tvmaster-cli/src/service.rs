@@ -24,10 +24,12 @@ pub fn render(
     data_dir: &Path,
     bind: &str,
     token_file: Option<&Path>,
+    tls: bool,
 ) -> String {
     let bin = bin.display().to_string();
     let data = data_dir.display().to_string();
     let token = token_file.map(|f| f.display().to_string());
+    let tls_arg = if tls { " --tls" } else { "" };
     match kind {
         Kind::Launchd => format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -40,7 +42,7 @@ pub fn render(
     <string>{bin}</string>
     <string>serve</string>
     <string>--bind</string><string>{bind}</string>
-    <string>--data-dir</string><string>{data}</string>{token_args}
+    <string>--data-dir</string><string>{data}</string>{token_args}{tls_xml}
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
@@ -52,6 +54,11 @@ pub fn render(
             bin = xml_escape(&bin),
             bind = xml_escape(bind),
             data = xml_escape(&data),
+            tls_xml = if tls {
+                "\n    <string>--tls</string>"
+            } else {
+                ""
+            },
             token_args = token
                 .as_deref()
                 .map(|t| format!(
@@ -67,7 +74,7 @@ pub fn render(
                 .unwrap_or_default();
             format!(
             "[Unit]\nDescription=TVMaster IPTV station\nAfter=network-online.target\nWants=network-online.target\n\n\
-[Service]\nExecStart={bin} serve --bind {bind} --data-dir {data}{token_arg}\nRestart=always\nRestartSec=3\n\n\
+[Service]\nExecStart={bin} serve --bind {bind} --data-dir {data}{token_arg}{tls_arg}\nRestart=always\nRestartSec=3\n\n\
 [Install]\nWantedBy=multi-user.target\n"
             )
         }
@@ -77,7 +84,7 @@ pub fn render(
                 .map(|t| format!(" --token-file \\\"{t}\\\""))
                 .unwrap_or_default();
             format!(
-            "schtasks /Create /TN \"TVMaster\" /SC ONSTART /RU SYSTEM /RL HIGHEST /F ^\n  /TR \"\\\"{bin}\\\" serve --bind {bind} --data-dir \\\"{data}\\\"{token_arg}\"\n"
+            "schtasks /Create /TN \"TVMaster\" /SC ONSTART /RU SYSTEM /RL HIGHEST /F ^\n  /TR \"\\\"{bin}\\\" serve --bind {bind} --data-dir \\\"{data}\\\"{token_arg}{tls_arg}\"\n"
             )
         }
     }
@@ -95,6 +102,7 @@ mod tests {
             &PathBuf::from("/var/lib/tvmaster"),
             "0.0.0.0:8787",
             None,
+            false,
         )
     }
 
@@ -126,6 +134,7 @@ mod tests {
             &PathBuf::from("/d"),
             "x",
             None,
+            false,
         );
         assert!(s.contains("A&amp;B"));
     }
@@ -140,6 +149,7 @@ mod tests {
                 &PathBuf::from("/d"),
                 "x",
                 Some(t),
+                false,
             )
         };
         assert!(args(Kind::Systemd).contains("--token-file /home/me/token"));
@@ -147,5 +157,25 @@ mod tests {
             .contains("<string>--token-file</string><string>/home/me/token</string>"));
         assert!(args(Kind::Windows).contains("--token-file"));
         assert!(!args(Kind::Systemd).contains("--token "));
+    }
+
+    #[test]
+    fn https_is_added_to_every_kind_of_definition_when_asked() {
+        let args = |k, tls| {
+            render(
+                k,
+                &PathBuf::from("/b/tvmaster"),
+                &PathBuf::from("/d"),
+                "x",
+                None,
+                tls,
+            )
+        };
+        assert!(args(Kind::Systemd, true).contains(" --tls"));
+        assert!(args(Kind::Launchd, true).contains("<string>--tls</string>"));
+        assert!(args(Kind::Windows, true).contains(" --tls"));
+        for k in [Kind::Systemd, Kind::Launchd, Kind::Windows] {
+            assert!(!args(k, false).contains("--tls"));
+        }
     }
 }

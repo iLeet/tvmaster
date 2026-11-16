@@ -52,6 +52,24 @@ enum Command {
         /// process listings and service definitions.
         #[arg(long, env = "TVMASTER_TOKEN_FILE", conflicts_with = "token")]
         token_file: Option<PathBuf>,
+        /// Also serve HTTPS (on --tls-bind) with a self-signed certificate that is
+        /// made once and kept in the data folder. Clients trust it by its fingerprint.
+        #[arg(long, env = "TVMASTER_TLS")]
+        tls: bool,
+        /// Address for HTTPS. Setting it turns HTTPS on.
+        #[arg(long, env = "TVMASTER_TLS_BIND")]
+        tls_bind: Option<String>,
+        /// Use your own certificate (PEM) instead of a self-signed one, for example
+        /// from Let's Encrypt or `tailscale cert`. Needs --tls-key. It is re-read
+        /// every few hours so renewals are picked up.
+        #[arg(long, env = "TVMASTER_TLS_CERT", requires = "tls_key")]
+        tls_cert: Option<PathBuf>,
+        #[arg(long, env = "TVMASTER_TLS_KEY", requires = "tls_cert")]
+        tls_key: Option<PathBuf>,
+        /// Do not open the plain-HTTP port; serve only HTTPS. IPTV apps and many
+        /// smart-TV browsers cannot use a self-signed certificate, so check yours can.
+        #[arg(long, env = "TVMASTER_NO_HTTP")]
+        no_http: bool,
     },
     /// Print a new random access token to use with --token.
     Token,
@@ -78,6 +96,9 @@ enum Command {
         /// Have the service read its access token from this file.
         #[arg(long)]
         token_file: Option<PathBuf>,
+        /// Have the service also serve HTTPS.
+        #[arg(long)]
+        tls: bool,
     },
 }
 
@@ -99,6 +120,11 @@ async fn main() -> Result<()> {
             idle_seconds,
             token,
             token_file,
+            tls,
+            tls_bind,
+            tls_cert,
+            tls_key,
+            no_http,
         } => {
             let token = match token_file {
                 Some(f) => Some(
@@ -112,7 +138,7 @@ async fn main() -> Result<()> {
                 ),
                 None => token,
             };
-            serve(
+            serve(ServeOptions {
                 bind,
                 data_dir,
                 ffmpeg,
@@ -120,7 +146,11 @@ async fn main() -> Result<()> {
                 encoder,
                 idle_seconds,
                 token,
-            )
+                tls: tls || tls_bind.is_some() || tls_cert.is_some(),
+                tls_bind: tls_bind.unwrap_or_else(|| "0.0.0.0:8788".into()),
+                tls_files: tls_cert.zip(tls_key),
+                no_http,
+            })
             .await
         }
         Command::Doctor { ffmpeg, ffprobe } => doctor(&ffmpeg, &ffprobe),
@@ -134,6 +164,7 @@ async fn main() -> Result<()> {
             data_dir,
             bind,
             token_file,
+            tls,
         } => {
             let bin = match bin {
                 Some(b) => b,
@@ -143,14 +174,14 @@ async fn main() -> Result<()> {
             let token_file = token_file.map(|f| std::path::absolute(&f).unwrap_or(f));
             print!(
                 "{}",
-                service::render(kind, &bin, &data_dir, &bind, token_file.as_deref())
+                service::render(kind, &bin, &data_dir, &bind, token_file.as_deref(), tls)
             );
             Ok(())
         }
     }
 }
 
-async fn serve(
+struct ServeOptions {
     bind: String,
     data_dir: PathBuf,
     ffmpeg: PathBuf,
@@ -158,7 +189,31 @@ async fn serve(
     encoder: Option<String>,
     idle_seconds: u64,
     token: Option<String>,
-) -> Result<()> {
+    tls: bool,
+    tls_bind: String,
+    tls_files: Option<(PathBuf, PathBuf)>,
+    no_http: bool,
+}
+
+fn port_of(addr: &str) -> Option<u16> {
+    addr.rsplit(':').next().and_then(|p| p.parse().ok())
+}
+
+async fn serve(o: ServeOptions) -> Result<()> {
+    let ServeOptions {
+        bind,
+        data_dir,
+        ffmpeg,
+        ffprobe,
+        encoder,
+        idle_seconds,
+        token,
+        tls,
+        tls_bind,
+        tls_files,
+        no_http,
+    } = o;
+    anyhow::ensure!(tls || !no_http, "--no-http needs HTTPS: add --tls");
     if let Some(t) = &token {
         anyhow::ensure!(
             tvmaster_server::valid_token(t),
@@ -214,23 +269,92 @@ async fn serve(
         }
     };
 
-    let state = AppState::new(conn, info, playout.clone()).with_token(token);
+    // HTTPS: the certificate is made (or loaded) before anything starts listening.
+    let tls_material = if tls {
+        let provided = tls_files.as_ref().map(|(c, k)| (c.as_path(), k.as_path()));
+        let m = tvmaster_server::tls::load_or_create(&data_dir, provided)
+            .map_err(|e| anyhow::anyhow!("TLS certificate: {e}"))?;
+        Some(m)
+    } else {
+        None
+    };
+    let network = tvmaster_server::NetworkInfo {
+        http_port: if no_http { None } else { port_of(&bind) },
+        https_port: if tls { port_of(&tls_bind) } else { None },
+        tls_fingerprint: tls_material.as_ref().map(|m| m.fingerprint.clone()),
+        tls_self_signed: tls_material.as_ref().is_some_and(|m| m.self_signed),
+    };
+    let state = AppState::new(conn, info, playout.clone())
+        .with_token(token)
+        .with_network(network);
     // Keeps every channel's schedule filled days ahead; the first pass runs now.
     state.spawn_autopilot();
     // Pushes "now playing" changes to connected remotes and players.
     state.spawn_now_watcher();
     state.start_always_on();
 
-    let listener = tokio::net::TcpListener::bind(&bind)
-        .await
-        .with_context(|| format!("binding {bind}"))?;
-    tracing::info!("TVMaster listening on http://{bind}");
-    axum::serve(listener, tvmaster_server::router(state))
-        .with_graceful_shutdown(async {
+    // One signal stops both listeners.
+    let stop = std::sync::Arc::new(tokio::sync::Notify::new());
+    {
+        let stop = stop.clone();
+        tokio::spawn(async move {
             let _ = tokio::signal::ctrl_c().await;
             tracing::info!("shutting down");
-        })
-        .await?;
+            stop.notify_waiters();
+            // Notify only wakes those already waiting; a second signal below keeps it sticky.
+            stop.notify_one();
+        });
+    }
+    let mut servers = tokio::task::JoinSet::new();
+
+    if !no_http {
+        let listener = tokio::net::TcpListener::bind(&bind)
+            .await
+            .with_context(|| format!("binding {bind}"))?;
+        tracing::info!("TVMaster listening on http://{bind}");
+        let (app, stop) = (tvmaster_server::router(state.clone()), stop.clone());
+        servers.spawn(async move {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(async move { stop.notified().await })
+                .await
+                .map_err(anyhow::Error::from)
+        });
+    }
+    if let Some(m) = &tls_material {
+        let addr: std::net::SocketAddr = tls_bind
+            .parse()
+            .with_context(|| format!("--tls-bind '{tls_bind}' must look like 0.0.0.0:8788"))?;
+        tracing::info!("TVMaster listening on https://{tls_bind}");
+        tracing::info!(
+            "HTTPS certificate ({}) SHA-256 {}",
+            if m.self_signed {
+                "self-signed"
+            } else {
+                "yours"
+            },
+            m.fingerprint
+        );
+        let handle = axum_server::Handle::new();
+        let (app, m, stop2, h2) = (
+            tvmaster_server::router_https(state.clone()),
+            m.clone(),
+            stop.clone(),
+            handle.clone(),
+        );
+        tokio::spawn(async move {
+            stop2.notified().await;
+            h2.graceful_shutdown(Some(Duration::from_secs(5)));
+        });
+        servers.spawn(async move {
+            tvmaster_server::tls::serve(addr, app, &m, handle)
+                .await
+                .map_err(anyhow::Error::from)
+        });
+    }
+    // Run until a listener ends (a failure) or everything has shut down.
+    while let Some(done) = servers.join_next().await {
+        done.context("a listener panicked")??;
+    }
 
     if let Some(p) = playout {
         p.stop_all();

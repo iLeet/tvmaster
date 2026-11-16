@@ -5,6 +5,8 @@ public enum TVMasterError: Error, LocalizedError, Equatable, Sendable {
     case unauthorized
     case http(Int, String)
     case invalidResponse
+    /// An HTTPS server whose certificate nothing vouches for. Carries what the user needs to decide.
+    case untrustedCertificate(host: String, fingerprint: String)
 
     public var errorDescription: String? {
         switch self {
@@ -12,6 +14,7 @@ public enum TVMasterError: Error, LocalizedError, Equatable, Sendable {
         case .unauthorized: "The server needs an access token, or the token is wrong."
         case .http(_, let message): message
         case .invalidResponse: "The server sent something unexpected."
+        case .untrustedCertificate(let host, _): "\(host) uses a certificate this Mac doesn't trust yet."
         }
     }
 }
@@ -21,11 +24,62 @@ public struct TVMasterClient: Sendable {
     public let baseURL: URL
     public let token: String?
     private let session: URLSession
+    /// Set for HTTPS clients made by [`make`](x-source-tag://make): decides which certificates are accepted.
+    public let trust: TrustDelegate?
 
-    public init(baseURL: URL, token: String? = nil, session: URLSession = .shared) {
+    public init(baseURL: URL, token: String? = nil, session: URLSession = .shared, trust: TrustDelegate? = nil) {
         self.baseURL = baseURL
         self.token = token?.isEmpty == true ? nil : token
         self.session = session
+        self.trust = trust
+    }
+
+    /// A client whose connection (HTTPS or not) honours `pins`: certificates the
+    /// system trusts are accepted, and so are ones the user has pinned.
+    public static func make(baseURL: URL, token: String? = nil, pins: PinStore) -> TVMasterClient {
+        guard baseURL.scheme?.lowercased() == "https" else { return TVMasterClient(baseURL: baseURL, token: token) }
+        let delegate = TrustDelegate(pins: pins)
+        let config = URLSessionConfiguration.default
+        config.waitsForConnectivity = false
+        let session = URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
+        return TVMasterClient(baseURL: baseURL, token: token, session: session, trust: delegate)
+    }
+
+    /// The session this client uses, for things that need the same trust (the WebSocket, the proxy).
+    public var urlSession: URLSession { session }
+
+    public var isHTTPS: Bool { baseURL.scheme?.lowercased() == "https" }
+
+    /// `host:port` of the server, the key certificates are pinned under.
+    public var pinKey: String { PinStore.key(for: baseURL) }
+
+    func mapped(_ error: Error) -> TVMasterError {
+        if let trust, let r = trust.lastRejected, let code = (error as? URLError)?.code,
+           [.cancelled, .serverCertificateUntrusted, .secureConnectionFailed, .serverCertificateHasUnknownRoot,
+            .serverCertificateNotYetValid, .serverCertificateHasBadDate, .clientCertificateRejected].contains(code) {
+            return .untrustedCertificate(host: r.host, fingerprint: r.fingerprint)
+        }
+        return .unreachable
+    }
+
+    public enum Reachability: Equatable, Sendable {
+        case up
+        case down
+        case untrusted(host: String, fingerprint: String)
+    }
+
+    /// Is the server there, and (for HTTPS) is its certificate acceptable? The health endpoint is public.
+    public func reachability(timeout: TimeInterval = 3) async -> Reachability {
+        trust?.forgetRejection()
+        var req = URLRequest(url: url("/api/v1/health"))
+        req.timeoutInterval = timeout
+        do {
+            let (_, response) = try await session.data(for: req)
+            return (response as? HTTPURLResponse)?.statusCode == 200 ? .up : .down
+        } catch {
+            if case .untrustedCertificate(let host, let fp) = mapped(error) { return .untrusted(host: host, fingerprint: fp) }
+            return .down
+        }
     }
 
     // MARK: URLs
@@ -84,7 +138,7 @@ public struct TVMasterClient: Sendable {
         do {
             (data, response) = try await session.data(for: req)
         } catch {
-            throw TVMasterError.unreachable
+            throw mapped(error)
         }
         guard let http = response as? HTTPURLResponse else { throw TVMasterError.invalidResponse }
         if http.statusCode == 401 { throw TVMasterError.unauthorized }

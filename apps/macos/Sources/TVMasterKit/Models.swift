@@ -223,6 +223,22 @@ public struct SystemInfo: Codable, Sendable, Hashable {
     public var ffmpeg: FFmpeg?
     public var onAir: [String]
     public var authRequired: Bool
+    public var network: Network?
+
+    /// Where the server can be reached, so links can be built for other devices.
+    public struct Network: Codable, Sendable, Hashable {
+        public struct TLS: Codable, Sendable, Hashable {
+            public var enabled: Bool
+            public var selfSigned: Bool
+            public var fingerprint: String?
+        }
+        public var hostname: String
+        /// Names first (they survive an address change), then IPv4 addresses.
+        public var hosts: [String]
+        public var httpPort: Int?
+        public var httpsPort: Int?
+        public var tls: TLS
+    }
 }
 
 public struct AuthStatus: Codable, Sendable, Hashable {

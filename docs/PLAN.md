@@ -120,7 +120,7 @@ docs/                 plan, API, design
 
 ## 12. Milestones
 
-Status: **M1-M10 done** (see notes below). Still to come: Apple notarization and a trusted Windows certificate (need your accounts), native Windows and Linux shells, HTTPS.
+Status: **M1-M11 done** (see notes below). Still to come: Apple notarization and a trusted Windows certificate (need your accounts), native Windows and Linux shells, HTTPS.
 
 1. **Foundation:** repo, workspace, CI matrix, FFmpeg manager, library scanner, SQLite schema, API skeleton.
 2. **One channel on air:** playout runner, HLS/M3U/XMLTV, shuffle + sequential, web player, watchdog, service installers, state recovery.
@@ -221,3 +221,12 @@ Golden-file schedule tests (same seed → same schedule), fake-FFmpeg harness fo
 - **Real-machine testing (a Linux box with an RTX 3080 Ti, reached over SSH):** the full suite passes on Linux for the first time; NVENC works at 5.3x real time; `tvmaster doctor` now reports the cause of a failure (`Cannot load libcuda.so.1`) rather than FFmpeg's last line; `install.sh --service` ran under real systemd and survived `kill -9`. Packages were installed in Debian, Fedora and Arch containers.
 - **Self-signing:** answered in RELEASE.md with evidence: a self-signed Mac app is rejected by Gatekeeper exactly like an ad-hoc one; self-signed Windows installers work for PCs that import your certificate.
 - **Known limits:** the Windows installer and its PowerShell have never run on Windows; the release workflow and Docker image have never run; the packaged system unit was verified for syntax only; no apt/dnf repository, MSI or Docker registry image; the Mac FFmpeg button needs Homebrew.
+
+## 24. M11 notes (HTTPS and sharing)
+
+- **Server:** `crates/tvmaster-server/src/tls.rs` (rustls via axum-server, rcgen for the self-signed certificate; no OpenSSL or C toolchain needed beyond `ring`). Two listeners share one router; an outermost layer stamps which scheme a request used (and deletes any client-supplied stamp), so links and cookies are right. `/api/v1/system` advertises the ports, hosts and certificate fingerprint. Flags: `--tls`, `--tls-bind`, `--tls-cert`, `--tls-key`, `--no-http`; the same as `TVMASTER_*` environment variables, wired into the Linux service file, `install.sh --tls`, `install.ps1 -Https` and a Windows setup option.
+- **Bugs the testing found:** over HTTP/2 (every browser on HTTPS) the host arrives as the URI authority and there is no `Host` header, so M3U and HDHomeRun links named `localhost:8787` (fixed by filling `Host` in); a reformatting by `cargo fmt` had silently stopped a patch from applying, caught only because a test asserted the result; the Mac app, when it started a server with a freshly made token, asked the user for that token (the client was built before the token existed).
+- **Mac app:** HTTPS with trust on first use: untrusted certificate, fingerprint shown, the user's choice pinned per server and checked on every connection (REST, WebSocket); a loopback relay lets AVPlayer play pinned servers. **Share** screen: IPTV playlist and guide, tuner address, phone remote and per-TV remote with QR codes (verified by scanning them back with a QR detector), every channel's HLS and MPEG-TS URL, copy and the system share sheet, address and HTTP/HTTPS pickers and an optional token. Settings can let the bundled server listen on the network (it makes a token) and serve HTTPS; the menu bar copies the playlist link.
+- **Web admin:** Settings now has the same Share card, the certificate fingerprint, and says when HTTPS is off.
+- **Testing:** `scripts/system-test.sh` is a 44-check end-to-end test of a real daemon and also runs in CI on Linux and macOS.
+- **Known limits:** the Windows setup option, Windows/Linux packaging of HTTPS and the real-certificate reload were not run; IPv6 is left out of the address lists and certificate; HTTP is still on by default (HTTPS is opt-in); the relay buffers whole responses (fine for HLS, not for an endless TS stream); FFmpeg's HLS client cannot use a self-signed certificate.

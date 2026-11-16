@@ -2,7 +2,7 @@
 
 Self-hosted retro TV station and IPTV engine. Add your TV collections, and TVMaster runs real-feeling channels: complete chaos or scheduled time slots, retro commercials placed at natural breaks, "Up Next / Later Today" bumpers, a guide channel, and a phone/web remote. Runs headless or with a GUI on Windows, macOS and Linux (x64 and arm64).
 
-**Status:** milestone 10 complete: installers for every platform, on top of hardening and the weekly grid editor engineering on top of the web admin UI, remote, desktop shell, token auth and native macOS app. See [docs/PLAN.md](docs/PLAN.md) for the full design and roadmap, and [docs/API.md](docs/API.md) for the API.
+**Status:** milestone 11 complete (HTTPS, in-app share links, system test on top of M1-M10). See [docs/PLAN.md](docs/PLAN.md) for the full design and roadmap, and [docs/API.md](docs/API.md) for the API.
 
 ## What works today
 
@@ -52,6 +52,10 @@ For a real lineup (blocks, seasons, events), see the example in [docs/SCHEDULING
 - A guide channel: `POST /api/v1/channels` with `"kind": "guide"` (see [docs/API.md](docs/API.md)).
 
 Protect it: `tvmaster serve --token $(tvmaster token)` (browsers sign in once; IPTV apps use the `?token=` that the playlist already contains).
+
+Encrypt it: `tvmaster serve --tls` also serves HTTPS on port 8788 with a self-signed certificate made once (kept in the data folder; `--tls-bind`, `--no-http` to change ports or serve only HTTPS). Bring your own with `--tls-cert` and `--tls-key` (Let's Encrypt, `tailscale cert`): it is re-read every few hours so renewals are picked up. The Mac app and the web admin show the certificate fingerprint to compare. IPTV apps and Plex usually refuse self-signed certificates, so leave HTTP on for them unless you use a certificate from a real authority.
+
+Share it: the Mac app's **Share** screen and the web admin's **Settings** page list every address other apps and devices need (IPTV playlist and guide, Plex/Jellyfin/Emby tuner, each channel's stream, phone remote with a QR code), with copy buttons and a choice of address, HTTP or HTTPS, and whether to include the token.
 
 Run unattended: `tvmaster service launchd|systemd|windows` prints a definition that starts on boot and restarts on failure.
 

@@ -12,6 +12,7 @@ mod plan;
 #[cfg(test)]
 mod soak;
 mod stream;
+pub mod tls;
 mod tvs;
 mod ws;
 
@@ -50,6 +51,38 @@ pub struct AppState {
     pub(crate) events: broadcast::Sender<String>,
     /// How many connected players each TV has (online while > 0).
     presence: Arc<Mutex<HashMap<String, usize>>>,
+    /// Which ports and certificate the listeners use, for `/api/v1/system`.
+    network: Arc<NetworkInfo>,
+}
+
+/// What the daemon is listening on, so clients can build links to it.
+#[derive(Debug, Clone, Default)]
+pub struct NetworkInfo {
+    pub http_port: Option<u16>,
+    pub https_port: Option<u16>,
+    /// SHA-256 of the certificate on the HTTPS port.
+    pub tls_fingerprint: Option<String>,
+    pub tls_self_signed: bool,
+}
+
+/// Set by the HTTPS listener (and removed on the HTTP one) so handlers that
+/// write links know which scheme the client used.
+pub(crate) const SCHEME_HEADER: &str = "x-tvmaster-scheme";
+
+/// `https` when the request came in over TLS, directly or through a reverse
+/// proxy that says so; otherwise `http`.
+pub(crate) fn request_scheme(headers: &axum::http::HeaderMap) -> &'static str {
+    let is = |name: &str| {
+        headers
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|v| v.eq_ignore_ascii_case("https"))
+    };
+    if is(SCHEME_HEADER) || is("x-forwarded-proto") {
+        "https"
+    } else {
+        "http"
+    }
 }
 
 /// How often the autopilot loop tops up schedules and commits aired episodes.
@@ -74,7 +107,13 @@ impl AppState {
             token: None,
             events: broadcast::channel(256).0,
             presence: Arc::new(Mutex::new(HashMap::new())),
+            network: Arc::new(NetworkInfo::default()),
         }
+    }
+
+    pub fn with_network(mut self, network: NetworkInfo) -> Self {
+        self.network = Arc::new(network);
+        self
     }
 
     /// Require this token on every request (see [`auth`]). Must be 8-128
@@ -303,7 +342,17 @@ pub(crate) type ApiResult<T> = Result<T, ApiError>;
 
 pub use auth::{generate_token, valid_token};
 
+/// The plain-HTTP router.
 pub fn router(state: AppState) -> Router {
+    build_router(state, false)
+}
+
+/// The same router for the HTTPS listener: links it writes say `https`.
+pub fn router_https(state: AppState) -> Router {
+    build_router(state, true)
+}
+
+fn build_router(state: AppState, https: bool) -> Router {
     let guard_state = state.clone();
     Router::new()
         .route("/", get(|| async { Html(PLAYER_HTML) }))
@@ -364,6 +413,28 @@ pub fn router(state: AppState) -> Router {
         .layer(axum::middleware::from_fn_with_state(
             guard_state,
             auth::guard,
+        ))
+        // Outermost: decide the scheme here, never trust what a client sent.
+        .layer(axum::middleware::from_fn(
+            move |mut req: axum::extract::Request, next: axum::middleware::Next| async move {
+                req.headers_mut().remove(SCHEME_HEADER);
+                // HTTP/2 (every browser over HTTPS) carries the host as the URI's
+                // authority, not a Host header; handlers that write links read the header.
+                if !req.headers().contains_key(axum::http::header::HOST) {
+                    let authority = req
+                        .uri()
+                        .authority()
+                        .and_then(|a| axum::http::HeaderValue::from_str(a.as_str()).ok());
+                    if let Some(a) = authority {
+                        req.headers_mut().insert(axum::http::header::HOST, a);
+                    }
+                }
+                if https {
+                    req.headers_mut()
+                        .insert(SCHEME_HEADER, axum::http::HeaderValue::from_static("https"));
+                }
+                next.run(req).await
+            },
         ))
         .with_state(state)
 }

@@ -169,7 +169,31 @@ pub async fn system(State(s): State<AppState>) -> Json<Value> {
         "ffmpeg": ffmpeg,
         "on_air": s.playout.as_ref().map(|p| p.running()).unwrap_or_default(),
         "auth_required": s.token.is_some(),
+        "network": network_json(&s.network),
     }))
+}
+
+/// Where this server can be reached, for clients that build links to it.
+fn network_json(n: &crate::NetworkInfo) -> Value {
+    let (hostname, ips) = crate::tls::host_names();
+    let short = hostname.split('.').next().unwrap_or("").to_string();
+    // Names first (they survive a DHCP change), then addresses.
+    let mut hosts: Vec<String> = Vec::new();
+    if !short.is_empty() {
+        hosts.push(format!("{short}.local"));
+    }
+    hosts.extend(ips.iter().map(|i| i.to_string()));
+    json!({
+        "hostname": hostname,
+        "hosts": hosts,
+        "http_port": n.http_port,
+        "https_port": n.https_port,
+        "tls": {
+            "enabled": n.https_port.is_some(),
+            "self_signed": n.tls_self_signed,
+            "fingerprint": n.tls_fingerprint,
+        },
+    })
 }
 
 #[cfg(test)]

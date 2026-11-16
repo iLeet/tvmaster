@@ -3,6 +3,7 @@
 #   ./install.sh                     install to ~/.local/bin
 #   ./install.sh --service           also run it at login/boot (launchd or systemd, as you)
 #   ./install.sh --prefix /usr/local --data-dir /srv/tvmaster --bind 0.0.0.0:8787
+#   ./install.sh --service --tls     also serve HTTPS (self-signed certificate, port 8788)
 #   ./install.sh --dry-run           show what would happen
 # It never needs root unless you point --prefix somewhere root owns.
 set -euo pipefail
@@ -11,6 +12,7 @@ PREFIX="${HOME}/.local"
 DATA_DIR=""
 BIND="0.0.0.0:8787"
 SERVICE=0
+TLS=0
 DRY=0
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
@@ -20,6 +22,7 @@ while [[ $# -gt 0 ]]; do
     --data-dir) DATA_DIR="$2"; shift 2 ;;
     --bind)     BIND="$2"; shift 2 ;;
     --service)  SERVICE=1; shift ;;
+    --tls)      TLS=1; shift ;;
     --dry-run)  DRY=1; shift ;;
     -h|--help)  sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
@@ -51,6 +54,7 @@ run mkdir -p "$PREFIX/bin" "$DATA_DIR"
 run install -m 755 "$BIN_SRC" "$BIN"
 echo "Installed $BIN"
 
+TLS_FLAG=""; [[ $TLS == 1 ]] && TLS_FLAG="--tls"
 if [[ $SERVICE == 1 ]]; then
   # A token keeps the rest of the network out; generate one the first time.
   TOKEN_FILE="$DATA_DIR/token"
@@ -64,7 +68,7 @@ if [[ $SERVICE == 1 ]]; then
       PLIST="$HOME/Library/LaunchAgents/com.tvmaster.daemon.plist"
       run mkdir -p "$HOME/Library/LaunchAgents"
       if [[ $DRY == 1 ]]; then echo "+ write $PLIST"; else
-        "$BIN" service launchd --bin "$BIN" --data-dir "$DATA_DIR" --bind "$BIND" --token-file "$TOKEN_FILE" > "$PLIST"
+        "$BIN" service launchd --bin "$BIN" --data-dir "$DATA_DIR" --bind "$BIND" --token-file "$TOKEN_FILE" ${TLS_FLAG} > "$PLIST"
       fi
       run launchctl unload "$PLIST" 2>/dev/null || true
       run launchctl load "$PLIST"
@@ -74,7 +78,7 @@ if [[ $SERVICE == 1 ]]; then
       UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
       run mkdir -p "$UNIT_DIR"
       if [[ $DRY == 1 ]]; then echo "+ write $UNIT_DIR/tvmaster.service"; else
-        "$BIN" service systemd --bin "$BIN" --data-dir "$DATA_DIR" --bind "$BIND" --token-file "$TOKEN_FILE" \
+        "$BIN" service systemd --bin "$BIN" --data-dir "$DATA_DIR" --bind "$BIND" --token-file "$TOKEN_FILE" ${TLS_FLAG} \
           | sed 's/multi-user.target/default.target/' > "$UNIT_DIR/tvmaster.service"
       fi
       run systemctl --user daemon-reload

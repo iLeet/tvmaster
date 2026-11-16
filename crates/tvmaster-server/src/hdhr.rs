@@ -17,7 +17,7 @@ fn base_url(headers: &HeaderMap) -> String {
         .get(header::HOST)
         .and_then(|h| h.to_str().ok())
         .unwrap_or("localhost:8787");
-    format!("http://{host}")
+    format!("{}://{host}", crate::request_scheme(headers))
 }
 
 /// A stable 8-digit hex device id, created on first use.

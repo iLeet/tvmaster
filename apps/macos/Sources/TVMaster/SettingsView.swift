@@ -25,12 +25,28 @@ struct SettingsView: View {
                     Text("Shows up under TVs as “\(Host.current().localizedName ?? "This Mac")” and follows channel changes from your phone or the web admin.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-                Section("Phone remote and IPTV apps") {
-                    if let c = model.client {
-                        LabeledContent("Remote") { Text(c.webURL("/admin/#/remote").absoluteString).textSelection(.enabled).font(.caption.monospaced()) }
-                        LabeledContent("Playlist") { Text(c.playlistURL.absoluteString).textSelection(.enabled).font(.caption.monospaced()).lineLimit(1).truncationMode(.middle) }
-                        LabeledContent("Guide (XMLTV)") { Text(c.guideURL.absoluteString).textSelection(.enabled).font(.caption.monospaced()).lineLimit(1).truncationMode(.middle) }
-                    } else { Text("Connect to a server to see its addresses.").foregroundStyle(.secondary) }
+                Section("Links for other apps and devices") {
+                    Text("Playlists, guide, tuner address and a phone-remote QR code live under Share in the sidebar.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Button("Open Share") { model.selection = .share }.glassButton()
+                }
+                Section("Trusted certificates") {
+                    let _ = model.pinsChanged
+                    let pinned = model.pins.all.sorted { $0.key < $1.key }
+                    if pinned.isEmpty {
+                        Text("None. Servers with a certificate your Mac already trusts need nothing here; for a self-signed HTTPS server the app asks the first time.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    ForEach(pinned, id: \.key) { item in
+                        HStack {
+                            VStack(alignment: .leading) {
+                                Text(item.key)
+                                Text(item.value).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                            }
+                            Spacer()
+                            Button("Forget") { model.forgetCertificate(for: item.key) }.glassButton()
+                        }
+                    }
                 }
             }
             .formStyle(.grouped).tabItem { Label("General", systemImage: "gearshape") }
@@ -38,6 +54,10 @@ struct SettingsView: View {
             Form {
                 Section("Local server") {
                     Toggle("Start a server on this Mac when none is running", isOn: $model.startLocalServer)
+                    Toggle("Let other devices on my network use it", isOn: Binding(get: { model.shareOnNetwork }, set: { model.shareOnNetwork = $0; Task { await model.restartLocalServer() } }))
+                    Toggle("Also serve HTTPS (self-signed certificate)", isOn: Binding(get: { model.serveHTTPS }, set: { model.serveHTTPS = $0; Task { await model.restartLocalServer() } }))
+                    Text("Sharing on the network always uses an access token, made for you the first time. macOS may ask whether TVMaster may accept incoming connections: allow it.")
+                        .font(.caption).foregroundStyle(.secondary)
                     LabeledContent("Server program") {
                         Text(DaemonLocator.find()?.path ?? "Not found").font(.caption.monospaced()).foregroundStyle(DaemonLocator.find() == nil ? .red : .secondary)
                     }

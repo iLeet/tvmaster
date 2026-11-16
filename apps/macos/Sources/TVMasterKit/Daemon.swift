@@ -75,11 +75,15 @@ public actor DaemonSupervisor {
     }
 
     /// Start the server on `bind` (for example `127.0.0.1:8787`). Does nothing if it is already running.
-    public func start(binary: URL, bind: String, dataDirectory: URL, token: String?) {
+    public func start(binary: URL, bind: String, dataDirectory: URL, token: String?, extraArguments: [String] = []) {
         guard process == nil else { return }
         wantRunning = true
+        self.extraArguments = extraArguments
         launch(binary: binary, bind: bind, dataDirectory: dataDirectory, token: token)
     }
+
+    /// Flags beyond the basics (HTTPS), kept so a crash restart uses the same ones.
+    private var extraArguments: [String] = []
 
     private func launch(binary: URL, bind: String, dataDirectory: URL, token: String?) {
         try? FileManager.default.createDirectory(at: dataDirectory, withIntermediateDirectories: true)
@@ -90,6 +94,7 @@ public actor DaemonSupervisor {
         p.executableURL = binary
         var args = ["serve", "--bind", bind, "--data-dir", dataDirectory.path]
         if let token, !token.isEmpty { args += ["--token", token] }
+        args += extraArguments
         p.arguments = args
         p.environment = DaemonLocator.environment()
         if let log = try? FileHandle(forWritingTo: logURL) {

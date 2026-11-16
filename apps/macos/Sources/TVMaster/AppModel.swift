@@ -4,7 +4,7 @@ import Observation
 import TVMasterKit
 
 enum SidebarItem: String, CaseIterable, Identifiable, Hashable {
-    case home, watch, channels, schedule, libraries, tvs
+    case home, watch, channels, schedule, libraries, tvs, share
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -14,6 +14,7 @@ enum SidebarItem: String, CaseIterable, Identifiable, Hashable {
         case .schedule: "Schedule"
         case .libraries: "Libraries"
         case .tvs: "TVs"
+        case .share: "Share"
         }
     }
     var symbol: String {
@@ -24,6 +25,7 @@ enum SidebarItem: String, CaseIterable, Identifiable, Hashable {
         case .schedule: "calendar"
         case .libraries: "folder"
         case .tvs: "tv"
+        case .share: "square.and.arrow.up"
         }
     }
 }
@@ -35,6 +37,8 @@ final class AppModel {
         case connecting
         case needsServer(String?)   // optional message
         case needsToken(String?)
+        /// An HTTPS server whose certificate this Mac has no reason to trust yet.
+        case needsTrust(host: String, fingerprint: String)
         case ready
     }
 
@@ -42,6 +46,10 @@ final class AppModel {
     var serverText: String { didSet { defaults.set(serverText, forKey: "server") } }
     var token: String = ""
     var startLocalServer: Bool { didSet { defaults.set(startLocalServer, forKey: "startLocal") } }
+    /// Let other devices reach the server this app starts (it listens on this Mac only otherwise).
+    var shareOnNetwork: Bool { didSet { defaults.set(shareOnNetwork, forKey: "shareOnNetwork") } }
+    /// Also serve HTTPS from the server this app starts.
+    var serveHTTPS: Bool { didSet { defaults.set(serveHTTPS, forKey: "serveHTTPS") } }
     var macIsTV: Bool { didSet { defaults.set(macIsTV, forKey: "macIsTV"); Task { await self.applyTVRegistration() } } }
 
     // State
@@ -59,6 +67,10 @@ final class AppModel {
     var installingFFmpeg = false
 
     private(set) var client: TVMasterClient?
+    /// Certificates the user has chosen to trust (self-signed HTTPS servers).
+    let pins = PinStore()
+    /// Relays AVPlayer's plain-HTTP requests to a pinned HTTPS server.
+    private var proxy: PinnedProxy?
     private var events: EventStream?
     private var eventTask: Task<Void, Never>?
     private let defaults = UserDefaults.standard
@@ -69,6 +81,8 @@ final class AppModel {
         serverText = defaults.string(forKey: "server") ?? "http://127.0.0.1:8787"
         startLocalServer = defaults.object(forKey: "startLocal") as? Bool ?? true
         macIsTV = defaults.bool(forKey: "macIsTV")
+        shareOnNetwork = defaults.bool(forKey: "shareOnNetwork")
+        serveHTTPS = defaults.bool(forKey: "serveHTTPS")
         // Developer aid: start on a given screen (used for screenshots).
         if let start = ProcessInfo.processInfo.environment["TVM_SECTION"], let item = SidebarItem(rawValue: start) { selection = item }
         Task { await daemon.observe { [weak self] s in Task { @MainActor in self?.daemonState = s } } }
@@ -95,9 +109,14 @@ final class AppModel {
         guard let url = serverURL else { phase = .needsServer("Enter your server's address."); return }
         let saved = tokens.token(for: url.absoluteString) ?? ""
         if token.isEmpty { token = saved }
-        let client = TVMasterClient(baseURL: url, token: token)
+        var client = TVMasterClient.make(baseURL: url, token: token, pins: pins)
 
-        if !(await TVMasterClient.isReachable(url)) {
+        var reach = await client.reachability()
+        if case .untrusted(let host, let fingerprint) = reach {
+            phase = .needsTrust(host: host, fingerprint: fingerprint)
+            return
+        }
+        if reach != .up {
             guard client.isLocal, startLocalServer else {
                 phase = .needsServer("Cannot reach \(url.host ?? "the server"). Is TVMaster running?")
                 return
@@ -107,10 +126,19 @@ final class AppModel {
                 return
             }
             let port = url.port ?? 8787
-            await daemon.start(binary: binary, bind: "127.0.0.1:\(port)", dataDirectory: DaemonLocator.defaultDataDirectory, token: token.isEmpty ? nil : token)
+            // Reachable from other devices means reachable by anyone on the network: always behind a token.
+            if shareOnNetwork && token.isEmpty {
+                token = Format.randomToken()
+                // The server is about to require it; the client must carry it too.
+                client = TVMasterClient.make(baseURL: url, token: token, pins: pins)
+            }
+            let host = shareOnNetwork ? "0.0.0.0" : "127.0.0.1"
+            let tlsArguments = serveHTTPS ? ["--tls", "--tls-bind", "\(host):\(port + 1)"] : []
+            await daemon.start(binary: binary, bind: "\(host):\(port)", dataDirectory: DaemonLocator.defaultDataDirectory, token: token.isEmpty ? nil : token, extraArguments: tlsArguments)
             var up = false
             for _ in 0..<40 {
-                if await TVMasterClient.isReachable(url) { up = true; break }
+                reach = await client.reachability()
+                if reach == .up { up = true; break }
                 try? await Task.sleep(nanoseconds: 250_000_000)
             }
             guard up else { phase = .needsServer("The local server didn't start. Check its log in Settings."); return }
@@ -134,6 +162,37 @@ final class AppModel {
         }
     }
 
+    /// The user compared the fingerprint and accepts this certificate for this server.
+    func trustServer(host: String, fingerprint: String) async {
+        guard let url = serverURL else { return }
+        pins.set(fingerprint, host: host, port: url.port ?? 443)
+        await connect()
+    }
+
+    func forgetCertificate(for key: String) {
+        let parts = key.split(separator: ":")
+        guard parts.count == 2, let port = Int(parts[1]) else { return }
+        pins.set(nil, host: String(parts[0]), port: port)
+        pinsChanged += 1
+    }
+
+    /// Bumped when a pin is forgotten, so views listing them refresh.
+    var pinsChanged = 0
+
+    /// Where AVPlayer should load a channel from. A server whose certificate is
+    /// only trusted because the user pinned it is reached through the loopback
+    /// relay, since AVPlayer cannot be told about pins.
+    func playableURL(for channel: Channel) async -> URL? {
+        guard let client else { return nil }
+        let direct = client.streamURL(channel: channel.id)
+        guard client.isHTTPS, let host = client.baseURL.host, client.trust?.usesPin(host: host, port: client.baseURL.port ?? 443) == true else {
+            return direct
+        }
+        if proxy == nil { proxy = PinnedProxy(upstream: client.baseURL, session: client.urlSession) }
+        guard (try? await proxy?.start()) != nil else { return nil }
+        return proxy?.localURL(for: direct)
+    }
+
     func submitToken(_ t: String) async {
         token = t.trimmingCharacters(in: .whitespacesAndNewlines)
         await connect()
@@ -152,6 +211,15 @@ final class AppModel {
     }
 
     func shutdown() async { await daemon.stop() }
+
+    /// Apply a changed "share on network" or HTTPS setting to the server this app runs.
+    func restartLocalServer() async {
+        guard client?.isLocal == true || phase != .ready else { return }
+        eventTask?.cancel()
+        await daemon.stop()
+        try? await Task.sleep(nanoseconds: 800_000_000)
+        await connect()
+    }
 
     /// Install FFmpeg with Homebrew, then restart the local server so it finds it.
     func installFFmpeg() async {

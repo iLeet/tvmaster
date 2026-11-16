@@ -32,6 +32,16 @@ You can sign anything yourself on any platform. The difference is whether *other
 
 The release workflow signs and notarizes automatically when the repository has the matching secrets (`MACOS_CERT_P12_BASE64`, `MACOS_CERT_PASSWORD`, `MACOS_SIGN_IDENTITY`, `APPLE_ID`, `APPLE_TEAM_ID`, `APPLE_APP_PASSWORD`, `WINDOWS_CERT_PFX_BASE64`, `WINDOWS_CERT_PASSWORD`) and otherwise ships ad-hoc and unsigned builds. That signing path has not run.
 
+### HTTPS
+
+`tvmaster serve --tls` (or `TVMASTER_TLS=1`, `./install.sh --service --tls`, `install.ps1 -Https`, the Windows setup option) adds HTTPS on port 8788. By default the certificate is self-signed, made once into `<data>/tls/` (private key mode 600), valid three years and renewed 30 days before it expires, which is the only time its fingerprint changes. Its names cover `localhost`, the machine's name and `.local` name, and its IPv4 addresses at the time it was made; a client that pins the fingerprint does not care about names.
+
+To use a real certificate, set `TVMASTER_TLS_CERT` and `TVMASTER_TLS_KEY` (full-chain PEM and key; the service user must be able to read both). It is re-read every six hours. `tailscale cert <machine>.<tailnet>.ts.net` is the easiest way to get one that every device trusts.
+
+Clients: browsers warn once about a self-signed certificate; the Mac app shows the fingerprint, asks, and remembers that exact certificate (Settings > Server > Trusted certificates lists and forgets them); IPTV apps and Plex generally refuse self-signed certificates, so keep the HTTP port for them or use a real certificate. `ffmpeg`/`ffprobe` read an HTTPS channel's `.ts` stream with `-tls_verify 0`, but their HLS reader does not pass that option on to the segment requests, so for HLS they need a certificate their trust store accepts. `--no-http` serves only HTTPS.
+
+The Mac app plays a pinned self-signed server through a small loopback relay (AVPlayer cannot be told to trust a pinned certificate); servers with a certificate the Mac already trusts are played directly.
+
 ## Check the machine: `tvmaster doctor`
 
 ```
@@ -106,6 +116,8 @@ Locally: `scripts/package.sh [target] [out-dir]` (archive), `packaging/linux/bui
 | DMG | built, mounted, the app inside verifies; Gatekeeper rejection of ad-hoc and self-signed builds observed |
 | Windows setup `.exe` | **compiled** (NSIS 3.08 on Linux, no warnings); **never run**. The PowerShell it calls has not been run either |
 | Self-signed Authenticode | signed and verified with `osslsigncode` |
+| HTTPS (macOS) | in-process TLS client tests (handshake, name check, refusal of an unknown certificate, Secure cookie, https links); `scripts/system-test.sh` (44 checks over HTTP and HTTPS with real FFmpeg, ffprobe as the IPTV client, WebSocket over ws:// and wss://); the Mac app played a live channel from a self-signed HTTPS server through the pinned relay; shown the trust prompt with the server's fingerprint |
+| HTTPS over a real network | from the Linux box to the Mac: HTTP and HTTPS health, 401 without a token, M3U with https links, HLS over HTTP decoded, 5 s of the TS stream decoded over HTTPS. FFmpeg's HLS reader refuses a self-signed certificate even with `-tls_verify 0` (see above) |
 | Release workflow, Docker image | never run |
 
 **Not done:** Developer ID and notarization (needs your Apple account), a trusted Windows certificate, an MSI, publishing the Docker image or apt/dnf repositories, and Tauri desktop-shell installers.

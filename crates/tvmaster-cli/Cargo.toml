@@ -17,6 +17,7 @@ tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 tvmaster-server.workspace = true
+axum-server.workspace = true
 tvmaster-db.workspace = true
 tvmaster-media.workspace = true
 tvmaster-playout.workspace = true

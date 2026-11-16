@@ -6,6 +6,7 @@ Unicode true
 !include "LogicLib.nsh"
 !include "FileFunc.nsh"
 !include "x64.nsh"
+!include "Sections.nsh"
 
 !ifndef VERSION
   !define VERSION "0.0.0"
@@ -122,8 +123,17 @@ Section "TVMaster server" SecMain
   CreateShortcut "$SMPROGRAMS\TVMaster\Uninstall TVMaster.lnk" "$INSTDIR\Uninstall.exe"
 SectionEnd
 
+Section /o "Also serve HTTPS (port 8788, self-signed certificate)" SecHttps
+  ; Only a marker: the next section reads whether it was ticked.
+SectionEnd
+
 Section "Run TVMaster in the background and start it with Windows" SecService
-  !insertmacro Setup "Service"
+  ${If} ${SectionIsSelected} ${SecHttps}
+    nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\tvmaster-setup.ps1" -Action Service -InstallDir "$INSTDIR" -DataDir "${DATA_DIR}" -Https'
+    Pop $0
+  ${Else}
+    !insertmacro Setup "Service"
+  ${EndIf}
   ${If} $0 != 0
     MessageBox MB_OK|MB_ICONEXCLAMATION "TVMaster was installed, but starting it as a background task failed. See the installer log, or run:$\r$\n  tvmaster.exe serve --data-dir $\"${DATA_DIR}$\""
   ${EndIf}
@@ -141,11 +151,13 @@ Section "Download FFmpeg (TVMaster needs it to stream)" SecFfmpeg
 SectionEnd
 
 LangString DESC_Main ${LANG_ENGLISH} "The TVMaster server and its documentation."
+LangString DESC_Https ${LANG_ENGLISH} "Also listens on HTTPS so your access token is encrypted on the network. Uses a self-signed certificate: the TVMaster apps ask you to trust it once, browsers show a warning to click through."
 LangString DESC_Service ${LANG_ENGLISH} "Registers a Windows task that starts TVMaster when the PC starts and restarts it if it stops. Protected by an access token."
 LangString DESC_Firewall ${LANG_ENGLISH} "Lets other devices on private (home) networks reach TVMaster. Public networks stay blocked."
 LangString DESC_Ffmpeg ${LANG_ENGLISH} "Downloads FFmpeg (about 140 MB) next to TVMaster unless you already have it. Skip this if you installed FFmpeg yourself."
 !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
   !insertmacro MUI_DESCRIPTION_TEXT ${SecMain} $(DESC_Main)
+  !insertmacro MUI_DESCRIPTION_TEXT ${SecHttps} $(DESC_Https)
   !insertmacro MUI_DESCRIPTION_TEXT ${SecService} $(DESC_Service)
   !insertmacro MUI_DESCRIPTION_TEXT ${SecFirewall} $(DESC_Firewall)
   !insertmacro MUI_DESCRIPTION_TEXT ${SecFfmpeg} $(DESC_Ffmpeg)
