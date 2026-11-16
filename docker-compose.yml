@@ -20,7 +20,14 @@ services:
       # TVMASTER_ENCODER: "nvenc"               # a GPU encoder; see docs/DOCKER.md
     volumes:
       - tvmaster-data:/data   # the database, caches and uploaded pictures
-      - ${MEDIA_DIR:-./media}:/media  # your shows, commercials, bumpers and music; uploads from the apps land here
+      # Your shows, commercials, bumpers and music; uploads from the apps land here.
+      # rslave: a drive that is mounted (or unmounted) on the host after this container started
+      # appears (or disappears) inside it, so a USB drive that is not always plugged in works.
+      - type: bind
+        source: ${MEDIA_DIR:-./media}
+        target: /media
+        bind:
+          propagation: rslave
     # init: true is built in (tini). For an NVIDIA GPU, add:
     # deploy:
     #   resources:
