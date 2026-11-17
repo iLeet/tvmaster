@@ -107,7 +107,7 @@ function Shell() {
     default:
       page = <Dashboard />;
   }
-  if (setup.data?.needed && !dismissed && section !== 'setup') page = <Setup onDone={() => { setDismissed(true); setup.reload(); }} />;
+  if (setup.data?.needed && !dismissed && section === 'dashboard') page = <Setup onDone={() => { setDismissed(true); setup.reload(); }} />;
 
   if (bare) return <div className="main">{page}</div>;
   return (
