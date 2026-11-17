@@ -453,7 +453,7 @@ struct PictureSoundTests {
         let raw = try JSONDecoder().decode(JSONValue.self, from: Data(json.utf8))
         var s = LineupSettings(lineup: raw)
         #expect(s.slots.count == 1 && s.slots[0].source.show == "Mickey Mouse Clubhouse" && s.slots[0].days.count == 7)
-        #expect(s.seasonCount == 1 && s.ads == nil && s.problem == nil)
+        #expect(s.seasons.count == 1 && s.seasons[0].from == "06-01" && s.ads == nil && s.problem == nil)
         s.slots[0].once = true
         s.slots.append({ var t = TimeSlot(); t.source.kind = .pool; t.source.shows = ["A", "B"]; return t }())
         s.ads = AdSettings()
@@ -466,6 +466,19 @@ struct PictureSoundTests {
         #expect(out.get(["ads", "pod_seconds"])?.intValue == 120)
         let back = LineupSettings(lineup: out)
         #expect(back.slots.count == 2 && back.slots[0].once && back.slots[1].source.shows == ["A", "B"] && back.ads == s.ads)
+    }
+
+    @Test func rotationsAndSeasonsRoundTrip() throws {
+        let json = #"{"blocks":[{"name":"Rot","days":[],"start":"20:00","end":"21:00","source":{"type":"rotation","items":[{"type":"show","show":"A"},{"type":"pool","shows":["B","C"],"order":"shuffle"}],"advance":{"weeks":3}}}],"seasons":[{"name":"Summer","from":"06-01","to":"08-31","blocks":[{"name":"","days":[5,6],"start":"10:00","end":"12:00","source":{"type":"chaos"}}]}]}"#
+        let raw = try JSONDecoder().decode(JSONValue.self, from: Data(json.utf8))
+        var s = LineupSettings(lineup: raw)
+        #expect(s.slots[0].source.kind == .rotation && s.slots[0].source.items.count == 2 && s.slots[0].source.weeks == 3)
+        #expect(s.seasons[0].slots.count == 1 && s.seasons[0].slots[0].days == [5, 6])
+        s.slots[0].source.advance = "finale"
+        let out = s.apply(to: raw)
+        #expect(out.get(["blocks"])?.arrayValue?[0].get(["source", "advance"])?.stringValue == "finale")
+        #expect(out.get(["seasons"])?.arrayValue?[0].get(["blocks"])?.arrayValue?.count == 1)
+        #expect(LineupSettings(lineup: out).apply(to: out) == out)
     }
 
     @Test func aSlotNeedsAShowAndALength() {

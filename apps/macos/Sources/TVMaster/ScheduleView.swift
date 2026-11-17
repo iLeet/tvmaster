@@ -9,6 +9,12 @@ struct ScheduleView: View {
     @State private var programs: [Program] = []
     @State private var items: [ScheduleItem] = []
     @State private var loading = false
+    @State private var air: AirRequest?
+
+    private struct AirRequest: Identifiable {
+        let id = UUID()
+        var range: (from: Date, to: Date)?
+    }
 
     private var channel: Channel? { model.channels.first { $0.id == channelID } }
     private var programmable: [Channel] { model.channels.filter { $0.isScheduled } }
@@ -35,9 +41,15 @@ struct ScheduleView: View {
                             if let n = channel.next { Text("Next: \(n.headline) at \(n.start.formatted(date: .omitted, time: .shortened))").foregroundStyle(.secondary) }
                         }
                         Spacer()
+                        Button { air = AirRequest(range: nil) } label: { Label("Air now…", systemImage: "play.fill") }.glassButton()
+                            .help("Cut to something right now (a stand-by screen, say)")
+                        Button { Task { await refreshNow() } } label: { Label("Refresh now", systemImage: "arrow.clockwise") }.glassButton()
+                            .help("Put the channel on the plan for this moment, even part way through a show")
                         Button { Task { await reroll() } } label: { Label("Re-roll", systemImage: "arrow.triangle.2.circlepath") }.glassButton()
                             .help("Regenerate everything that hasn't aired yet")
-                        Button("Edit in web admin") { model.openInBrowser("/admin/#/channels/\(channel.id)?tab=programming") }.glassButton()
+                        Button { let a = Date().timeIntervalSince1970; let from = Date(timeIntervalSince1970: (a / 1800).rounded(.up) * 1800)
+                            air = AirRequest(range: (from, from.addingTimeInterval(1800))) } label: { Text("Change a time…") }.glassButton()
+                            .help("Change what airs in a stretch of time")
                     }
                     .padding(16).glassCard()
                 }
@@ -63,7 +75,8 @@ struct ScheduleView: View {
                     if items.isEmpty && !loading { Text("Nothing scheduled in this window.").foregroundStyle(.secondary) }
                 } else {
                     VStack(spacing: 0) {
-                        ForEach(programs) { p in
+                        ForEach(rows) { row in
+                          if let p = row.program {
                             HStack(alignment: .firstTextBaseline, spacing: 12) {
                                 Text(p.start.formatted(date: .abbreviated, time: .shortened)).font(.callout.monospacedDigit()).foregroundStyle(.secondary).frame(width: 150, alignment: .leading)
                                 VStack(alignment: .leading, spacing: 1) {
@@ -76,9 +89,21 @@ struct ScheduleView: View {
                                 Spacer()
                                 if let l = p.label { Badge(text: l) }
                                 Text(Format.duration(p.endMs - p.startMs)).foregroundStyle(.secondary)
+                                if p.end > Date() { Button("Change…") { air = AirRequest(range: (max(p.start, Date()), p.end)) }.glassButton() }
                             }
                             .padding(.vertical, 9).padding(.horizontal, 16)
                             Divider().opacity(0.3)
+                          } else if let g = row.gap {
+                            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                                Text(g.from.formatted(date: .abbreviated, time: .shortened)).font(.callout.monospacedDigit()).foregroundStyle(.secondary).frame(width: 150, alignment: .leading)
+                                Text("Off air").italic().foregroundStyle(.secondary)
+                                Spacer()
+                                Text(Format.duration(Int64(g.to.timeIntervalSince(g.from) * 1000))).foregroundStyle(.secondary)
+                                Button("Fill…") { air = AirRequest(range: (g.from, g.to)) }.glassButton()
+                            }
+                            .padding(.vertical, 9).padding(.horizontal, 16)
+                            Divider().opacity(0.3)
+                          }
                         }
                     }
                     .glassCard()
@@ -86,6 +111,9 @@ struct ScheduleView: View {
                 }
             }
             .padding(28)
+        }
+        .sheet(item: $air) { a in
+            if let channel { AirSheet(channel: channel, range: a.range) { Task { await load() } } }
         }
         .task { if channelID == nil { channelID = programmable.first?.id } }
         .task(id: "\(channelID ?? "")-\(hours)-\(showBreaks)") { await load() }
@@ -101,6 +129,31 @@ struct ScheduleView: View {
         } else {
             if let v = await model.run({ try await client.schedule(channel: id, hours: hours) }) { programs = v }
         }
+    }
+
+    /// The programmes with the stretches between them (off air) as rows of their own.
+    private struct Row: Identifiable {
+        let id: String
+        var program: Program?
+        var gap: (from: Date, to: Date)?
+    }
+
+    private var rows: [Row] {
+        var out: [Row] = []
+        var at = max(programs.first?.start ?? Date(), Date())
+        for p in programs {
+            if p.start.timeIntervalSince(at) >= 60 { out.append(Row(id: "gap-\(at.timeIntervalSince1970)", program: nil, gap: (at, p.start))) }
+            out.append(Row(id: p.id, program: p, gap: nil))
+            at = max(at, p.end)
+        }
+        return out
+    }
+
+    private func refreshNow() async {
+        guard let client = model.client, let id = channelID else { return }
+        _ = await model.run { try await client.refresh(channel: id) }
+        await model.refreshChannels()
+        await load()
     }
 
     private func reroll() async {

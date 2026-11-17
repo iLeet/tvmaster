@@ -4,16 +4,21 @@ import Foundation
 /// or something this editor leaves alone (a rotation), which is kept exactly as it was.
 public struct SourceChoice: Equatable, Sendable {
     public enum Kind: String, CaseIterable, Identifiable, Sendable {
-        case show, pool, chaos, other
+        case show, pool, chaos, rotation, other
         public var id: String { rawValue }
         public var label: String {
-            switch self { case .show: "One show"; case .pool: "Several shows"; case .chaos: "Anything"; case .other: "Rotation" }
+            switch self { case .show: "One show"; case .pool: "Several shows"; case .chaos: "Anything"; case .rotation: "A rotation"; case .other: "Other" }
         }
     }
     public var kind: Kind = .chaos
     public var show = ""
     public var shows: [String] = []
     public var order = "sequential"
+    /// For a rotation: what takes turns, and when the next one takes over.
+    public var items: [SourceChoice] = []
+    /// `weeks` (every `weeks` weeks) or `finale` (when the current show finishes a full pass).
+    public var advance = "weeks"
+    public var weeks = 1
     var raw: JSONValue?
 
     public init() {}
@@ -24,6 +29,11 @@ public struct SourceChoice: Equatable, Sendable {
         case "show": kind = .show; show = json.get(["show"])?.stringValue ?? ""
         case "pool": kind = .pool; shows = json.get(["shows"])?.stringArray ?? []; order = json.get(["order"])?.stringValue ?? "sequential"
         case "chaos": kind = .chaos
+        case "rotation":
+            kind = .rotation
+            items = (json.get(["items"])?.arrayValue ?? []).map { SourceChoice(json: $0) }
+            if json.get(["advance"])?.stringValue == "finale" { advance = "finale" }
+            else if let w = json.get(["advance", "weeks"])?.intValue { advance = "weeks"; weeks = max(1, w) }
         default: kind = .other; raw = json
         }
     }
@@ -33,6 +43,9 @@ public struct SourceChoice: Equatable, Sendable {
         case .show: .object(["type": .string("show"), "show": .string(show)])
         case .pool: .object(["type": .string("pool"), "shows": .array(shows.map { .string($0) }), "order": .string(order)])
         case .chaos: .object(["type": .string("chaos")])
+        case .rotation:
+            .object(["type": .string("rotation"), "items": .array(items.map(\.json)),
+                     "advance": advance == "finale" ? .string("finale") : .object(["weeks": .number(Double(max(1, weeks)))])])
         case .other: raw ?? .object(["type": .string("chaos")])
         }
     }
@@ -42,7 +55,8 @@ public struct SourceChoice: Equatable, Sendable {
         case .show: show.isEmpty ? "No show chosen" : show
         case .pool: shows.isEmpty ? "Every show" : shows.count == 1 ? shows[0] : "\(shows.count) shows"
         case .chaos: "Anything"
-        case .other: "A rotation (edit it in the web admin)"
+        case .rotation: "\(items.count) taking turns"
+        case .other: "Something this editor does not know (kept as it is)"
         }
     }
 }
@@ -58,6 +72,17 @@ public struct TimeSlot: Equatable, Identifiable, Sendable {
     public var source = SourceChoice()
     /// Air one episode at the start time, then leave the rest of the slot to the gap policy.
     public var once = false
+    public init() {}
+}
+
+/// Part of the year with its own time slots ("Summer schedule", 06-01 to 08-31).
+public struct SeasonSlot: Equatable, Identifiable, Sendable {
+    public var id = UUID()
+    public var name = ""
+    /// "MM-DD", inclusive.
+    public var from = "06-01"
+    public var to = "08-31"
+    public var slots: [TimeSlot] = []
     public init() {}
 }
 
@@ -95,21 +120,15 @@ public struct LineupSettings: Equatable, Sendable {
     public var catchUpAdvances = false
     public var slots: [TimeSlot] = []
     public var events: [EventSlot] = []
+    public var seasons: [SeasonSlot] = []
     /// What airs between slots; nil = automatic (from the channel's strategy).
     public var fill: SourceChoice?
     public var ads: AdSettings?
-    public var seasonCount = 0
 
     public static let grids = [5, 10, 15, 20, 30, 60]
 
-    public init() {}
-
-    public init(lineup: JSONValue?) {
-        guard let l = lineup else { return }
-        gridMinutes = l.get(["grid_minutes"])?.intValue
-        catchUpAdvances = l.get(["catch_up"])?.stringValue == "advance"
-        seasonCount = l.get(["seasons"])?.arrayValue?.count ?? 0
-        slots = (l.get(["blocks"])?.arrayValue ?? []).map { b in
+    static func slots(_ blocks: JSONValue?) -> [TimeSlot] {
+        (blocks?.arrayValue ?? []).map { b in
             var s = TimeSlot()
             s.name = b.get(["name"])?.stringValue ?? ""
             s.days = Set((b.get(["days"])?.arrayValue ?? []).compactMap(\.intValue))
@@ -118,6 +137,34 @@ public struct LineupSettings: Equatable, Sendable {
             s.source = SourceChoice(json: b.get(["source"]))
             s.once = b.get(["once"])?.boolValue ?? false
             return s
+        }
+    }
+
+    static func blocksJSON(_ slots: [TimeSlot]) -> JSONValue {
+        .array(slots.map { s in
+            var o: [String: JSONValue] = [
+                "name": .string(s.name), "days": .array(s.days.sorted().map { .number(Double($0)) }),
+                "start": .string(s.start), "end": .string(s.end), "source": s.source.json,
+            ]
+            if s.once { o["once"] = .bool(true) }
+            return .object(o)
+        })
+    }
+
+    public init() {}
+
+    public init(lineup: JSONValue?) {
+        guard let l = lineup else { return }
+        gridMinutes = l.get(["grid_minutes"])?.intValue
+        catchUpAdvances = l.get(["catch_up"])?.stringValue == "advance"
+        slots = Self.slots(l.get(["blocks"]))
+        seasons = (l.get(["seasons"])?.arrayValue ?? []).map { j in
+            var v = SeasonSlot()
+            v.name = j.get(["name"])?.stringValue ?? ""
+            v.from = j.get(["from"])?.stringValue ?? "06-01"
+            v.to = j.get(["to"])?.stringValue ?? "08-31"
+            v.slots = Self.slots(j.get(["blocks"]))
+            return v
         }
         events = (l.get(["events"])?.arrayValue ?? []).map { e in
             var v = EventSlot()
@@ -154,6 +201,11 @@ public struct LineupSettings: Equatable, Sendable {
             if s.start == s.end { return "A time slot starts and ends at the same time." }
             if s.source.kind == .show && s.source.show.isEmpty { return "Choose a show for every time slot." }
         }
+        for season in seasons {
+            if season.name.trimmingCharacters(in: .whitespaces).isEmpty { return "Give every season a name." }
+            for sl in season.slots where sl.start == sl.end { return "A time slot in “\(season.name)” starts and ends at the same time." }
+            for sl in season.slots where sl.source.kind == .show && sl.source.show.isEmpty { return "Choose a show for every time slot in “\(season.name)”." }
+        }
         for e in events {
             if e.name.trimmingCharacters(in: .whitespaces).isEmpty { return "Give every event a name." }
             if e.start.isEmpty || e.end.isEmpty { return "Give “\(e.name)” a start and an end." }
@@ -168,13 +220,9 @@ public struct LineupSettings: Equatable, Sendable {
         var l = lineup ?? .object([:])
         l.set(["grid_minutes"], gridMinutes.map { .number(Double($0)) } ?? .null)
         l.set(["catch_up"], .string(catchUpAdvances ? "advance" : "resume"))
-        l.set(["blocks"], .array(slots.map { s in
-            var o: [String: JSONValue] = [
-                "name": .string(s.name), "days": .array(s.days.sorted().map { .number(Double($0)) }),
-                "start": .string(s.start), "end": .string(s.end), "source": s.source.json,
-            ]
-            if s.once { o["once"] = .bool(true) }
-            return .object(o)
+        l.set(["blocks"], Self.blocksJSON(slots))
+        l.set(["seasons"], .array(seasons.map { v in
+            .object(["name": .string(v.name), "from": .string(v.from), "to": .string(v.to), "blocks": Self.blocksJSON(v.slots)])
         }))
         l.set(["events"], .array(events.map { e in
             .object(["name": .string(e.name), "start": .string(e.start), "end": .string(e.end),

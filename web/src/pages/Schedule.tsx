@@ -5,6 +5,7 @@ import { useLiveEvent, useQuery } from '../live';
 import { href, navigate } from '../router';
 import type { ChannelView, Cursor, Program, ScheduleItem } from '../types';
 import { Badge, Btn, Card, Empty, Field, Progress, Segmented, Spinner, useToast } from '../ui';
+import { AirModal } from './ScheduleActions';
 
 const KIND_CLASS: Record<string, string> = { show: 'tl-show', commercial: 'tl-commercial', bumper: 'tl-bumper', filler: 'tl-filler' };
 
@@ -32,6 +33,18 @@ function Timeline({ items, from, to, tz }: { items: ScheduleItem[]; from: number
   );
 }
 
+/** The programmes with the stretches between them (off air) as rows of their own. */
+function withGaps(progs: Program[], now: number): (Program & { gap?: boolean })[] {
+  const out: (Program & { gap?: boolean })[] = [];
+  let at = progs.length ? Math.max(progs[0].start_ms, now) : now;
+  for (const p of progs) {
+    if (p.start_ms - at >= 60_000) out.push({ ...p, gap: true, show: null, title: 'Off air', start_ms: at, end_ms: p.start_ms, label: null });
+    out.push(p);
+    at = Math.max(at, p.end_ms);
+  }
+  return out;
+}
+
 export function Schedule({ channelId }: { channelId?: string }) {
   const channels = useQuery(() => api.get<ChannelView[]>('/channels'));
   const programmable = (channels.data ?? []).filter((c) => c.kind === 'programming');
@@ -39,6 +52,7 @@ export function Schedule({ channelId }: { channelId?: string }) {
   const [hours, setHours] = useState('6');
   const [mode, setMode] = useState<'guide' | 'items'>('guide');
   const { say, attempt } = useToast();
+  const [air, setAir] = useState<{ from: number; to: number } | 'now' | null>(null);
 
   useEffect(() => {
     if (!channelId && programmable[0]) navigate(`schedule/${programmable[0].id}`);
@@ -59,6 +73,10 @@ export function Schedule({ channelId }: { channelId?: string }) {
     if (r) say(`Re-rolled: ${r.items} new items`);
   };
 
+  const refresh = async () => {
+    const r = await attempt(() => api.post<{ items: number }>(`/channels/${id}/refresh`));
+    if (r) say('On the current plan now');
+  };
   const now = Date.now();
   const winFrom = Math.floor(now / 600_000) * 600_000 - 10 * 60_000;
   const winTo = winFrom + Math.min(Number(hours), 3) * 3_600_000;
@@ -90,7 +108,10 @@ export function Schedule({ channelId }: { channelId?: string }) {
             </div>
             <div className="row">
               <a className="btn" href={href(`channels/${channel.id}`)}>Edit channel</a>
+              <Btn icon="play" onClick={() => setAir('now')} title="Cut to something right now (a stand-by screen, say)">Air now…</Btn>
+              <Btn icon="refresh" onClick={refresh} title="Put the channel on the plan for this moment, even part way through a show">Refresh now</Btn>
               <Btn icon="refresh" onClick={reroll} title="Regenerate everything that has not aired yet">Re-roll</Btn>
+              <Btn onClick={() => setAir({ from: Math.ceil(Date.now() / 1_800_000) * 1_800_000, to: Math.ceil(Date.now() / 1_800_000) * 1_800_000 + 1_800_000 })} title="Change what airs in a stretch of time">Change a time…</Btn>
             </div>
           </Card>
 
@@ -116,14 +137,15 @@ export function Schedule({ channelId }: { channelId?: string }) {
             <Card>
               {guide.loading && !guide.data ? <Spinner /> : (guide.data ?? []).length === 0 ? <Empty>Nothing scheduled. Add shows to the channel's libraries.</Empty> : (
                 <table className="table">
-                  <thead><tr><th>Day</th><th>Time</th><th>Programme</th><th>Block</th></tr></thead>
+                  <thead><tr><th>Day</th><th>Time</th><th>Programme</th><th>Block</th><th /></tr></thead>
                   <tbody>
-                    {(guide.data ?? []).map((p, i) => (
-                      <tr key={i}>
+                    {withGaps(guide.data ?? [], now).map((p, i) => (
+                      <tr key={i} className={p.gap ? 'dim' : undefined}>
                         <td className="dim">{formatDay(p.start_ms, tz)}</td>
                         <td className="mono">{formatClock(p.start_ms, tz)}–{formatClock(p.end_ms, tz)}</td>
-                        <td><strong>{p.show ?? p.title}</strong>{p.show && <span className="dim"> — {p.title}</span>}{p.season != null && p.episode != null && <span className="dim small"> · S{String(p.season).padStart(2, '0')}E{String(p.episode).padStart(2, '0')}</span>}</td>
+                        <td>{p.gap ? <em>Off air</em> : <><strong>{p.show ?? p.title}</strong>{p.show && <span className="dim"> — {p.title}</span>}{p.season != null && p.episode != null && <span className="dim small"> · S{String(p.season).padStart(2, '0')}E{String(p.episode).padStart(2, '0')}</span>}</>}</td>
                         <td>{p.label && <Badge>{p.label}</Badge>}</td>
+                        <td>{p.end_ms > now && <Btn small onClick={() => setAir({ from: Math.max(p.start_ms, now), to: p.end_ms })}>{p.gap ? 'Fill…' : 'Change…'}</Btn>}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -131,6 +153,8 @@ export function Schedule({ channelId }: { channelId?: string }) {
               )}
             </Card>
           )}
+
+          {air && channel && <AirModal channel={channel} tz={tz} range={air === 'now' ? undefined : air} onClose={() => setAir(null)} onDone={() => { guide.reload(); items.reload(); cursors.reload(); channels.reload(); }} />}
 
           <Card className="stack">
             <h2>Where each show is up to</h2>

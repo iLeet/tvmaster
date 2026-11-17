@@ -530,7 +530,15 @@ fn build_router(state: AppState, https: bool) -> Router {
         .route("/api/v1/server/restart", post(station::server_restart))
         .route("/api/v1/live", get(live::get_live).post(live::set_live))
         .route("/api/v1/live/clear", post(live::clear_live))
+        .route("/api/v1/live/preview", post(live::preview))
         .route("/api/v1/channels/:id/reset", post(station::reset))
+        .route("/api/v1/channels/:id/refresh", post(station::refresh))
+        .route("/api/v1/channels/:id/play", post(station::play_now))
+        .route("/api/v1/channels/:id/episodes", get(station::episodes))
+        .route(
+            "/api/v1/channels/:id/schedule/edit",
+            post(station::edit_schedule),
+        )
         .route("/api/v1/channels/:id/stream", post(station::stream_control))
         .route("/api/v1/monitor", get(monitor::get).put(monitor::put))
         .route("/api/v1/monitor/test", post(monitor::test))

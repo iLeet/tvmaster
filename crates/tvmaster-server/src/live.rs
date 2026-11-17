@@ -7,7 +7,8 @@ use axum::{extract::State, http::StatusCode, Json};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
-use tvmaster_playout::{LiveMode, LiveOverride};
+use tvmaster_playout::{AlertLook, AlertSound, AlertStyle, LiveMode, LiveOverride};
+use tvmaster_render::alert::{AlertTheme, Severity};
 
 const KEY: &str = "live_overrides";
 const MAX_EVENT: usize = 80;
@@ -21,10 +22,35 @@ pub struct Entry {
     pub title: String,
     #[serde(default)]
     pub message: String,
+    /// `full` (the whole screen) or `bar` (across the bottom of the programme).
+    #[serde(default = "d_style")]
+    pub style: String,
+    /// `retro`, `modern`, `midnight`, `graphite`, `snow`, `forest`, `berry` or `mono`.
+    #[serde(default = "d_theme")]
+    pub theme: String,
+    /// `emergency`, `warning` or `info`.
+    #[serde(default = "d_severity")]
+    pub severity: String,
+    /// `none`, `attention`, `information`, `urgent` or `beeps`.
+    #[serde(default = "d_sound")]
+    pub sound: String,
     pub started_ms: i64,
     /// When it ends by itself (`None` = until cleared).
     #[serde(default)]
     pub until_ms: Option<i64>,
+}
+
+fn d_style() -> String {
+    "full".into()
+}
+fn d_theme() -> String {
+    "retro".into()
+}
+fn d_severity() -> String {
+    "emergency".into()
+}
+fn d_sound() -> String {
+    "attention".into()
 }
 
 pub type Book = BTreeMap<String, Entry>;
@@ -56,6 +82,12 @@ pub(crate) fn current(book: &Book, channel: &str, now_ms: i64) -> Option<LiveOve
         "alert" => LiveMode::Alert {
             event: e.title.clone(),
             text: e.message.clone(),
+            look: AlertLook {
+                theme: AlertTheme::parse(&e.theme).unwrap_or_default(),
+                severity: Severity::parse(&e.severity).unwrap_or_default(),
+            },
+            style: AlertStyle::parse(&e.style).unwrap_or_default(),
+            sound: AlertSound::parse(&e.sound).unwrap_or_default(),
         },
         _ => return None,
     };
@@ -71,40 +103,65 @@ pub fn samples() -> Value {
         {
             "id": "eas_test",
             "name": "Required test (EAS style)",
+            "severity": "emergency", "sound": "attention",
             "event": "Emergency alert test",
             "text": "This is a test of the Emergency Alert System. This is only a test. If this had been an actual emergency, you would have been told where to tune for news and official information. This concludes this test of the Emergency Alert System."
         },
         {
             "id": "civil_emergency",
             "name": "Civil emergency (sample)",
+            "severity": "emergency", "sound": "urgent",
             "event": "Civil emergency message",
             "text": "SAMPLE ONLY - THIS IS A TEST. Authorities in your area have issued a civil emergency message. Stay tuned to this station and local officials for instructions. No action is required; this is only a test."
         },
         {
             "id": "weather_warning",
             "name": "Severe weather (sample)",
+            "severity": "warning", "sound": "attention",
             "event": "Tornado warning",
             "text": "SAMPLE ONLY - THIS IS A TEST. A tornado warning is in effect for your area until 9:00 PM. Take shelter now in a basement or an interior room on the lowest floor. This is only a test."
         },
         {
             "id": "child_alert",
             "name": "Child abduction (sample)",
+            "severity": "emergency", "sound": "attention",
             "event": "Child abduction emergency",
             "text": "SAMPLE ONLY - THIS IS A TEST. An alert has been issued for a missing child in your area. If you have information, call your local police. This is only a test of the alert system."
         },
         {
             "id": "all_clear",
             "name": "Technical difficulties",
+            "severity": "info", "sound": "information",
             "event": "Please stand by",
             "text": "We are experiencing technical difficulties. Programming will resume shortly. Thank you for your patience."
         }
     ])
 }
 
+/// The choices an alert offers, for the apps to build their pickers from.
+pub fn options() -> Value {
+    let pairs = |p: &[(&str, &str)]| -> Value {
+        p.iter()
+            .map(|(v, l)| json!({ "value": v, "label": l }))
+            .collect::<Vec<_>>()
+            .into()
+    };
+    json!({
+        "styles": [
+            { "value": "full", "label": "Full screen" },
+            { "value": "bar", "label": "Bar across the bottom" },
+        ],
+        "themes": pairs(&AlertTheme::ALL),
+        "severities": pairs(&Severity::ALL),
+        "sounds": pairs(&AlertSound::ALL),
+    })
+}
+
 fn entry_json(channel: &str, e: &Entry) -> Value {
     json!({
         "channel": channel, "mode": e.mode, "title": e.title, "message": e.message,
         "started_ms": e.started_ms, "until_ms": e.until_ms,
+        "style": e.style, "theme": e.theme, "severity": e.severity, "sound": e.sound,
     })
 }
 
@@ -116,7 +173,7 @@ fn state_json(s: &AppState) -> Value {
         .filter(|(_, e)| e.until_ms.is_none_or(|u| u > now))
         .map(|(c, e)| entry_json(c, e))
         .collect();
-    json!({ "overrides": active, "samples": samples() })
+    json!({ "overrides": active, "samples": samples(), "options": options() })
 }
 
 /// `GET /api/v1/live`
@@ -142,6 +199,79 @@ pub struct SetBody {
     /// Go back to programming by itself after this many minutes.
     #[serde(default)]
     minutes: Option<u32>,
+    /// For an alert: `full` or `bar`.
+    #[serde(default)]
+    style: Option<String>,
+    #[serde(default)]
+    theme: Option<String>,
+    #[serde(default)]
+    severity: Option<String>,
+    /// For an alert: `none`, `attention`, `information`, `urgent` or `beeps`.
+    #[serde(default)]
+    sound: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct PreviewBody {
+    #[serde(default)]
+    style: Option<String>,
+    #[serde(default)]
+    theme: Option<String>,
+    #[serde(default)]
+    severity: Option<String>,
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    message: String,
+    #[serde(default)]
+    t: f32,
+}
+
+/// `POST /api/v1/live/preview`: one frame of an alert as it would look, as a PNG (nothing goes on air).
+pub async fn preview(Json(b): Json<PreviewBody>) -> ApiResult<axum::response::Response> {
+    use axum::http::{header, HeaderValue};
+    use axum::response::IntoResponse;
+    let bad = |what: &str| ApiError::new(StatusCode::BAD_REQUEST, format!("unknown {what}"));
+    let look = AlertLook {
+        theme: AlertTheme::parse(b.theme.as_deref().unwrap_or("retro"))
+            .ok_or_else(|| bad("theme"))?,
+        severity: Severity::parse(b.severity.as_deref().unwrap_or("emergency"))
+            .ok_or_else(|| bad("severity"))?,
+    };
+    let style =
+        AlertStyle::parse(b.style.as_deref().unwrap_or("full")).ok_or_else(|| bad("style"))?;
+    let title = if b.title.trim().is_empty() {
+        "Emergency alert test".to_string()
+    } else {
+        b.title.chars().take(80).collect()
+    };
+    let message = if b.message.trim().is_empty() {
+        "This is a test. No action is required.".to_string()
+    } else {
+        b.message.chars().take(600).collect()
+    };
+    let t = b.t.clamp(0.0, 3600.0);
+    let png = tokio::task::spawn_blocking(move || {
+        let c = tvmaster_render::alert::alert_preview(&look, style, &title, &message, t);
+        let mut rgba = Vec::with_capacity(c.w * c.h * 4);
+        for px in c.px.as_chunks::<3>().0 {
+            rgba.extend_from_slice(px);
+            rgba.push(255);
+        }
+        tvmaster_render::png::rgba_png(c.w as u32, c.h as u32, &rgba)
+    })
+    .await
+    .map_err(|_| {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "could not draw the alert",
+        )
+    })?;
+    let mut res = png.into_response();
+    let h = res.headers_mut();
+    h.insert(header::CONTENT_TYPE, HeaderValue::from_static("image/png"));
+    h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    Ok(res)
 }
 
 #[derive(Deserialize)]
@@ -213,7 +343,39 @@ pub async fn set_live(
             "mode must be test_screen, off_air, black, static or alert",
         ));
     }
+    // The look of an alert: what was asked, else the sample's own, else the usual.
+    let sample = body.sample.as_deref().and_then(|id| {
+        samples()
+            .as_array()
+            .and_then(|a| a.iter().find(|x| x["id"] == id).cloned())
+    });
+    let pick = |asked: &Option<String>, key: &str, default: &str| -> String {
+        asked
+            .clone()
+            .or_else(|| {
+                sample
+                    .as_ref()
+                    .and_then(|s| s[key].as_str().map(str::to_string))
+            })
+            .unwrap_or_else(|| default.to_string())
+    };
+    let (style, theme, severity, sound) = (
+        pick(&body.style, "style", "full"),
+        pick(&body.theme, "theme", "retro"),
+        pick(&body.severity, "severity", "emergency"),
+        pick(&body.sound, "sound", "attention"),
+    );
     if body.mode == "alert" {
+        if AlertStyle::parse(&style).is_none()
+            || AlertTheme::parse(&theme).is_none()
+            || Severity::parse(&severity).is_none()
+            || AlertSound::parse(&sound).is_none()
+        {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "unknown style, theme, severity or sound (see GET /api/v1/live for the choices)",
+            ));
+        }
         if title.trim().is_empty() || message.trim().is_empty() {
             return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
@@ -249,6 +411,10 @@ pub async fn set_live(
                     mode: body.mode.clone(),
                     title: title.clone(),
                     message: message.clone(),
+                    style: style.clone(),
+                    theme: theme.clone(),
+                    severity: severity.clone(),
+                    sound: sound.clone(),
                     started_ms: now,
                     until_ms: body.minutes.map(|m| now + i64::from(m) * 60_000),
                 },
@@ -318,7 +484,7 @@ pub(crate) fn expire(s: &AppState) {
 
 #[cfg(test)]
 mod tests {
-    use crate::test_util::call;
+    use crate::test_util::{call, call_raw};
     use crate::{router, AppState};
     use axum::http::StatusCode;
 
@@ -415,5 +581,83 @@ mod tests {
         state.live.lock().unwrap().get_mut("a").unwrap().until_ms = Some(now - 1);
         crate::live::expire(&state);
         assert!(state.live.lock().unwrap().is_empty());
+    }
+    #[tokio::test]
+    async fn an_alert_has_a_look_a_sound_and_a_preview() {
+        let (state, app) = two_channels().await;
+        let (st, v) = call(&app, "GET", "/api/v1/live", "").await;
+        assert_eq!(st, StatusCode::OK);
+        assert!(v["options"]["themes"].as_array().unwrap().len() >= 8);
+        assert!(v["options"]["sounds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|s| s["value"] == "none"));
+
+        // a sample brings its own severity and sound; asking overrides them
+        let (st, v) = call(
+            &app,
+            "POST",
+            "/api/v1/live",
+            r#"{"channels":["a"],"mode":"alert","sample":"all_clear","style":"bar","theme":"modern"}"#,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{v}");
+        let a = &v["overrides"][0];
+        assert_eq!(
+            (a["style"].as_str(), a["theme"].as_str()),
+            (Some("bar"), Some("modern"))
+        );
+        assert_eq!(
+            (a["severity"].as_str(), a["sound"].as_str()),
+            (Some("info"), Some("information"))
+        );
+        let (st, v) = call(
+            &app,
+            "POST",
+            "/api/v1/live",
+            r#"{"channels":["b"],"mode":"alert","sample":"eas_test","sound":"none"}"#,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{v}");
+        let cur = {
+            let book = state.live.lock().unwrap();
+            crate::live::current(&book, "b", crate::plan::now_ms()).unwrap()
+        };
+        assert!(matches!(
+            cur.mode,
+            tvmaster_playout::LiveMode::Alert {
+                sound: tvmaster_playout::AlertSound::None,
+                ..
+            }
+        ));
+        for body in [
+            r#"{"channels":["a"],"mode":"alert","sample":"eas_test","theme":"disco"}"#,
+            r#"{"channels":["a"],"mode":"alert","sample":"eas_test","style":"corner"}"#,
+            r#"{"channels":["a"],"mode":"alert","sample":"eas_test","sound":"loud"}"#,
+        ] {
+            let (st, _) = call(&app, "POST", "/api/v1/live", body).await;
+            assert_eq!(st, StatusCode::BAD_REQUEST, "{body}");
+        }
+
+        let (st, p1) = call_raw(
+            &app,
+            "POST",
+            "/api/v1/live/preview",
+            r#"{"theme":"modern","severity":"warning"}"#,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert!(p1.starts_with("\u{fffd}PNG"));
+        let (_, p2) = call_raw(
+            &app,
+            "POST",
+            "/api/v1/live/preview",
+            r#"{"theme":"modern","style":"bar"}"#,
+        )
+        .await;
+        assert_ne!(p1, p2, "a bar is not the full screen");
+        let (st, _) = call_raw(&app, "POST", "/api/v1/live/preview", r#"{"theme":"nope"}"#).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST);
     }
 }

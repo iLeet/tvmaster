@@ -186,6 +186,8 @@ pub struct ItemPlan {
     pub clock: Option<ClockFx>,
     /// Drawn over the picture, in order.
     pub overlays: Vec<OverlayInput>,
+    /// A sound mixed into the programme's own (an alert's tone): an FFmpeg `lavfi` audio source.
+    pub extra_audio: Option<String>,
 }
 
 impl Default for ItemPlan {
@@ -199,6 +201,7 @@ impl Default for ItemPlan {
             deinterlace: false,
             clock: None,
             overlays: Vec::new(),
+            extra_audio: None,
         }
     }
 }

@@ -194,5 +194,14 @@ The daemon also runs an autopilot loop (every minute) that tops up every channel
 
 - `GET /api/v1/live`: `{overrides: [{channel, mode, title, message, started_ms, until_ms}], samples: [{id, name, event, text}]}`.
 - `POST /api/v1/live` `{channels: ["all"] | [ids], mode: "test_screen"|"off_air"|"black"|"static"|"alert", title?, message?, sample?, minutes?}`: take channels over. `alert` needs `title` and `message`, or a `sample` id. Channels that are on air restart so it shows within seconds; the takeover is saved until cleared (or `minutes` pass).
+- `POST /api/v1/live` also takes, for an alert, `style` (`full` or `bar`), `theme` (`retro`, `modern`, `midnight`, `graphite`, `snow`, `forest`, `berry`, `mono`), `severity` (`emergency`, `warning`, `info`) and `sound` (`none`, `attention`, `information`, `urgent`, `beeps`); a `sample` supplies its own severity and sound. `GET /api/v1/live` lists the choices under `options`.
+- `POST /api/v1/live/preview` `{style, theme, severity, title, message}`: a PNG of the alert, nothing goes on air.
 - `POST /api/v1/live/clear` `{channels?: [...]}`: give channels (all when none are named) back to their programming.
 - `POST /api/v1/server/restart`: stop the server cleanly. Docker, systemd and the Windows task start it again.
+
+## Putting a channel on its plan, airing something now, editing the schedule
+
+- `POST /api/v1/channels/{id}/refresh`: plan afresh from the slot on air now and restart the stream, so a changed plan airs at once, joining part way through.
+- `POST /api/v1/channels/{id}/play` `{show | media_id | random: true}`: cut to something right now; the schedule carries on after it.
+- `POST /api/v1/channels/{id}/schedule/edit` `{from_ms, to_ms, show | media_id | random | off_air: true}`: change what airs in a stretch (at most 48 hours). Lasts until the next re-roll.
+- `GET /api/v1/channels/{id}/episodes?show=Name`: the episodes of a show the channel can air.

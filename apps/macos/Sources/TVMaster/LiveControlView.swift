@@ -10,7 +10,13 @@ struct LiveControlView: View {
     @State private var event = ""
     @State private var message = ""
     @State private var minutes = 0
+    @State private var style = "full"
+    @State private var theme = "retro"
+    @State private var severity = "emergency"
+    @State private var sound = "attention"
+    @State private var shot: NSImage?
     @State private var busy = false
+    @State private var airOn: Channel?
     @State private var confirm: Confirmation?
 
     private struct Confirmation: Identifiable {
@@ -56,6 +62,7 @@ struct LiveControlView: View {
             }
             .padding(28)
         }
+        .sheet(item: $airOn) { ch in AirSheet(channel: ch) { } }
         .alert(item: $confirm) { c in
             Alert(title: Text(c.title), message: Text(c.detail),
                   primaryButton: .destructive(Text("Do it")) { Task { await c.action() } },
@@ -95,9 +102,29 @@ struct LiveControlView: View {
                 HStack {
                     Text("Start from").font(.caption).foregroundStyle(.secondary)
                     ForEach(state.samples) { s in
-                        Button(s.name) { event = s.event; message = s.text }.glassButton()
+                        Button(s.name) {
+                            event = s.event; message = s.text
+                            if let v = s.severity { severity = v }
+                            if let v = s.sound { sound = v }
+                        }.glassButton()
                     }
                 }
+            }
+            let o = state.options
+            HStack(alignment: .top) {
+                Picker("Shown as", selection: $style) { ForEach(o?.styles ?? [LiveChoice(value: "full", label: "Full screen")]) { Text($0.label).tag($0.value) } }
+                Picker("Look", selection: $theme) { ForEach(o?.themes ?? [LiveChoice(value: "retro", label: "Retro")]) { Text($0.label).tag($0.value) } }
+            }
+            HStack(alignment: .top) {
+                Picker("How serious", selection: $severity) { ForEach(o?.severities ?? [LiveChoice(value: "emergency", label: "Emergency (red)")]) { Text($0.label).tag($0.value) } }
+                Picker("Sound", selection: $sound) { ForEach(o?.sounds ?? [LiveChoice(value: "attention", label: "Attention tone")]) { Text($0.label).tag($0.value) } }
+            }
+            if style == "bar" {
+                Text("The programme keeps playing underneath. If a channel has nothing playing, the alert takes the whole screen.").font(.caption).foregroundStyle(.secondary)
+            }
+            if let shot {
+                Image(nsImage: shot).resizable().aspectRatio(contentMode: .fit).frame(maxWidth: 520)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
             }
             TextField("Event, like “Tornado warning”", text: $event)
             TextField("What people should know and do", text: $message, axis: .vertical).lineLimit(3...6)
@@ -121,7 +148,7 @@ struct LiveControlView: View {
                     let ids = Array(target), name = scopeName, mins = minutes
                     confirm = Confirmation(title: "Put the alert “\(e)” on \(name)?",
                                            detail: "It replaces whatever is airing until it ends or you resume programming.") {
-                        await takeOver(ids, "alert", title: e, message: m, minutes: mins)
+                        await takeOver(ids, "alert", title: e, message: m, minutes: mins, look: (style, theme, severity, sound))
                     }
                 } label: { Label("Put alert on \(scopeName)", systemImage: "exclamationmark.triangle.fill") }
                     .glassButton(prominent: true).tint(.red).disabled(busy || !canAlert)
@@ -129,6 +156,13 @@ struct LiveControlView: View {
         }
         .textFieldStyle(.roundedBorder)
         .padding(16).frame(maxWidth: .infinity, alignment: .leading).glassCard(cornerRadius: 20)
+        .task(id: "\(style)|\(theme)|\(severity)|\(event)|\(message)") {
+            // Redraw the picture shortly after the choices stop changing.
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard !Task.isCancelled, let client = model.client else { return }
+            if let data = try? await client.alertPreview(style: style, theme: theme, severity: severity, title: event, message: message),
+               let img = NSImage(data: data) { shot = img }
+        }
     }
 
     // MARK: channels
@@ -157,6 +191,11 @@ struct LiveControlView: View {
                         Divider()
                         Button("Emergency alert…") { target = [ch.id] }
                     }.menuStyle(.borderlessButton).fixedSize().disabled(busy)
+                    if ch.isScheduled {
+                        Button("Air now…") { airOn = ch }.glassButton().disabled(busy)
+                        Button { Task { await refresh(ch) } } label: { Image(systemName: "arrow.clockwise") }.glassButton().disabled(busy)
+                            .help("Put the channel on the plan for this moment, even part way through a show")
+                    }
                     if o != nil { Button("Resume") { Task { await giveBack([ch.id]) } }.glassButton(prominent: true).disabled(busy) }
                     Menu {
                         Button(onAir ? "Restart stream" : "Start stream") { Task { await stream(ch, onAir ? "restart" : "start") } }
@@ -179,10 +218,12 @@ struct LiveControlView: View {
 
     // MARK: actions
 
-    private func takeOver(_ ids: [String], _ mode: String, title: String? = nil, message: String? = nil, minutes: Int? = nil) async {
+    private func takeOver(_ ids: [String], _ mode: String, title: String? = nil, message: String? = nil, minutes: Int? = nil,
+                          look: (style: String, theme: String, severity: String, sound: String)? = nil) async {
         guard let client = model.client else { return }
         busy = true; defer { busy = false }
-        if let v = await model.run({ try await client.takeOver(channels: ids, mode: mode, title: title, message: message, minutes: minutes) }) { model.liveState = v }
+        if let v = await model.run({ try await client.takeOver(channels: ids, mode: mode, title: title, message: message, minutes: minutes,
+                                                                style: look?.style, theme: look?.theme, severity: look?.severity, sound: look?.sound) }) { model.liveState = v }
         await model.refreshChannels()
     }
 
@@ -190,6 +231,13 @@ struct LiveControlView: View {
         guard let client = model.client else { return }
         busy = true; defer { busy = false }
         if let v = await model.run({ try await client.giveBack(channels: ids) }) { model.liveState = v }
+        await model.refreshChannels()
+    }
+
+    private func refresh(_ ch: Channel) async {
+        guard let client = model.client else { return }
+        busy = true; defer { busy = false }
+        _ = await model.run { try await client.refresh(channel: ch.id) }
         await model.refreshChannels()
     }
 

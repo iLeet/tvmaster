@@ -361,6 +361,36 @@ public struct ScheduleItem: Codable, Sendable, Hashable, Identifiable {
 }
 
 /// What the web player and remote both listen to.
+/// One episode of a show a channel can air.
+public struct Episode: Codable, Sendable, Hashable, Identifiable {
+    public var id: Int
+    public var season: Int?
+    public var episode: Int?
+    public var title: String?
+    public var durationMs: Int64
+    public var label: String {
+        let code = (season != nil && episode != nil) ? String(format: "S%02dE%02d ", season!, episode!) : ""
+        return code + (title ?? "")
+    }
+}
+
+/// What to put on the air.
+public enum AirTarget: Sendable, Equatable {
+    case show(String)
+    case episode(Int)
+    case random
+    case offAir
+
+    var body: [String: JSONValue] {
+        switch self {
+        case .show(let n): ["show": .string(n)]
+        case .episode(let id): ["media_id": .number(Double(id))]
+        case .random: ["random": .bool(true)]
+        case .offAir: ["off_air": .bool(true)]
+        }
+    }
+}
+
 /// A channel the operator has taken over (test screen, blank, emergency alert...).
 public struct LiveOverride: Codable, Sendable, Hashable, Identifiable {
     public var channel: String
@@ -369,6 +399,10 @@ public struct LiveOverride: Codable, Sendable, Hashable, Identifiable {
     public var message: String
     public var startedMs: Int64
     public var untilMs: Int64?
+    public var style: String?
+    public var theme: String?
+    public var severity: String?
+    public var sound: String?
     public var id: String { channel }
 
     public var modeLabel: String {
@@ -389,12 +423,30 @@ public struct LiveSample: Codable, Sendable, Hashable, Identifiable {
     public var name: String
     public var event: String
     public var text: String
+    public var severity: String?
+    public var sound: String?
+}
+
+public struct LiveChoice: Codable, Sendable, Hashable, Identifiable {
+    public var value: String
+    public var label: String
+    public var id: String { value }
+    public init(value: String, label: String) { self.value = value; self.label = label }
+}
+
+/// What an alert can look and sound like, as the server offers it.
+public struct LiveOptions: Codable, Sendable, Hashable {
+    public var styles: [LiveChoice]
+    public var themes: [LiveChoice]
+    public var severities: [LiveChoice]
+    public var sounds: [LiveChoice]
 }
 
 public struct LiveState: Codable, Sendable, Hashable {
     public var overrides: [LiveOverride]
     public var samples: [LiveSample]
-    public init(overrides: [LiveOverride] = [], samples: [LiveSample] = []) { self.overrides = overrides; self.samples = samples }
+    public var options: LiveOptions?
+    public init(overrides: [LiveOverride] = [], samples: [LiveSample] = [], options: LiveOptions? = nil) { self.overrides = overrides; self.samples = samples; self.options = options }
     public func override(for channel: String) -> LiveOverride? { overrides.first { $0.channel == channel } }
 }
 

@@ -190,6 +190,18 @@ pub fn item_args(job: &ItemJob, p: &OutputProfile, enc: Encoder) -> Vec<String> 
         ]);
         overlay_inputs.push((next_input, o));
     }
+    // A sound to mix in (an alert's tone).
+    let extra_audio_input = first_overlay_input + job.plan.overlays.len();
+    if let Some(src) = &job.plan.extra_audio {
+        a.extend([
+            "-f".into(),
+            "lavfi".into(),
+            "-t".into(),
+            secs(job.duration_ms),
+            "-i".into(),
+            src.clone(),
+        ]);
+    }
     a.extend(["-t".into(), secs(job.duration_ms)]);
 
     // The picture: image subtitles go on at the source's own size, then the
@@ -246,16 +258,30 @@ pub fn item_args(job: &ItemJob, p: &OutputProfile, enc: Encoder) -> Vec<String> 
         g.push_str(&format!(";[{last}]{}[vout]", pix_tail(enc)));
         a.extend(["-filter_complex".into(), g, "-map".into(), "[vout]".into()]);
     }
-    a.extend([
-        "-map".into(),
-        if !job.has_audio {
-            "1:a:0".to_string()
-        } else if let Some(i) = plan.audio_index {
-            format!("0:{i}")
+    let programme_audio = if !job.has_audio {
+        "1:a:0".to_string()
+    } else if let Some(i) = plan.audio_index {
+        format!("0:{i}")
+    } else {
+        "0:a:0".to_string()
+    };
+    if plan.extra_audio.is_some() {
+        let chain = if job.has_audio {
+            audio_chain(&plan.audio)
         } else {
-            "0:a:0".to_string()
-        },
-    ]);
+            "anull".to_string()
+        };
+        a.extend([
+            "-filter_complex".into(),
+            format!(
+                "[{programme_audio}]{chain}[pa];[{extra_audio_input}:a:0]anull[ta];[pa][ta]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[aout]"
+            ),
+            "-map".into(),
+            "[aout]".into(),
+        ]);
+    } else {
+        a.extend(["-map".into(), programme_audio]);
+    }
     a.extend(video_args(enc, p));
     a.extend([
         "-c:a".into(),
@@ -267,7 +293,7 @@ pub fn item_args(job: &ItemJob, p: &OutputProfile, enc: Encoder) -> Vec<String> 
         "-ac".into(),
         "2".into(),
     ]);
-    if job.has_audio {
+    if job.has_audio && plan.extra_audio.is_none() {
         a.extend(["-af".into(), audio_chain(&plan.audio)]);
     }
     a.extend([
@@ -511,14 +537,6 @@ pub fn rendered_args(
         enc,
         "anullsrc=r=48000:cl=stereo",
     )
-}
-
-/// The emergency-alert attention signal: the two tones (853 Hz and 960 Hz) every
-/// alert starts with, for `tone_ms`, then quiet.
-pub fn attention_tone_source(tone_ms: u64) -> String {
-    let t = format!("{:.3}", tone_ms as f64 / 1000.0);
-    let e = format!("if(lt(t\\,{t})\\,0.30*sin(2*PI*853*t)+0.30*sin(2*PI*960*t)\\,0)");
-    format!("aevalsrc={e}|{e}:s=48000")
 }
 
 /// [`rendered_args`] with a chosen lavfi audio source.
@@ -1162,6 +1180,42 @@ mod tests {
         assert!(
             !a.iter().any(|x| x == "-filter_complex"),
             "no extra inputs: a plain -vf chain"
+        );
+    }
+
+    #[test]
+    fn an_alert_tone_is_mixed_into_the_programmes_own_sound() {
+        use crate::looks::OverlayInput;
+        let plan = ItemPlan {
+            overlays: vec![OverlayInput {
+                png: "/c/bar.png".into(),
+                x: "0".into(),
+                y: "main_h-overlay_h-36".into(),
+                enable: None,
+            }],
+            extra_audio: crate::AlertSound::Attention.source(0),
+            ..Default::default()
+        };
+        let a = job_with(plan, true);
+        // media is input 0, the bar 1, the tone 2
+        let graphs: Vec<&String> = a
+            .iter()
+            .enumerate()
+            .filter(|(_, x)| *x == "-filter_complex")
+            .map(|(i, _)| &a[i + 1])
+            .collect();
+        assert_eq!(graphs.len(), 2, "one for the picture, one for the sound");
+        assert!(graphs[1].starts_with("[0:a:0]"), "{}", graphs[1]);
+        assert!(
+            graphs[1].contains("[2:a:0]anull[ta]") && graphs[1].contains("amix=inputs=2"),
+            "{}",
+            graphs[1]
+        );
+        assert!(a.iter().any(|x| x.starts_with("aevalsrc=")));
+        assert!(a.windows(2).any(|w| w[0] == "-map" && w[1] == "[aout]"));
+        assert!(
+            !a.iter().any(|x| x == "-af"),
+            "the chain moved into the graph"
         );
     }
 

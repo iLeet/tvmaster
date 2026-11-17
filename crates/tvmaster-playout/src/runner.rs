@@ -46,8 +46,6 @@ const EMPTY_SLATE_MS: u64 = 5_000;
 const MAX_SLATE_MS: u64 = 30_000;
 /// An override is aired in pieces this long, so clearing or changing it is noticed promptly.
 const LIVE_CHUNK_MS: u64 = 5_000;
-/// How long an alert's attention tone sounds.
-const ALERT_TONE_MS: i64 = 8_000;
 /// Consecutive unplayable items before giving up and letting the watchdog
 /// restart (with backoff) instead of spinning.
 const MAX_CONSECUTIVE_FAILURES: u32 = 5;
@@ -209,9 +207,19 @@ async fn produce(
                 .await
                 .map_err(|e| anyhow!("override lookup failed: {e}"))?
         };
-        if let Some(ov) = live {
+        // A bar alert rides over the programme; everything else replaces the picture.
+        let bar_alert = live.as_ref().filter(|o| {
+            matches!(
+                &o.mode,
+                crate::LiveMode::Alert {
+                    style: tvmaster_render::alert::AlertStyle::Bar,
+                    ..
+                }
+            ) && spec.guide.is_none()
+        });
+        if let Some(ov) = live.as_ref().filter(|_| bar_alert.is_none()) {
             let chunk = LIVE_CHUNK_MS;
-            live_screen(&cfg, &spec, &ov, chunk, ts_offset_ms, &tx, &mut fixer).await?;
+            live_screen(&cfg, &spec, ov, chunk, ts_offset_ms, &tx, &mut fixer).await?;
             ts_offset_ms += chunk;
             vt += chunk as i64;
             continue;
@@ -223,6 +231,21 @@ async fn produce(
             .map_err(|e| anyhow!("schedule lookup failed: {e}"))?;
 
         let Some(item) = next else {
+            if let Some(ov) = bar_alert {
+                live_screen(
+                    &cfg,
+                    &spec,
+                    ov,
+                    EMPTY_SLATE_MS,
+                    ts_offset_ms,
+                    &tx,
+                    &mut fixer,
+                )
+                .await?;
+                ts_offset_ms += EMPTY_SLATE_MS;
+                vt += EMPTY_SLATE_MS as i64;
+                continue;
+            }
             // Nothing scheduled at all: hold the air with the slate.
             slate(&cfg, &spec, EMPTY_SLATE_MS, ts_offset_ms, &tx, &mut fixer).await?;
             ts_offset_ms += EMPTY_SLATE_MS;
@@ -233,7 +256,12 @@ async fn produce(
         if item.start_ms > vt {
             // A hole in the schedule: slate until the next item starts.
             let gap = ((item.start_ms - vt) as u64).min(MAX_SLATE_MS);
-            slate(&cfg, &spec, gap, ts_offset_ms, &tx, &mut fixer).await?;
+            match bar_alert {
+                Some(ov) => {
+                    live_screen(&cfg, &spec, ov, gap, ts_offset_ms, &tx, &mut fixer).await?
+                }
+                None => slate(&cfg, &spec, gap, ts_offset_ms, &tx, &mut fixer).await?,
+            }
             ts_offset_ms += gap;
             vt += gap as i64;
             continue;
@@ -246,11 +274,24 @@ async fn produce(
             continue;
         }
 
+        // Nothing to lay a bar over (a stand-by screen, a bumper): the alert takes the whole screen.
+        if let Some(ov) = bar_alert.filter(|_| item.kind != PlayKind::Media) {
+            let chunk = LIVE_CHUNK_MS;
+            live_screen(&cfg, &spec, ov, chunk, ts_offset_ms, &tx, &mut fixer).await?;
+            ts_offset_ms += chunk;
+            vt += chunk as i64;
+            continue;
+        }
+
         match item.kind {
             PlayKind::Slate => {
-                slate(&cfg, &spec, remaining, ts_offset_ms, &tx, &mut fixer).await?;
-                ts_offset_ms += remaining;
+                // In pieces, so a plan changed while the stand-by screen is up is noticed within seconds.
+                let piece = remaining.min(MAX_SLATE_MS);
+                slate(&cfg, &spec, piece, ts_offset_ms, &tx, &mut fixer).await?;
+                ts_offset_ms += piece;
+                vt += piece as i64;
                 failures = 0;
+                continue;
             }
             PlayKind::SignOff => {
                 // Bars and snow come with a tone and hiss, the way a station signed off.
@@ -578,19 +619,23 @@ async fn live_screen(
             )
             .await
         }
-        LiveMode::Alert { event, text } => {
+        LiveMode::Alert {
+            event,
+            text,
+            look,
+            sound,
+            ..
+        } => {
             let into = (now_ms() - ov.started_ms).max(0);
-            let tone_left = (ALERT_TONE_MS - into).max(0) as u64;
-            let audio = crate::attention_tone_source(tone_left);
-            let scene = Scene::Alert {
-                event: event.clone(),
-                text: text.clone(),
-            };
-            let total_secs = (into as u64 + duration_ms) as f32 / 1000.0;
+            let audio = sound
+                .source(into)
+                .unwrap_or_else(|| "anullsrc=r=48000:cl=stereo".to_string());
+            let (look, event, text) = (*look, event.clone(), text.clone());
+            let (w, h) = tvmaster_render::alert::screen_size(&look);
             let frames = (duration_ms as f64 / 1000.0 * FPS as f64).ceil() as u64;
             let args = crate::rendered_args_with_audio(
-                WIDTH,
-                HEIGHT,
+                w,
+                h,
                 duration_ms,
                 ts_offset_ms,
                 &cfg.profile,
@@ -607,14 +652,15 @@ async fn live_screen(
                 .with_context(|| format!("starting {}", cfg.ffmpeg.display()))?;
             let mut stdin = child.stdin.take().context("encoder has no stdin")?;
             let mut out = child.stdout.take().context("encoder has no stdout")?;
-            let theme = Theme::for_channel(&spec.id);
-            let offset_s = into as f32 / 1000.0;
+            let offset_s = (now_ms() - ov.started_ms).max(0) as f32 / 1000.0;
             let writer = tokio::spawn(async move {
                 let chunk = tokio::task::spawn_blocking(move || {
-                    let mut buf = Vec::with_capacity(frames as usize * WIDTH * HEIGHT * 3);
+                    let mut buf = Vec::with_capacity(frames as usize * w * h * 3);
                     for k in 0..frames {
                         let t = offset_s + k as f32 / FPS as f32;
-                        buf.extend_from_slice(&render(&scene, &theme, t, total_secs).px);
+                        buf.extend_from_slice(
+                            &tvmaster_render::alert::alert_screen(&look, &event, &text, t).px,
+                        );
                     }
                     buf
                 })

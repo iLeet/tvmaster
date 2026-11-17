@@ -187,3 +187,28 @@ export function platformClass(ua: string, platform: string): 'mac' | 'win' | 'li
   if (s.includes('win')) return 'win';
   return 'linux';
 }
+
+/** "2026-11-16T19:30" as the wall clock in `timeZone` (or this device's zone). */
+export function msToInput(ms: number, timeZone?: string): string {
+  const p = Object.fromEntries(
+    new Intl.DateTimeFormat('en-CA', { timeZone, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+      .formatToParts(new Date(ms))
+      .map((x) => [x.type, x.value]),
+  ) as Record<string, string>;
+  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;
+}
+
+/** The moment a wall-clock time ("2026-11-16T19:30") is in `timeZone`, in milliseconds. */
+export function inputToMs(value: string, timeZone?: string): number {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(value);
+  if (!m) return NaN;
+  const asUtc = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]);
+  // Ask what the zone's clock says at that instant and correct by the difference, twice (for daylight saving).
+  let guess = asUtc;
+  for (let i = 0; i < 2; i++) {
+    const shown = msToInput(guess, timeZone);
+    const s = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(shown)!;
+    guess += asUtc - Date.UTC(+s[1], +s[2] - 1, +s[3], +s[4], +s[5]);
+  }
+  return guess;
+}

@@ -226,6 +226,19 @@ api -XPUT "$H/api/v1/security" -d '{"open_viewing":true}' >/dev/null
 [[ "$(curl -s -o /dev/null -w '%{http_code}' "$H/api/v1/libraries")" == 401 && "$(curl -s -o /dev/null -w '%{http_code}' -XPOST -H 'content-type: application/json' -d '{"id":"x","number":99,"name":"X"}' "$H/api/v1/channels")" == 401 ]] && ok "but managing still needs it" || bad "managing was left open"
 api -XPUT "$H/api/v1/security" -d '{"open_viewing":false}' >/dev/null
 
+# putting a channel on a new plan at once, airing something right now, and editing a stretch of the schedule
+code() { curl -s -o /dev/null -w '%{http_code}' -XPOST "${auth[@]}" -H 'content-type: application/json' -d "$2" "$H$1"; }
+[[ "$(code /api/v1/channels/retro/refresh '{}')" == 200 ]] && ok "a channel can be refreshed onto its plan right now" || bad "refresh"
+[[ "$(code /api/v1/channels/retro/play '{"show":"Alpha"}')" == 200 ]] && ok "something can be aired right now" || bad "play now"
+NOWPROG="$(api "$H/api/v1/channels/retro" | json "(d.get('now') or {}).get('show')")"
+[[ "$NOWPROG" == Alpha ]] && ok "and it is what the channel reports on air (Alpha)" || bad "now playing" "$NOWPROG"
+[[ "$(code /api/v1/channels/retro/play '{"show":"Nope"}')" == 400 ]] && ok "airing a show it does not have is refused without touching the schedule" || bad "play unknown show"
+FROM=$(( $(date +%s) * 1000 + 3600000 )); TO=$(( FROM + 1800000 ))
+[[ "$(code /api/v1/channels/retro/schedule/edit "{\"from_ms\":$FROM,\"to_ms\":$TO,\"off_air\":true}")" == 200 ]] && ok "a stretch of the schedule can be left off the air" || bad "edit off air"
+[[ "$(api "$H/api/v1/channels/retro/schedule?detail=items&hours=3" | json "any(i['kind']=='filler' and i['start_ms']==$FROM for i in d)")" == True ]] && ok "and the schedule shows it" || bad "edit not in schedule"
+[[ "$(code /api/v1/channels/retro/schedule/edit "{\"from_ms\":$FROM,\"to_ms\":$TO,\"show\":\"Beta\"}")" == 200 ]] && ok "or put a show into it" || bad "edit with a show"
+api -XPOST "$H/api/v1/channels/retro/reroll" >/dev/null
+
 # live control: the whole station to the test screen, one channel to an emergency alert, then back
 grab() { # grab channel out.png : wait for fresh segments, then save a frame from the newest one
   sleep 9; local seg; seg="$(curl -fsS "$H/stream/$1/index.m3u8?token=$TOKEN" | grep 'seg_.*\.ts' | tail -1)"
@@ -242,6 +255,15 @@ RGB="$(ffmpeg -hide_banner -loglevel error -i "$W/live-alert.png" -vf "crop=1:1:
 ffmpeg -hide_banner -loglevel error -t 3 -i "$H/stream/retro/index.m3u8?token=$TOKEN" -af astats=metadata=1 -f null - 2>&1 | head -1 >/dev/null
 VOL="$(ffmpeg -hide_banner -i "$H/stream/retro/index.m3u8?token=$TOKEN" -t 3 -af volumedetect -f null - 2>&1 | grep -o 'mean_volume: [-0-9.]*' | head -1)"
 [[ -n "$VOL" && "$VOL" != "mean_volume: -91.0" ]] && ok "and the test screen has its tone ($VOL dB)" || bad "tone missing" "$VOL"
+# an alert as a bar over the programme that is airing, in a smooth theme, with no sound
+api -XPOST "$H/api/v1/live/clear" -d '{}' >/dev/null
+api -XPOST "$H/api/v1/live" -d '{"channels":["retro"],"mode":"alert","sample":"weather_warning","style":"bar","theme":"modern","sound":"none"}' >/dev/null
+grab retro "$W/live-bar.png"
+RGB="$(ffmpeg -hide_banner -loglevel error -i "$W/live-bar.png" -vf "crop=1:1:5:650,format=rgb24" -f rawvideo - | od -An -tu1 | tr -s ' ' | sed 's/^ //')"; set -- $RGB
+[[ "${1:-0}" -gt 200 && "${2:-0}" -gt 120 && "${3:-255}" -lt 60 ]] && ok "a bar alert (amber, modern theme) sits over the programme (band pixel: $RGB)" || bad "bar alert" "rgb=$RGB"
+VOL="$(ffmpeg -hide_banner -i "$H/stream/retro/index.m3u8?token=$TOKEN" -t 3 -af volumedetect -f null - 2>&1 | grep -o 'mean_volume: [-0-9.]*' | head -1)"
+[[ -n "$VOL" && "$VOL" != "mean_volume: -91.0" ]] && ok "and the programme's own sound carries on under it ($VOL dB)" || bad "programme sound lost under the bar" "$VOL"
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -XPOST "${auth[@]}" -H 'content-type: application/json' -d '{"theme":"snow","severity":"info","style":"bar"}' "$H/api/v1/live/preview")" == 200 ]] && ok "an alert can be previewed without putting it on air" || bad "alert preview"
 api -XPOST "$H/api/v1/live/clear" -d '{}' >/dev/null
 [[ "$(api "$H/api/v1/live" | json "len(d['overrides'])")" == 0 ]] && ok "everything can be given back to the schedule" || bad "live clear"
 OUT="$(grab retro "$W/live-back.png")"

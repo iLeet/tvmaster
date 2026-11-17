@@ -16,32 +16,32 @@ struct ProgrammingForm: View {
                 Text("A weekly lineup. Each slot airs its show between the times you give. Time outside every slot follows “When nothing is scheduled”.")
                     .font(.caption).foregroundStyle(.secondary)
                 ForEach($ls.slots) { $slot in
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            TextField("Name", text: $slot.name, prompt: Text("Weeknight sitcoms")).textFieldStyle(.roundedBorder)
-                            Button(role: .destructive) { ls.slots.removeAll { $0.id == slot.id } } label: { Image(systemName: "trash") }.buttonStyle(.borderless)
-                        }
-                        HStack(spacing: 4) {
-                            ForEach(0..<7, id: \.self) { d in
-                                Toggle(dayNames[d], isOn: Binding(get: { slot.days.contains(d) }, set: { on in if on { slot.days.insert(d) } else { slot.days.remove(d) } }))
-                                    .toggleStyle(.button).controlSize(.small)
-                            }
-                            Text(LineupSettings.daysLabel(slot.days)).font(.caption).foregroundStyle(.secondary).padding(.leading, 6)
-                        }
-                        HStack {
-                            TimeField(label: "Starts", value: $slot.start)
-                            TimeField(label: "Ends", value: $slot.end, allow24: true)
-                        }
-                        SourcePicker(source: $slot.source, shows: shows)
-                        Toggle("One episode only (then the rest of the slot is a gap, like the test screen)", isOn: $slot.once).font(.callout)
-                    }
-                    .padding(10).background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))
+                    SlotEditor(slot: $slot, shows: shows) { ls.slots.removeAll { $0.id == slot.id } }
                 }
                 Button { ls.slots.append(TimeSlot()) } label: { Label("Add a time slot", systemImage: "plus") }
-                if ls.seasonCount > 0 {
-                    Text("\(ls.seasonCount) season\(ls.seasonCount == 1 ? "" : "s") (different slots for part of the year) are kept as they are; edit them in the web admin.")
-                        .font(.caption).foregroundStyle(.secondary)
+            }
+
+            Section("Seasons") {
+                Text("Part of the year with its own time slots (a summer schedule). While a season is on, its slots replace the ones above.")
+                    .font(.caption).foregroundStyle(.secondary)
+                ForEach($ls.seasons) { $season in
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            TextField("Name", text: $season.name, prompt: Text("Summer schedule")).textFieldStyle(.roundedBorder)
+                            Button(role: .destructive) { ls.seasons.removeAll { $0.id == season.id } } label: { Image(systemName: "trash") }.buttonStyle(.borderless)
+                        }
+                        HStack {
+                            MonthDayField(label: "From", value: $season.from)
+                            MonthDayField(label: "To", value: $season.to)
+                        }
+                        ForEach($season.slots) { $slot in
+                            SlotEditor(slot: $slot, shows: shows) { season.slots.removeAll { $0.id == slot.id } }
+                        }
+                        Button { season.slots.append(TimeSlot()) } label: { Label("Add a slot to this season", systemImage: "plus") }
+                    }
+                    .padding(10).background(.quaternary.opacity(0.2), in: RoundedRectangle(cornerRadius: 10))
                 }
+                Button { ls.seasons.append(SeasonSlot()) } label: { Label("Add a season", systemImage: "plus") }
             }
 
             Section("Specials") {
@@ -137,11 +137,13 @@ struct ProgrammingForm: View {
 struct SourcePicker: View {
     @Binding var source: SourceChoice
     var shows: [String]
+    /// Rotations can take turns between shows, but not between rotations.
+    var allowRotation = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Picker("Airs", selection: $source.kind) {
-                ForEach(SourceChoice.Kind.allCases.filter { $0 != .other || source.kind == .other }) { Text($0.label).tag($0) }
+                ForEach(SourceChoice.Kind.allCases.filter { ($0 != .other || source.kind == .other) && ($0 != .rotation || allowRotation || source.kind == .rotation) }) { Text($0.label).tag($0) }
             }
             switch source.kind {
             case .show:
@@ -162,6 +164,19 @@ struct SourcePicker: View {
                 }
             case .chaos:
                 Text("Anything, at random.").font(.caption).foregroundStyle(.secondary)
+            case .rotation:
+                Picker("Next one takes over", selection: $source.advance) {
+                    Text("Every few weeks").tag("weeks"); Text("When the current show finishes a full pass").tag("finale")
+                }
+                if source.advance == "weeks" { Stepper("Every \(source.weeks) week\(source.weeks == 1 ? "" : "s")", value: $source.weeks, in: 1...52) }
+                ForEach(Array(source.items.enumerated()), id: \.offset) { i, _ in
+                    HStack(alignment: .top) {
+                        Text("\(i + 1)").foregroundStyle(.secondary).frame(width: 18)
+                        SourcePicker(source: $source.items[i], shows: shows, allowRotation: false)
+                        Button(role: .destructive) { source.items.remove(at: i) } label: { Image(systemName: "minus.circle") }.buttonStyle(.borderless)
+                    }
+                }
+                Button { source.items.append({ var c = SourceChoice(); c.kind = .show; return c }()) } label: { Label("Add to the rotation", systemImage: "plus") }
             case .other:
                 Text(source.summary).font(.caption).foregroundStyle(.secondary)
             }
@@ -205,5 +220,61 @@ struct DateTimeField: View {
         DatePicker(label, selection: Binding(
             get: { Self.f.date(from: value) ?? Date() },
             set: { value = Self.f.string(from: $0) }))
+    }
+}
+
+
+/// One weekly time slot.
+struct SlotEditor: View {
+    @Binding var slot: TimeSlot
+    var shows: [String]
+    var onDelete: () -> Void
+    private let dayNames = ["M", "T", "W", "T", "F", "S", "S"]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                TextField("Name", text: $slot.name, prompt: Text("Weeknight sitcoms")).textFieldStyle(.roundedBorder)
+                Button(role: .destructive, action: onDelete) { Image(systemName: "trash") }.buttonStyle(.borderless)
+            }
+            HStack(spacing: 4) {
+                ForEach(0..<7, id: \.self) { d in
+                    Toggle(dayNames[d], isOn: Binding(get: { slot.days.contains(d) }, set: { on in if on { slot.days.insert(d) } else { slot.days.remove(d) } }))
+                        .toggleStyle(.button).controlSize(.small)
+                }
+                Text(LineupSettings.daysLabel(slot.days)).font(.caption).foregroundStyle(.secondary).padding(.leading, 6)
+            }
+            HStack {
+                TimeField(label: "Starts", value: $slot.start)
+                TimeField(label: "Ends", value: $slot.end, allow24: true)
+            }
+            SourcePicker(source: $slot.source, shows: shows)
+            Toggle("One episode only (then the rest of the slot is a gap, like the test screen)", isOn: $slot.once).font(.callout)
+        }
+        .padding(10).background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))
+    }
+}
+
+/// "MM-DD" as a month and a day.
+struct MonthDayField: View {
+    var label: String
+    @Binding var value: String
+    private let months = Calendar.current.monthSymbols
+
+    private var parts: (m: Int, d: Int) {
+        let p = value.split(separator: "-").compactMap { Int($0) }
+        return (p.count == 2 ? p[0] : 1, p.count == 2 ? p[1] : 1)
+    }
+
+    var body: some View {
+        HStack {
+            Text(label).frame(width: 40, alignment: .leading)
+            Picker("", selection: Binding(get: { parts.m }, set: { value = String(format: "%02d-%02d", $0, parts.d) })) {
+                ForEach(1...12, id: \.self) { Text(months[$0 - 1]).tag($0) }
+            }.labelsHidden().frame(width: 130)
+            Picker("", selection: Binding(get: { parts.d }, set: { value = String(format: "%02d-%02d", parts.m, $0) })) {
+                ForEach(1...31, id: \.self) { Text("\($0)").tag($0) }
+            }.labelsHidden().frame(width: 70)
+        }
     }
 }

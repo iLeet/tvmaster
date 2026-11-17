@@ -200,6 +200,7 @@ export function ChannelEditor({ id, tab }: { id: string; tab: string }) {
                 {all.data?.find((c) => c.id === draft.id)?.on_air
                   ? <Btn onClick={() => attempt(() => api.post(`/channels/${draft.id}/stream`, { action: 'stop' }), 'Taken off air').then(() => all.reload())}>Take off air</Btn>
                   : <Btn onClick={() => attempt(() => api.post(`/channels/${draft.id}/stream`, { action: 'start' }), 'On air').then(() => all.reload())}>Put on air</Btn>}
+                <Btn onClick={() => attempt(() => api.post(`/channels/${draft.id}/refresh`), 'On the current plan now')}>Refresh now</Btn>
                 <Btn onClick={() => attempt(() => api.post(`/channels/${draft.id}/reset`, { what: 'schedule' }), 'Schedule re-planned from now')}>Re-plan the schedule</Btn>
                 <ConfirmBtn kind="danger" label="Start every show from episode 1" confirm="Every show on this channel starts again at its first episode, and the schedule is re-planned from now." onConfirm={() => attempt(() => api.post(`/channels/${draft.id}/reset`, { what: 'progress' }), 'Progress reset')} />
               </div>

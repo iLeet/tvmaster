@@ -6,6 +6,7 @@
 //! output appears on every platform. Colours come from a per-channel theme so
 //! each channel looks like its own station.
 
+pub mod alert;
 pub mod guide;
 pub mod overlay;
 pub mod png;
@@ -159,6 +160,13 @@ impl Canvas {
 fn mix(a: Rgb, b: Rgb, f: f32) -> Rgb {
     let m = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * f) as u8;
     [m(a[0], b[0]), m(a[1], b[1]), m(a[2], b[2])]
+}
+
+/// The pixel-font alert screen, in the colour of its severity.
+pub(crate) fn retro_alert(severity: alert::Severity, event: &str, text: &str, t: f32) -> Canvas {
+    let mut c = Canvas::new(WIDTH, HEIGHT);
+    alert_into(&mut c, event, text, t, severity);
+    c
 }
 
 pub fn text_width(text: &str, scale: i32) -> i32 {
@@ -342,16 +350,21 @@ fn background(c: &mut Canvas, th: &Theme, t: f32) {
 }
 
 /// The emergency-alert screen. Steady (no fades), because it stays up for as long as the alert does.
-fn alert(c: &mut Canvas, event: &str, text: &str, t: f32) {
-    const RED: Rgb = [200, 16, 24];
-    const DARK_RED: Rgb = [120, 8, 14];
+fn alert_into(c: &mut Canvas, event: &str, text: &str, t: f32, severity: alert::Severity) {
+    let red: Rgb = severity.accent();
+    let dark_red: Rgb = mix(red, [0, 0, 0], 0.45);
+    let label = match severity {
+        alert::Severity::Emergency => "EMERGENCY ALERT SYSTEM",
+        alert::Severity::Warning => "ALERT",
+        alert::Severity::Info => "INFORMATION",
+    };
     const YELLOW: Rgb = [255, 214, 0];
     c.vgradient([26, 0, 4], [6, 0, 2]);
     // Flashing header band.
     let flash = (t * 2.0) as i64 % 2 == 0;
-    c.rect(0, 0, WIDTH as i32, 56, if flash { RED } else { DARK_RED });
+    c.rect(0, 0, WIDTH as i32, 56, if flash { red } else { dark_red });
     c.rect(0, 56, WIDTH as i32, 3, WHITE);
-    c.text_centered(18, "EMERGENCY ALERT SYSTEM", 3, WHITE);
+    c.text_centered(18, label, 3, WHITE);
     // The event, as large as fits.
     let (scale, ls) = layout_title(event, 600, 2);
     let mut y = 74;
@@ -379,7 +392,7 @@ fn alert(c: &mut Canvas, event: &str, text: &str, t: f32) {
         y += 20;
     }
     // The crawl.
-    c.rect(0, 322, WIDTH as i32, 38, RED);
+    c.rect(0, 322, WIDTH as i32, 38, red);
     c.rect(0, 320, WIDTH as i32, 2, WHITE);
     let crawl = format!("{}      ***      ", text.replace('\n', " "));
     let w = text_width(&crawl, 2).max(1);
@@ -418,7 +431,7 @@ fn lines(
 pub fn render(scene: &Scene, th: &Theme, t: f32, dur: f32) -> Canvas {
     let mut c = Canvas::new(WIDTH, HEIGHT);
     if let Scene::Alert { event, text } = scene {
-        alert(&mut c, event, text, t);
+        alert_into(&mut c, event, text, t, alert::Severity::Emergency);
         return c;
     }
     background(&mut c, th, t);

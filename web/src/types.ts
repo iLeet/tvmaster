@@ -340,6 +340,10 @@ export interface LiveOverride {
   mode: LiveMode;
   title: string;
   message: string;
+  style?: string;
+  theme?: string;
+  severity?: string;
+  sound?: string;
   started_ms: number;
   until_ms: number | null;
 }
@@ -349,9 +353,17 @@ export interface LiveSample {
   name: string;
   event: string;
   text: string;
+  severity?: string;
+  sound?: string;
+}
+
+export interface LiveChoice {
+  value: string;
+  label: string;
 }
 
 export interface LiveState {
   overrides: LiveOverride[];
   samples: LiveSample[];
+  options?: { styles: LiveChoice[]; themes: LiveChoice[]; severities: LiveChoice[]; sounds: LiveChoice[] };
 }

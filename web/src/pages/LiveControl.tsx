@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api, errorMessage } from '../api';
 import { formatClock } from '../lib';
 import { useLiveEvent, useQuery } from '../live';
 import type { ChannelView, LiveMode, LiveState } from '../types';
-import { Badge, Btn, Card, Chips, ConfirmBtn, Field, Spinner, useToast } from '../ui';
+import { AirModal } from './ScheduleActions';
+import { Badge, Btn, Card, Chips, ConfirmBtn, Field, Segmented, Spinner, useToast } from '../ui';
 
 const MODES: { value: LiveMode; label: string; help: string }[] = [
   { value: 'test_screen', label: 'Test screen', help: 'Colour bars and a steady tone' },
@@ -35,6 +36,37 @@ export function LiveControl() {
   const [message, setMessage] = useState('');
   const [minutes, setMinutes] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [airOn, setAirOn] = useState<ChannelView | null>(null);
+  const [style, setStyle] = useState('full');
+  const [theme, setTheme] = useState('retro');
+  const [severity, setSeverity] = useState('emergency');
+  const [sound, setSound] = useState('attention');
+  const opts = live.data?.options;
+
+  // A picture of the alert as it will look, redrawn as the choices change.
+  const [shot, setShot] = useState<string | null>(null);
+  const last = useRef<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch('/api/v1/live/preview', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ style, theme, severity, title: event, message, t: 1.2 }),
+          credentials: 'same-origin',
+        });
+        if (!res.ok || !alive) return;
+        const next = URL.createObjectURL(await res.blob());
+        if (last.current) URL.revokeObjectURL(last.current);
+        last.current = next;
+        setShot(next);
+      } catch {
+        /* the preview is a convenience */
+      }
+    }, 250);
+    return () => { alive = false; clearTimeout(timer); };
+  }, [style, theme, severity, event, message]);
 
   const run = async (what: () => Promise<unknown>, done: string) => {
     setBusy(true);
@@ -85,15 +117,37 @@ export function LiveControl() {
 
       <Card>
         <div className="row"><h3 style={{ margin: 0 }}>Emergency alert</h3><Badge tone="warn">Overrides programming</Badge></div>
-        <p className="dim small">Takes over the picture with an alert screen: flashing header, the event, your message and a crawl, and the two-tone attention signal at the start. Pick a sample to try it out. The samples all say they are tests, so use them for a drill.</p>
+        <p className="dim small">Take over the whole screen, or put a bar across the bottom of whatever is airing. Pick the look, how serious it is, and a sound (or none, for a quiet notice). The samples all say they are tests, so use them for a drill.</p>
         <div className="stack">
           <Field label="Start from a sample">
             <div className="row wrap">
               {samples.map((s) => (
-                <Btn key={s.id} small onClick={() => { setEvent(s.event); setMessage(s.text); }}>{s.name}</Btn>
+                <Btn key={s.id} small onClick={() => { setEvent(s.event); setMessage(s.text); if (s.severity) setSeverity(s.severity); if (s.sound) setSound(s.sound); }}>{s.name}</Btn>
               ))}
             </div>
           </Field>
+          <div className="row wrap" style={{ alignItems: 'flex-start' }}>
+            <Field label="Shown as">
+              <Segmented value={style} options={(opts?.styles ?? [{ value: 'full', label: 'Full screen' }, { value: 'bar', label: 'Bar across the bottom' }]).map((o) => ({ value: o.value, label: o.label }))} onChange={setStyle} />
+            </Field>
+            <Field label="Look">
+              <select className="select" value={theme} onChange={(e) => setTheme(e.target.value)}>
+                {(opts?.themes ?? [{ value: 'retro', label: 'Retro' }]).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </Field>
+            <Field label="How serious">
+              <select className="select" value={severity} onChange={(e) => setSeverity(e.target.value)}>
+                {(opts?.severities ?? [{ value: 'emergency', label: 'Emergency (red)' }]).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </Field>
+            <Field label="Sound" hint="Plays once when it goes on air.">
+              <select className="select" value={sound} onChange={(e) => setSound(e.target.value)}>
+                {(opts?.sounds ?? [{ value: 'attention', label: 'Attention tone' }]).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </Field>
+          </div>
+          {style === 'bar' && <p className="small dim">The programme keeps playing underneath. If a channel has nothing playing (a stand-by screen, a bumper) the alert takes the whole screen instead.</p>}
+          {shot && <img src={shot} alt="How the alert will look" style={{ width: '100%', maxWidth: 560, borderRadius: 10, border: '1px solid var(--edge)' }} />}
           <Field label="Event" hint="Short and big, like “Tornado warning”.">
             <input className="input" maxLength={80} value={event} onChange={(e) => setEvent(e.target.value)} placeholder="Emergency alert test" />
           </Field>
@@ -111,12 +165,13 @@ export function LiveControl() {
             </Field>
           </div>
           <div className="row wrap">
-            <ConfirmBtn kind="danger" icon="alert" label={`Put alert on ${scope}`} disabled={busy || !canAlert} confirm={`Put the emergency alert “${event.trim()}” on ${scope} now? It replaces whatever is airing until it ends or you resume programming.`} onConfirm={() => run(() => take(target, 'alert', { title: event.trim(), message: message.trim() }, minutes), `Alert is on air on ${scope}`)} />
+            <ConfirmBtn kind="danger" icon="alert" label={`Put alert on ${scope}`} disabled={busy || !canAlert} confirm={`Put the emergency alert “${event.trim()}” on ${scope} now? It replaces whatever is airing until it ends or you resume programming.`} onConfirm={() => run(() => take(target, 'alert', { title: event.trim(), message: message.trim(), style, theme, severity, sound }, minutes), `Alert is on air on ${scope}`)} />
             {target.length > 0 && <Btn small onClick={() => setTarget([])}>Aim at every channel</Btn>}
           </div>
         </div>
       </Card>
 
+      {airOn && <AirModal channel={airOn} onClose={() => setAirOn(null)} onDone={() => { channels.reload(); live.reload(); }} />}
       <h3>Channels</h3>
       {channels.loading && !channels.data ? <Spinner /> : (
         <div className="stack">
@@ -140,6 +195,8 @@ export function LiveControl() {
                     {MODES.map((m) => (
                       <Btn key={m.value} small title={m.help} disabled={busy || o?.mode === m.value} onClick={() => run(() => take([c.id], m.value), `${c.name}: ${m.label.toLowerCase()}`)}>{m.label}</Btn>
                     ))}
+                    {c.kind === 'programming' && <Btn small icon="play" disabled={busy} onClick={() => setAirOn(c)}>Air now…</Btn>}
+                    {c.kind === 'programming' && <Btn small icon="refresh" disabled={busy} title="Put the channel on the plan for this moment, even part way through a show" onClick={() => run(() => api.post(`/channels/${c.id}/refresh`), `${c.name} is on its plan`)}>Refresh</Btn>}
                     <Btn small icon="alert" onClick={() => { setTarget([c.id]); document.querySelector('.page')?.scrollTo?.({ top: 0 }); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>Alert…</Btn>
                     {o && <Btn small kind="primary" disabled={busy} onClick={() => run(() => give([c.id]), `${c.name} is back to programming`)}>Resume</Btn>}
                     <span className="dim">|</span>

@@ -158,6 +158,149 @@ pub async fn reset(
     Ok(Json(json!({ "reset": body.what, "items": items })))
 }
 
+/// Put a channel on the new plan right away: planned afresh from the slot on air now (joining part way
+/// through), and the stream restarted so viewers get it within seconds.
+pub async fn refresh(State(s): State<AppState>, Path(id): Path<String>) -> ApiResult<Json<Value>> {
+    let ch = programming_channel(&s, &id)?;
+    let items = autopilot::replan_now(&s.db(), &ch, plan::now_ms())?;
+    restart_if_running(&s, &id);
+    s.emit(json!({ "type": "schedule.changed", "channel": id }));
+    Ok(Json(json!({ "refreshed": true, "items": items })))
+}
+
+#[derive(Deserialize)]
+pub struct PlayBody {
+    /// Air this show's next episode.
+    #[serde(default)]
+    show: Option<String>,
+    /// Or this particular file.
+    #[serde(default)]
+    media_id: Option<i64>,
+    /// Or anything the channel has.
+    #[serde(default)]
+    random: bool,
+}
+
+/// `POST /api/v1/channels/{id}/play`: air something right now, cutting whatever is on (a stand-by
+/// screen, say). The schedule carries on after it.
+pub async fn play_now(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<PlayBody>,
+) -> ApiResult<Json<Value>> {
+    let ch = programming_channel(&s, &id)?;
+    let target = match (body.show, body.media_id, body.random) {
+        (Some(show), None, false) => autopilot::PlayTarget::Show(show),
+        (None, Some(m), false) => autopilot::PlayTarget::Media(m),
+        (None, None, true) => autopilot::PlayTarget::Random,
+        _ => {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "say what to air: a show, a media_id, or random",
+            ))
+        }
+    };
+    let items = autopilot::play_now(&s.db(), &ch, target, plan::now_ms())
+        .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, e))?;
+    restart_if_running(&s, &id);
+    s.emit(json!({ "type": "schedule.changed", "channel": id }));
+    Ok(Json(json!({ "playing": true, "items": items })))
+}
+
+#[derive(Deserialize)]
+pub struct EditBody {
+    from_ms: i64,
+    to_ms: i64,
+    #[serde(default)]
+    show: Option<String>,
+    #[serde(default)]
+    media_id: Option<i64>,
+    #[serde(default)]
+    random: bool,
+    /// Leave the time off the air (the stand-by screen).
+    #[serde(default)]
+    off_air: bool,
+}
+
+/// `POST /api/v1/channels/{id}/schedule/edit`: change what airs between two times. Lasts until the next re-roll.
+pub async fn edit_schedule(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<EditBody>,
+) -> ApiResult<Json<Value>> {
+    let ch = programming_channel(&s, &id)?;
+    let target = match (body.show, body.media_id, body.random, body.off_air) {
+        (None, None, false, true) => None,
+        (Some(show), None, false, false) => Some(autopilot::PlayTarget::Show(show)),
+        (None, Some(m), false, false) => Some(autopilot::PlayTarget::Media(m)),
+        (None, None, true, false) => Some(autopilot::PlayTarget::Random),
+        _ => {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "say what to air: a show, a media_id, random, or off_air",
+            ))
+        }
+    };
+    let now = plan::now_ms();
+    let items = autopilot::edit_range(&s.db(), &ch, body.from_ms, body.to_ms, target, now)
+        .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, e))?;
+    if body.from_ms <= now + 60_000 {
+        restart_if_running(&s, &id);
+    }
+    s.emit(json!({ "type": "schedule.changed", "channel": id }));
+    Ok(Json(json!({ "edited": true, "items": items })))
+}
+
+#[derive(Deserialize)]
+pub struct EpisodesQuery {
+    show: String,
+}
+
+/// `GET /api/v1/channels/{id}/episodes?show=Name`: the episodes of a show this channel can air, in order.
+pub async fn episodes(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<EpisodesQuery>,
+) -> ApiResult<Json<Value>> {
+    let ch = programming_channel(&s, &id)?;
+    let rows = tvmaster_db::list_media_in_libraries(&s.db(), &ch.library_ids)?;
+    let want = q.show.to_lowercase();
+    let mut eps: Vec<_> = rows
+        .into_iter()
+        .filter(|m| m.show.as_deref().unwrap_or("").to_lowercase() == want && m.duration_ms > 0)
+        .collect();
+    eps.sort_by(|a, b| (a.season, a.episode, &a.path).cmp(&(b.season, b.episode, &b.path)));
+    Ok(Json(json!(eps
+        .into_iter()
+        .map(|m| json!({
+            "id": m.id, "season": m.season, "episode": m.episode,
+            "title": m.title, "duration_ms": m.duration_ms,
+        }))
+        .collect::<Vec<_>>())))
+}
+
+fn programming_channel(s: &AppState, id: &str) -> ApiResult<tvmaster_core::Channel> {
+    let ch = tvmaster_db::get_channel(&s.db(), id)?
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "no such channel"))?;
+    if ch.kind != ChannelKind::Programming {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "only programming channels have a schedule",
+        ));
+    }
+    Ok(ch)
+}
+
+/// A channel that is streaming restarts so the change shows within seconds.
+fn restart_if_running(s: &AppState, id: &str) {
+    if let Some(p) = &s.playout {
+        if p.is_running(id) {
+            p.stop(id);
+            let _ = crate::stream::ensure_on_air(s, id, true);
+        }
+    }
+}
+
 #[derive(Deserialize)]
 pub struct StreamBody {
     /// `start`, `stop` or `restart`.

@@ -168,6 +168,8 @@ struct ChannelEditorSheet: View {
                         HStack {
                             Button("Restart the stream") { Task { _ = await model.run { try await model.client!.stream(channel: id, action: "restart") } } }.glassButton()
                             Button("Take off air") { Task { _ = await model.run { try await model.client!.stream(channel: id, action: "stop") } } }.glassButton()
+                            Button("Refresh now") { Task { _ = await model.run { try await model.client!.refresh(channel: id) } } }.glassButton()
+                                .help("Put the channel on the plan for this moment, even part way through a show")
                             Button("Re-plan the schedule") { Task { _ = await model.run { try await model.client!.reset(channel: id, what: "schedule") } } }.glassButton()
                         }
                         Button("Start every show from episode 1…", role: .destructive) { confirmProgressReset = true }.glassButton()

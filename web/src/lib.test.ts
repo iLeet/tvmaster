@@ -5,7 +5,9 @@ import {
   defaultAds,
   emptyLineup,
   formatDuration,
+  inputToMs,
   lineupSummary,
+  msToInput,
   nextFreeNumber,
   platformClass,
   slugify,
@@ -137,5 +139,17 @@ describe('uploads', () => {
     expect(uploadPath('Retro/', { name: 'a.mp4' })).toBe('Retro/a.mp4');
     expect(uploadPath('/Retro', { name: 'a.mp4', webkitRelativePath: 'Show/Season 1/a.mp4' })).toBe('Retro/Show/Season 1/a.mp4');
     expect(uploadPath('', { name: 'a.mp4', webkitRelativePath: 'Show/a.mp4' })).toBe('Show/a.mp4');
+  });
+});
+
+describe('wall-clock times in a zone', () => {
+  it('round-trips through a zone that is not the device’s', () => {
+    const ms = Date.UTC(2026, 10, 16, 21, 30); // 4:30 PM in Toronto (EST)
+    expect(msToInput(ms, 'America/Toronto')).toBe('2026-11-16T16:30');
+    expect(inputToMs('2026-11-16T16:30', 'America/Toronto')).toBe(ms);
+    const summer = Date.UTC(2026, 6, 4, 20, 0); // 4 PM EDT
+    expect(msToInput(summer, 'America/Toronto')).toBe('2026-07-04T16:00');
+    expect(inputToMs('2026-07-04T16:00', 'America/Toronto')).toBe(summer);
+    expect(inputToMs('2026-11-16T09:00', 'UTC')).toBe(Date.UTC(2026, 10, 16, 9, 0));
   });
 });

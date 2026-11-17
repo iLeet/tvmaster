@@ -236,12 +236,356 @@ fn reroll_locked(
         .find(|i| i.kind == ItemKind::Show && i.cursor_pos.is_some() && i.start_ms >= lock)
         .map(|i| i.start_ms)
         .unwrap_or(lock);
+    // Off the air right now with nothing to show: let the new plan start at once, even part way
+    // through its slot, instead of waiting for the stand-by stretch to run out.
+    let cut = match off_air_now(conn, &channel.id, now_ms)? {
+        Some(start) => cut.min(start),
+        None => cut,
+    };
     tvmaster_db::delete_schedule_from(conn, &channel.id, cut)?;
     let kept = tvmaster_db::schedule_between(conn, &channel.id, i64::MIN, cut)?;
     let mut cursors = tvmaster_db::load_cursors(conn, &channel.id)?;
     rebuild_reservations(&kept, &mut cursors);
     tvmaster_db::save_cursors(conn, &channel.id, &cursors)?;
     extend(conn, channel, now_ms)
+}
+
+/// Start of the stand-by stretch (test screen, nothing scheduled) on air at `now_ms`, if that is what is on.
+fn off_air_now(conn: &Connection, channel: &str, now_ms: i64) -> rusqlite::Result<Option<i64>> {
+    Ok(
+        tvmaster_db::schedule_between(conn, channel, now_ms - 3_600_000, now_ms + 1)?
+            .into_iter()
+            .rev()
+            .find(|i| i.start_ms <= now_ms && i.end_ms > now_ms)
+            .filter(|i| {
+                i.kind == ItemKind::Filler
+                    && i.media_id.is_none()
+                    && i.label.as_deref() != Some(tvmaster_core::SIGNOFF_LABEL)
+                    && (i.label.is_none()
+                        || i.label.as_deref() == Some(tvmaster_core::OFF_AIR_LABEL))
+            })
+            .map(|i| i.start_ms),
+    )
+}
+
+/// Plan again from the slot that is on air now, so a changed plan (or a fix) takes effect
+/// immediately and joins part way through, instead of waiting for what is airing to end.
+/// What aired before this slot is kept; the slot itself is planned afresh.
+pub fn replan_now(conn: &Connection, channel: &Channel, now_ms: i64) -> rusqlite::Result<usize> {
+    let items =
+        tvmaster_db::schedule_between(conn, &channel.id, now_ms - 12 * 3_600_000, now_ms + 1)?;
+    let cut = match items
+        .iter()
+        .rposition(|i| i.start_ms <= now_ms && i.end_ms > now_ms)
+    {
+        None => now_ms,
+        Some(i) => {
+            let first_act = items[..=i]
+                .iter()
+                .rposition(|x| x.kind == ItemKind::Show && x.cursor_pos.is_some());
+            match first_act {
+                // Acts, breaks and padding of one slot run without a gap up to the current item.
+                Some(j)
+                    if items[j..=i]
+                        .windows(2)
+                        .all(|w| w[0].end_ms == w[1].start_ms) =>
+                {
+                    items[j].start_ms
+                }
+                _ => items[i].start_ms,
+            }
+        }
+    };
+    commit(conn, channel, cut - 1)?;
+    // What is planned afresh from `cut` may include the episode already counted as started: put it back.
+    let dropped = tvmaster_db::schedule_between(conn, &channel.id, cut, i64::MAX)?;
+    let mut cursors = tvmaster_db::load_cursors(conn, &channel.id)?;
+    for it in dropped.iter().filter(|i| i.start_ms >= cut) {
+        if let (Some(k), Some(p)) = (&it.cursor_key, it.cursor_pos) {
+            let c = cursors.entry(k.clone()).or_default();
+            c.committed = c.committed.min(p);
+        }
+    }
+    tvmaster_db::save_cursors(conn, &channel.id, &cursors)?;
+    tvmaster_db::delete_schedule_from(conn, &channel.id, i64::MIN)?;
+    extend(conn, channel, now_ms)
+}
+
+/// What to air right now.
+pub enum PlayTarget {
+    /// The show's next episode (and the show carries on from the one after).
+    Show(String),
+    /// One particular file, without disturbing any show's place.
+    Media(i64),
+    /// Any episode the channel has.
+    Random,
+}
+
+/// Cut whatever is airing and air `target` now; the schedule carries on after it.
+pub fn play_now(
+    conn: &Connection,
+    channel: &Channel,
+    target: PlayTarget,
+    now_ms: i64,
+) -> Result<usize, String> {
+    let db = |e: rusqlite::Error| format!("database: {e}");
+    let catalog = catalog_for(conn, channel).map_err(db)?;
+    check_target(conn, &catalog, &target)?;
+    // What has already started counts as aired, so the cursors are where they should be.
+    commit(conn, channel, now_ms - 1).map_err(db)?;
+    let mut cursors = tvmaster_db::load_cursors(conn, &channel.id).map_err(db)?;
+
+    // The item on air is cut short where it stands; everything after it goes.
+    let on_air = tvmaster_db::schedule_between(conn, &channel.id, now_ms - 3_600_000, now_ms + 1)
+        .map_err(db)?
+        .into_iter()
+        .rev()
+        .find(|i| i.start_ms < now_ms && i.end_ms > now_ms);
+    let cut_from = on_air.as_ref().map(|i| i.start_ms).unwrap_or(now_ms);
+    tvmaster_db::delete_schedule_from(conn, &channel.id, cut_from).map_err(db)?;
+    if let Some(mut cut) = on_air {
+        cut.end_ms = now_ms;
+        tvmaster_db::insert_schedule(conn, &channel.id, &[cut]).map_err(db)?;
+    }
+    let kept = tvmaster_db::schedule_between(conn, &channel.id, i64::MIN, now_ms).map_err(db)?;
+    rebuild_reservations(&kept, &mut cursors);
+
+    let (media_id, dur_ms, key, pos) = match target {
+        PlayTarget::Show(name) => {
+            let eps = catalog
+                .show(&name)
+                .ok_or_else(|| format!("this channel has no show called '{name}'"))?;
+            let key = format!("show:{}", name.to_lowercase());
+            let cur = cursors.entry(key.clone()).or_default();
+            // Past the last episode, start the show again.
+            let pos = cur.reserved;
+            let ep = eps.eps[(pos % eps.eps.len() as u64) as usize];
+            cur.reserved = pos + 1;
+            (ep.id, ep.dur_ms, key, pos)
+        }
+        PlayTarget::Media(id) => {
+            let m = tvmaster_db::get_media(conn, id)
+                .map_err(db)?
+                .filter(|m| m.duration_ms > 0 && std::path::Path::new(&m.path).exists())
+                .ok_or("that file is not available right now")?;
+            (
+                m.id,
+                m.duration_ms as u64,
+                "playnow".to_string(),
+                now_ms as u64,
+            )
+        }
+        PlayTarget::Random => {
+            let keys = catalog.show_keys();
+            if keys.is_empty() {
+                return Err("this channel has nothing to play".into());
+            }
+            let pick = (now_ms as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 11;
+            let show = catalog
+                .by_key(&keys[(pick % keys.len() as u64) as usize])
+                .expect("key came from the catalog");
+            let ep = show.eps[((pick >> 8) % show.eps.len() as u64) as usize];
+            (ep.id, ep.dur_ms, "playnow".to_string(), now_ms as u64)
+        }
+    };
+    tvmaster_db::insert_schedule(
+        conn,
+        &channel.id,
+        &[tvmaster_core::ScheduledItem {
+            kind: ItemKind::Show,
+            media_id: Some(media_id),
+            start_ms: now_ms,
+            end_ms: now_ms + dur_ms as i64,
+            cursor_key: Some(key),
+            cursor_pos: Some(pos),
+            label: Some("Playing now".to_string()),
+            in_ms: 0,
+            bumper: None,
+        }],
+    )
+    .map_err(db)?;
+    tvmaster_db::save_cursors(conn, &channel.id, &cursors).map_err(db)?;
+    extend(conn, channel, now_ms).map_err(db)
+}
+
+/// Change what airs in `[from_ms, to_ms)`: put `target` there (a show's next episode, a particular
+/// file, anything), or leave it off the air (`None`). Items around the range are trimmed to fit and
+/// everything else stays. An episode longer than the range is cut at its end; a shorter one is
+/// padded like any slot. Edits last until the channel is re-rolled.
+pub fn edit_range(
+    conn: &Connection,
+    channel: &Channel,
+    from_ms: i64,
+    to_ms: i64,
+    target: Option<PlayTarget>,
+    now_ms: i64,
+) -> Result<usize, String> {
+    let db = |e: rusqlite::Error| format!("database: {e}");
+    let from_ms = from_ms.max(now_ms);
+    if to_ms <= from_ms {
+        return Err("the end must be after the start (and after now)".into());
+    }
+    if to_ms - from_ms > 48 * 3_600_000 {
+        return Err("change at most 48 hours at a time".into());
+    }
+    let off_air = |start: i64, end: i64| tvmaster_core::ScheduledItem {
+        kind: ItemKind::Filler,
+        media_id: None,
+        start_ms: start,
+        end_ms: end,
+        cursor_key: None,
+        cursor_pos: None,
+        label: Some(tvmaster_core::OFF_AIR_LABEL.to_string()),
+        in_ms: 0,
+        bumper: None,
+    };
+    let catalog = catalog_for(conn, channel).map_err(db)?;
+    if let Some(t) = &target {
+        check_target(conn, &catalog, t)?;
+    }
+    commit(conn, channel, now_ms).map_err(db)?;
+
+    // Everything from the first item the range touches is rewritten.
+    let touched = tvmaster_db::schedule_between(conn, &channel.id, from_ms, to_ms).map_err(db)?;
+    let first = touched
+        .iter()
+        .map(|i| i.start_ms)
+        .min()
+        .unwrap_or(from_ms)
+        .min(from_ms);
+    let rest = tvmaster_db::schedule_between(conn, &channel.id, first, i64::MAX).map_err(db)?;
+    let before = tvmaster_db::schedule_between(conn, &channel.id, i64::MIN, first).map_err(db)?;
+    tvmaster_db::delete_schedule_from(conn, &channel.id, first).map_err(db)?;
+
+    let mut kept: Vec<tvmaster_core::ScheduledItem> =
+        before.into_iter().filter(|i| i.end_ms <= first).collect();
+    for it in rest {
+        if it.end_ms <= from_ms || it.start_ms >= to_ms {
+            kept.push(it);
+            continue;
+        }
+        if it.start_ms < from_ms {
+            let mut head = it.clone();
+            head.end_ms = from_ms;
+            kept.push(head);
+        }
+        if it.end_ms > to_ms {
+            // What was left of it after the range is not worth showing half-way: the screen stands by.
+            kept.push(off_air(to_ms, it.end_ms));
+        }
+    }
+    kept.sort_by_key(|i| i.start_ms);
+
+    let mut cursors = tvmaster_db::load_cursors(conn, &channel.id).map_err(db)?;
+    rebuild_reservations(&kept, &mut cursors);
+    let mut added: Vec<tvmaster_core::ScheduledItem> = Vec::new();
+    match target {
+        None => added.push(off_air(from_ms, to_ms)),
+        Some(t) => {
+            let (media_id, dur_ms, key, pos, label) =
+                pick_target(conn, &catalog, &mut cursors, t, now_ms)?;
+            let end = (from_ms + dur_ms as i64).min(to_ms);
+            added.push(tvmaster_core::ScheduledItem {
+                kind: ItemKind::Show,
+                media_id: Some(media_id),
+                start_ms: from_ms,
+                end_ms: end,
+                cursor_key: Some(key),
+                cursor_pos: Some(pos),
+                label: label.clone(),
+                in_ms: 0,
+                bumper: None,
+            });
+            if end < to_ms {
+                let mut pad = off_air(end, to_ms);
+                pad.label = label;
+                added.push(pad);
+            }
+        }
+    }
+    kept.extend(added);
+    kept.sort_by_key(|i| i.start_ms);
+    let from_first: Vec<_> = kept.into_iter().filter(|i| i.start_ms >= first).collect();
+    tvmaster_db::insert_schedule(conn, &channel.id, &from_first).map_err(db)?;
+    tvmaster_db::save_cursors(conn, &channel.id, &cursors).map_err(db)?;
+    extend(conn, channel, now_ms).map_err(db)?;
+    Ok(from_first.len())
+}
+
+/// Check a target can be aired before anything is changed.
+fn check_target(conn: &Connection, catalog: &Catalog, target: &PlayTarget) -> Result<(), String> {
+    match target {
+        PlayTarget::Show(name) => catalog
+            .show(name)
+            .map(|_| ())
+            .ok_or_else(|| format!("this channel has no show called '{name}'")),
+        PlayTarget::Media(id) => tvmaster_db::get_media(conn, *id)
+            .map_err(|e| format!("database: {e}"))?
+            .filter(|m| m.duration_ms > 0 && std::path::Path::new(&m.path).exists())
+            .map(|_| ())
+            .ok_or_else(|| "that file is not available right now".to_string()),
+        PlayTarget::Random => {
+            if catalog.show_keys().is_empty() {
+                Err("this channel has nothing to play".into())
+            } else {
+                Ok(())
+            }
+        }
+    }
+}
+
+/// Choose the file for a [`PlayTarget`] and reserve its place: (media, duration, cursor key, position, label).
+fn pick_target(
+    conn: &Connection,
+    catalog: &Catalog,
+    cursors: &mut tvmaster_core::Cursors,
+    target: PlayTarget,
+    now_ms: i64,
+) -> Result<(i64, u64, String, u64, Option<String>), String> {
+    match target {
+        PlayTarget::Show(name) => {
+            let eps = catalog
+                .show(&name)
+                .ok_or_else(|| format!("this channel has no show called '{name}'"))?;
+            let key = format!("show:{}", name.to_lowercase());
+            let cur = cursors.entry(key.clone()).or_default();
+            let pos = cur.reserved;
+            let ep = eps.eps[(pos % eps.eps.len() as u64) as usize];
+            cur.reserved = pos + 1;
+            Ok((ep.id, ep.dur_ms, key, pos, Some(eps.name.clone())))
+        }
+        PlayTarget::Media(id) => {
+            let m = tvmaster_db::get_media(conn, id)
+                .map_err(|e| format!("database: {e}"))?
+                .filter(|m| m.duration_ms > 0 && std::path::Path::new(&m.path).exists())
+                .ok_or("that file is not available right now")?;
+            Ok((
+                m.id,
+                m.duration_ms as u64,
+                "playnow".to_string(),
+                now_ms as u64,
+                m.show,
+            ))
+        }
+        PlayTarget::Random => {
+            let keys = catalog.show_keys();
+            if keys.is_empty() {
+                return Err("this channel has nothing to play".into());
+            }
+            let pick = (now_ms as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 11;
+            let show = catalog
+                .by_key(&keys[(pick % keys.len() as u64) as usize])
+                .expect("key came from the catalog");
+            let ep = show.eps[((pick >> 8) % show.eps.len() as u64) as usize];
+            Ok((
+                ep.id,
+                ep.dur_ms,
+                "playnow".to_string(),
+                now_ms as u64,
+                Some(show.name.clone()),
+            ))
+        }
+    }
 }
 
 /// Throw away the whole schedule and plan again from now. For when the files
@@ -619,5 +963,154 @@ mod tests {
         // Nothing changed since: nothing to do.
         assert!(revive(&conn).is_empty());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+    fn contiguous(conn: &Connection) {
+        let all = tvmaster_db::schedule_between(conn, "c", 0, i64::MAX).unwrap();
+        for w in all.windows(2) {
+            assert_eq!(w[0].end_ms, w[1].start_ms, "no gap or overlap: {w:?}");
+        }
+    }
+
+    #[test]
+    fn a_plan_changed_while_the_stand_by_screen_is_up_airs_at_once_part_way_through() {
+        let lineup = r#"{"blocks":[{"name":"Night","start":"20:00","end":"22:00","source":{"type":"show","show":"Alpha"}}]}"#;
+        let (conn, mut ch) = setup(50, lineup);
+        ch.run_out = tvmaster_core::RunOutPolicy::OffAir;
+        let now = T0 + 10 * HOUR + 10 * MIN;
+        maintain(&conn, &ch, now).unwrap();
+        let on = |c: &Connection| {
+            tvmaster_db::schedule_between(c, "c", now, now + 1)
+                .unwrap()
+                .into_iter()
+                .find(|i| i.start_ms <= now && i.end_ms > now)
+                .unwrap()
+        };
+        assert_eq!(
+            on(&conn).kind,
+            ItemKind::Filler,
+            "nothing is scheduled at ten in the morning"
+        );
+
+        // The plan now has a show on at that hour: the re-roll does not wait for the stand-by to end.
+        ch.lineup = serde_json::from_str(r#"{"blocks":[{"name":"Morning","start":"08:00","end":"12:00","source":{"type":"show","show":"Alpha"}}]}"#).unwrap();
+        reroll(&conn, &ch, now).unwrap();
+        let item = on(&conn);
+        assert_eq!(item.kind, ItemKind::Show);
+        assert!(item.start_ms <= now, "it joins part way through its slot");
+        contiguous(&conn);
+    }
+
+    #[test]
+    fn refresh_now_replans_the_slot_on_air_without_burning_an_episode() {
+        let (conn, ch) = setup(50, ALPHA_ALL_DAY);
+        let now = T0 + 2 * HOUR + 10 * MIN;
+        maintain(&conn, &ch, T0).unwrap();
+        maintain(&conn, &ch, now).unwrap();
+        let before = tvmaster_db::schedule_between(&conn, "c", now, now + 1).unwrap();
+        let airing = before
+            .iter()
+            .find(|i| i.kind == ItemKind::Show)
+            .unwrap()
+            .media_id;
+        replan_now(&conn, &ch, now).unwrap();
+        let after = tvmaster_db::schedule_between(&conn, "c", now, now + 1).unwrap();
+        let show = after.iter().find(|i| i.kind == ItemKind::Show).unwrap();
+        assert_eq!(
+            show.media_id, airing,
+            "the same plan puts the same episode back on"
+        );
+        assert!(show.start_ms <= now);
+        contiguous(&conn);
+    }
+
+    #[test]
+    fn air_now_cuts_what_is_on_and_the_schedule_carries_on_after_it() {
+        let (conn, ch) = setup(50, ALPHA_ALL_DAY);
+        let now = T0 + 2 * HOUR + 10 * MIN;
+        maintain(&conn, &ch, now).unwrap();
+        play_now(&conn, &ch, PlayTarget::Show("Alpha".into()), now).unwrap();
+        let on: Vec<_> = tvmaster_db::schedule_between(&conn, "c", now, now + 1).unwrap();
+        let item = on
+            .iter()
+            .find(|i| i.start_ms <= now && i.end_ms > now)
+            .unwrap();
+        assert_eq!(item.start_ms, now);
+        assert_eq!(item.label.as_deref(), Some("Playing now"));
+        assert!(play_now(&conn, &ch, PlayTarget::Show("Nope".into()), now).is_err());
+        let all = tvmaster_db::schedule_between(&conn, "c", 0, i64::MAX).unwrap();
+        assert!(
+            all.last().unwrap().end_ms >= now + HORIZON_MS / 2,
+            "the plan continues after it: {:?}",
+            all.iter()
+                .map(|i| (i.start_ms - now, i.end_ms - now))
+                .collect::<Vec<_>>()
+        );
+        let ids: Vec<_> = all
+            .iter()
+            .filter(|i| i.kind == ItemKind::Show)
+            .filter_map(|i| i.cursor_pos)
+            .collect();
+        let mut sorted = ids.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted.len(), ids.len(), "no episode is scheduled twice");
+        contiguous(&conn);
+    }
+
+    #[test]
+    fn a_stretch_of_the_schedule_can_be_changed_or_left_off_the_air() {
+        let (conn, ch) = setup(50, ALPHA_ALL_DAY);
+        let now = T0 + HOUR;
+        maintain(&conn, &ch, now).unwrap();
+        let (from, to) = (T0 + 3 * HOUR + 10 * MIN, T0 + 4 * HOUR);
+        edit_range(&conn, &ch, from, to, None, now).unwrap();
+        let mid = tvmaster_db::schedule_between(&conn, "c", from, to).unwrap();
+        assert!(
+            mid.iter().any(|i| i.kind == ItemKind::Filler
+                && i.label.as_deref() == Some(tvmaster_core::OFF_AIR_LABEL)
+                && i.start_ms == from
+                && i.end_ms == to),
+            "{mid:?}"
+        );
+        contiguous(&conn);
+
+        // a show goes in its place, longer than the space it was given
+        let (from2, to2) = (T0 + 6 * HOUR, T0 + 6 * HOUR + 10 * MIN);
+        edit_range(
+            &conn,
+            &ch,
+            from2,
+            to2,
+            Some(PlayTarget::Show("Alpha".into())),
+            now,
+        )
+        .unwrap();
+        let put = tvmaster_db::schedule_between(&conn, "c", from2, to2).unwrap();
+        assert_eq!(
+            put.iter().find(|i| i.start_ms == from2).unwrap().kind,
+            ItemKind::Show
+        );
+        assert_eq!(
+            put.iter().map(|i| i.end_ms).min().unwrap(),
+            to2,
+            "cut where the space ends"
+        );
+        contiguous(&conn);
+        let all = tvmaster_db::schedule_between(&conn, "c", 0, i64::MAX).unwrap();
+        let pos: Vec<_> = all
+            .iter()
+            .filter(|i| i.kind == ItemKind::Show)
+            .filter_map(|i| i.cursor_pos)
+            .collect();
+        let mut u = pos.clone();
+        u.sort();
+        u.dedup();
+        assert_eq!(u.len(), pos.len(), "no episode twice");
+
+        assert!(
+            edit_range(&conn, &ch, to, from, None, now).is_err(),
+            "end before start"
+        );
+        assert!(edit_range(&conn, &ch, from, from + 49 * HOUR, None, now).is_err());
     }
 }

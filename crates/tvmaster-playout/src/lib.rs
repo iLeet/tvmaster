@@ -12,6 +12,7 @@ mod manager;
 mod probe;
 mod profile;
 mod runner;
+mod sound;
 mod ts;
 
 pub use guide::{background_image, guide_look, guide_look_with_pictures};
@@ -19,10 +20,11 @@ pub use looks::{audio_chain, AudioFx, Burn, ClockFx, ItemPlan, OverlayInput};
 pub use manager::{ChannelHealth, Manager};
 pub use probe::{probe_encoder, EncoderProbe};
 pub use profile::{
-    attention_tone_source, guide_run_args, item_args, rendered_args, rendered_args_with_audio,
-    screen_args, segmenter_args, slate_args, GuideRun, ItemJob, LogoInput, OutputProfile, PipInput,
-    ScreenInput,
+    guide_run_args, item_args, rendered_args, rendered_args_with_audio, screen_args,
+    segmenter_args, slate_args, GuideRun, ItemJob, LogoInput, OutputProfile, PipInput, ScreenInput,
 };
+pub use sound::AlertSound;
+pub use tvmaster_render::alert::{AlertLook, AlertStyle};
 pub use tvmaster_render::GuideData;
 
 use std::path::PathBuf;
@@ -80,6 +82,9 @@ pub enum LiveMode {
     Alert {
         event: String,
         text: String,
+        look: AlertLook,
+        style: AlertStyle,
+        sound: AlertSound,
     },
 }
 

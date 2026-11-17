@@ -62,6 +62,7 @@ If a library is on a drive that is not always connected, TVMaster remembers the 
 
 - **All to test screen / off air / black / snow**: every channel, the guide included, in one press.
 - **Emergency alert**: a flashing alert screen with the event, your message, a crawl, and the two-tone attention signal at the start. Samples are provided (an EAS-style required test, a civil emergency, a tornado warning, a technical-difficulties card); the samples say they are tests. Choose the channels and how long (until cleared, or 5 minutes to an hour).
+- **Look of an alert**: full screen, or a bar across the bottom of whatever is airing (with a crawl, like a national alert system); a retro pixel look or smooth themes (Modern, Midnight, Graphite, Snow, Forest, Berry, Mono); red, amber or blue for how serious it is; and a sound or none: the two-tone attention signal, a soft information chime, an urgent warble, three beeps. A preview shows it before it goes on air.
 - **Resume**: back to programming, one channel or all.
 - Per channel: start, stop and restart its stream.
 
@@ -81,3 +82,9 @@ curl -H "Authorization: Bearer $TOKEN" -X POST http://server:8787/api/v1/live/cl
 ## Backups
 
 Everything that is yours is in the data folder (`/data` in Docker, `/var/lib/tvmaster` for the package): the database (channels, lineups, settings, how far each show has got), uploaded pictures and the HTTPS certificate. Copy it while the server is stopped. Your media files are never changed by TVMaster.
+
+## Changing what is on, right now
+
+- **Air now…** (Live control, Schedule): cut to a show's next episode, a particular episode or anything, when the channel is on a stand-by screen or you just want something else. The schedule carries on after it.
+- **Refresh now**: after you change a channel's plan, put it on that plan at once, joining part way through the show that should be on, instead of waiting for what is airing to end. (Saving a plan while a channel is on its stand-by screen does this by itself within about half a minute.)
+- **Change…** on a row of the Schedule, or **Change a time…**: replace what airs in a stretch, or leave it off the air. Lasts until the schedule is re-rolled.

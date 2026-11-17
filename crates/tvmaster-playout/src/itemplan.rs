@@ -301,6 +301,63 @@ pub(crate) async fn plan_item(
             }
         }
     }
+    // An alert across the bottom of the programme.
+    let live = {
+        let (source, id) = (spec.source.clone(), spec.id.clone());
+        tokio::task::spawn_blocking(move || source.live_override(&id))
+            .await
+            .ok()
+            .flatten()
+    };
+    if let Some(crate::LiveOverride {
+        mode:
+            crate::LiveMode::Alert {
+                event,
+                text,
+                look,
+                style: tvmaster_render::alert::AlertStyle::Bar,
+                sound,
+            },
+        started_ms,
+    }) = live
+    {
+        if spec.guide.is_none() {
+            let width = cfg.profile.width;
+            let k = width as f32 / 1280.0;
+            let bar = tvmaster_render::alert::alert_bar(&look, &event, &text, width);
+            let key = format!("{event}|{text}|{look:?}|{width}");
+            let (bar_name, crawl_name) = (
+                format!("{:016x}-bar.png", fnv1a(&key)),
+                format!("{:016x}-crawl.png", fnv1a(&key)),
+            );
+            let margin = cfg.profile.height * 5 / 100;
+            if let (Some(bar_png), Some(crawl_png)) = (
+                graphic(cfg, "alerts", &bar_name, &bar.bar.png).await,
+                graphic(cfg, "alerts", &crawl_name, &bar.crawl.png).await,
+            ) {
+                plan.overlays.push(OverlayInput {
+                    png: bar_png,
+                    x: "0".into(),
+                    y: format!("main_h-overlay_h-{margin}"),
+                    enable: None,
+                });
+                let band = bar.band_h;
+                plan.overlays.push(OverlayInput {
+                    png: crawl_png,
+                    x: format!("main_w-mod(t*{:.0}\\,main_w+overlay_w)", 170.0 * k),
+                    y: format!("main_h-{margin}-{band}+({band}-overlay_h)/2"),
+                    enable: None,
+                });
+                let into = (std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as i64)
+                    .unwrap_or(0)
+                    - started_ms)
+                    .max(0);
+                plan.extra_audio = sound.source(into);
+            }
+        }
+    }
     if ov.clock.enabled {
         if let Some(font) = &cfg.slate_font {
             plan.clock = Some(ClockFx {
@@ -316,7 +373,10 @@ pub(crate) async fn plan_item(
 impl ItemPlan {
     /// Does this plan add anything that could stop FFmpeg from encoding?
     pub(crate) fn has_extras(&self) -> bool {
-        self.burn.is_some() || !self.overlays.is_empty() || self.clock.is_some()
+        self.burn.is_some()
+            || !self.overlays.is_empty()
+            || self.clock.is_some()
+            || self.extra_audio.is_some()
     }
 
     /// The same item without subtitles, graphics or clock: what to try when the
@@ -326,6 +386,7 @@ impl ItemPlan {
             burn: None,
             overlays: Vec::new(),
             clock: None,
+            extra_audio: None,
             ..self.clone()
         }
     }

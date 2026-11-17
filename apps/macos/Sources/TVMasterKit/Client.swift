@@ -217,14 +217,27 @@ public struct TVMasterClient: Sendable {
     /// Put `channels` (empty = all) on the test screen, a blank, or an emergency alert.
     @discardableResult
     public func takeOver(channels: [String], mode: String, title: String? = nil, message: String? = nil,
-                         sample: String? = nil, minutes: Int? = nil) async throws -> LiveState {
+                         sample: String? = nil, minutes: Int? = nil, style: String? = nil, theme: String? = nil,
+                         severity: String? = nil, sound: String? = nil) async throws -> LiveState {
         var body: [String: JSONValue] = ["channels": .array((channels.isEmpty ? ["all"] : channels).map { .string($0) }), "mode": .string(mode)]
         if let title { body["title"] = .string(title) }
         if let message { body["message"] = .string(message) }
         if let sample { body["sample"] = .string(sample) }
         if let minutes, minutes > 0 { body["minutes"] = .number(Double(minutes)) }
+        if let style { body["style"] = .string(style) }
+        if let theme { body["theme"] = .string(theme) }
+        if let severity { body["severity"] = .string(severity) }
+        if let sound { body["sound"] = .string(sound) }
         let data = try await send("POST", "/live", body: .object(body))
         do { return try Self.decoder.decode(LiveState.self, from: data) } catch { throw TVMasterError.invalidResponse }
+    }
+
+    /// A PNG of an alert as it would look (nothing goes on air).
+    public func alertPreview(style: String, theme: String, severity: String, title: String, message: String) async throws -> Data {
+        try await send("POST", "/live/preview", body: .object([
+            "style": .string(style), "theme": .string(theme), "severity": .string(severity),
+            "title": .string(title), "message": .string(message), "t": .number(1.2),
+        ]))
     }
 
     /// Give `channels` (empty = all) back to their programming.
@@ -323,6 +336,26 @@ public struct TVMasterClient: Sendable {
     public func reroll(channel id: String) async throws -> Int {
         struct R: Decodable { var items: Int }
         return try await post("/channels/\(id)/reroll", as: R.self).items
+    }
+
+    /// Put the channel on the plan for this moment, even part way through a show.
+    public func refresh(channel id: String) async throws { try await send("POST", "/channels/\(id)/refresh", body: .object([:])) }
+
+    /// Cut to something right now; the schedule carries on after it.
+    public func play(channel id: String, _ target: AirTarget) async throws {
+        try await send("POST", "/channels/\(id)/play", body: .object(target.body))
+    }
+
+    /// Change what airs between two times (until the next re-roll).
+    public func editSchedule(channel id: String, from: Date, to: Date, _ target: AirTarget) async throws {
+        var body = target.body
+        body["from_ms"] = .number((from.timeIntervalSince1970 * 1000).rounded())
+        body["to_ms"] = .number((to.timeIntervalSince1970 * 1000).rounded())
+        try await send("POST", "/channels/\(id)/schedule/edit", body: .object(body))
+    }
+
+    public func episodes(channel id: String, show: String) async throws -> [Episode] {
+        try await get("/channels/\(id)/episodes", query: [URLQueryItem(name: "show", value: show)])
     }
 
     public func schedule(channel id: String, hours: Int = 6) async throws -> [Program] {
