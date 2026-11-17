@@ -168,7 +168,10 @@ pub fn set_show_info(conn: &Connection, title: &str, info: &ShowInfo) -> Result<
     conn.execute(
         "INSERT INTO show_info (title, json) VALUES (?1, ?2)
          ON CONFLICT(title) DO UPDATE SET json = excluded.json",
-        params![key(title), serde_json::to_string(&info).unwrap_or_else(|_| "{}".into())],
+        params![
+            key(title),
+            serde_json::to_string(&info).unwrap_or_else(|_| "{}".into())
+        ],
     )?;
     Ok(())
 }

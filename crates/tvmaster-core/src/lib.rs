@@ -15,9 +15,8 @@ mod timefmt;
 mod tracks;
 
 pub use ads::{
-    AdPreset, AD_PRESETS,
-    choose_break_points, loose_budget_ms, pack_pod, AdClip, AdConfig, AdInputs, AdPool, BumperKind,
-    BumperToggles,
+    choose_break_points, loose_budget_ms, pack_pod, AdClip, AdConfig, AdInputs, AdPool, AdPreset,
+    BumperKind, BumperToggles, AD_PRESETS,
 };
 pub use catalog::{Catalog, Ep, MediaRef, ShowEps};
 pub use clock::Zone;
@@ -27,11 +26,11 @@ pub use lineup::{
     OFF_AIR_LABEL, SIGNOFF_LABEL,
 };
 pub use model::{
-    ThemeChoice,
-    parse_hex_color, BackgroundStyle, Channel, ChannelKind, GuideAppearance, GuideBackground,
-    GuideColors, GuideConfig, GuideCorners, GuideHeader, GuideLayout, GuidePip, GuideScroll,
-    GraphicsStyle, GuideStyle, GuideTextSize, GuideTheme, GuideTicker, GuideTypeface, HeaderStyle, PipAudio,
-    PipMode, PipPlacement, PipSize, RunOutPolicy, Strategy, TickerPosition, TickerSpeed, Tv,
+    parse_hex_color, BackgroundStyle, Channel, ChannelKind, GraphicsStyle, GuideAppearance,
+    GuideBackground, GuideColors, GuideConfig, GuideCorners, GuideHeader, GuideLayout, GuidePip,
+    GuideScroll, GuideStyle, GuideTextSize, GuideTheme, GuideTicker, GuideTypeface, HeaderStyle,
+    PipAudio, PipMode, PipPlacement, PipSize, RunOutPolicy, Strategy, ThemeChoice, TickerPosition,
+    TickerSpeed, Tv,
 };
 pub use options::{
     Aspect, AudioPrefs, BugOptions, ChannelOptions, ClockOptions, Corner, Deinterlace, Effective,
@@ -39,11 +38,11 @@ pub use options::{
     SubMode, SubPrefs, SubSize, SubStyle, VideoOptions,
 };
 pub use rng::fnv1a;
-pub use showname::split_season_suffix;
 pub use scheduler::{
     align_start, commit_aired, generate, rebuild_reservations, Cursors, ItemKind, SchedConfig,
     ScheduledItem,
 };
+pub use showname::split_season_suffix;
 pub use timefmt::xmltv_time;
 pub use tracks::{
     audio_track, choose, choose_audio, choose_subtitle, is_image_codec, norm_lang, sub_track,

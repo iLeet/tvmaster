@@ -38,7 +38,11 @@ const REFRESH_SECS: u64 = 5;
 const KEEPALIVE: Duration = Duration::from_secs(10);
 
 /// The palette a theme choice describes.
-pub fn palette_for(theme: GuideTheme, colors: &tvmaster_core::GuideColors, channel_id: &str) -> Palette {
+pub fn palette_for(
+    theme: GuideTheme,
+    colors: &tvmaster_core::GuideColors,
+    channel_id: &str,
+) -> Palette {
     match theme {
         GuideTheme::Auto => Palette::from_theme(&Theme::for_channel(channel_id)),
         GuideTheme::Prevue => Palette::prevue(),
@@ -81,7 +85,10 @@ pub fn card_theme(choice: &tvmaster_core::ThemeChoice, channel_id: &str) -> Them
     if choice.theme == GuideTheme::Auto && !modern {
         return Theme::for_channel(channel_id);
     }
-    Theme::from_palette(&palette_for(choice.theme, &choice.colors, channel_id), modern)
+    Theme::from_palette(
+        &palette_for(choice.theme, &choice.colors, channel_id),
+        modern,
+    )
 }
 
 /// The look a guide's settings describe.

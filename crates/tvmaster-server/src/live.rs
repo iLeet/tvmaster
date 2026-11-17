@@ -161,7 +161,12 @@ pub fn options() -> Value {
             .into()
     };
     let mut themes = vec![json!({ "value": "station", "label": "Match the station theme" })];
-    themes.extend(pairs(&AlertTheme::ALL).as_array().cloned().unwrap_or_default());
+    themes.extend(
+        pairs(&AlertTheme::ALL)
+            .as_array()
+            .cloned()
+            .unwrap_or_default(),
+    );
     json!({
         "styles": [
             { "value": "full", "label": "Full screen" },
@@ -541,9 +546,13 @@ mod tests {
         .await;
         assert_eq!(st, StatusCode::OK, "{v}");
         assert_eq!(v["overrides"].as_array().unwrap().len(), 2);
-        assert!(
-            crate::live::current(&state.live.lock().unwrap(), "a", crate::plan::now_ms(), tvmaster_render::alert::AlertTheme::Retro).is_some()
-        );
+        assert!(crate::live::current(
+            &state.live.lock().unwrap(),
+            "a",
+            crate::plan::now_ms(),
+            tvmaster_render::alert::AlertTheme::Retro
+        )
+        .is_some());
 
         // one channel goes to an emergency alert from a sample
         let (st, v) = call(
@@ -595,9 +604,21 @@ mod tests {
         .await;
         assert_eq!(st, StatusCode::OK);
         let now = crate::plan::now_ms();
-        assert!(crate::live::current(&state.live.lock().unwrap(), "a", now, tvmaster_render::alert::AlertTheme::Retro).is_some());
+        assert!(crate::live::current(
+            &state.live.lock().unwrap(),
+            "a",
+            now,
+            tvmaster_render::alert::AlertTheme::Retro
+        )
+        .is_some());
         assert!(
-            crate::live::current(&state.live.lock().unwrap(), "a", now + 61_000, tvmaster_render::alert::AlertTheme::Retro).is_none(),
+            crate::live::current(
+                &state.live.lock().unwrap(),
+                "a",
+                now + 61_000,
+                tvmaster_render::alert::AlertTheme::Retro
+            )
+            .is_none(),
             "a timed override stops counting once its time is up"
         );
         state.live.lock().unwrap().get_mut("a").unwrap().until_ms = Some(now - 1);
@@ -644,7 +665,13 @@ mod tests {
         assert_eq!(st, StatusCode::OK, "{v}");
         let cur = {
             let book = state.live.lock().unwrap();
-            crate::live::current(&book, "b", crate::plan::now_ms(), tvmaster_render::alert::AlertTheme::Retro).unwrap()
+            crate::live::current(
+                &book,
+                "b",
+                crate::plan::now_ms(),
+                tvmaster_render::alert::AlertTheme::Retro,
+            )
+            .unwrap()
         };
         assert!(matches!(
             cur.mode,

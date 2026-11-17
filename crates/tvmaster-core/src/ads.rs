@@ -186,11 +186,56 @@ pub struct AdPreset {
 
 /// The presets, from none to heavy.
 pub const AD_PRESETS: [AdPreset; 5] = [
-    AdPreset { id: "none", name: "No commercials", about: "Shows run clean. Station cards still fill any spare time.", commercials: false, pod_seconds: 120, max_breaks: 4, minutes_per_hour: 8, mid_breaks: true },
-    AdPreset { id: "light", name: "Light", about: "A short break or two, about a minute each.", commercials: true, pod_seconds: 60, max_breaks: 2, minutes_per_hour: 4, mid_breaks: true },
-    AdPreset { id: "classic", name: "Classic TV", about: "Breaks of about two minutes inside the show and after it.", commercials: true, pod_seconds: 120, max_breaks: 4, minutes_per_hour: 8, mid_breaks: true },
-    AdPreset { id: "heavy", name: "Heavy", about: "Long, frequent breaks, like a busy cable channel.", commercials: true, pod_seconds: 180, max_breaks: 6, minutes_per_hour: 12, mid_breaks: true },
-    AdPreset { id: "after", name: "After the show", about: "No breaks inside shows; all the ads come together at the end.", commercials: true, pod_seconds: 120, max_breaks: 4, minutes_per_hour: 8, mid_breaks: false },
+    AdPreset {
+        id: "none",
+        name: "No commercials",
+        about: "Shows run clean. Station cards still fill any spare time.",
+        commercials: false,
+        pod_seconds: 120,
+        max_breaks: 4,
+        minutes_per_hour: 8,
+        mid_breaks: true,
+    },
+    AdPreset {
+        id: "light",
+        name: "Light",
+        about: "A short break or two, about a minute each.",
+        commercials: true,
+        pod_seconds: 60,
+        max_breaks: 2,
+        minutes_per_hour: 4,
+        mid_breaks: true,
+    },
+    AdPreset {
+        id: "classic",
+        name: "Classic TV",
+        about: "Breaks of about two minutes inside the show and after it.",
+        commercials: true,
+        pod_seconds: 120,
+        max_breaks: 4,
+        minutes_per_hour: 8,
+        mid_breaks: true,
+    },
+    AdPreset {
+        id: "heavy",
+        name: "Heavy",
+        about: "Long, frequent breaks, like a busy cable channel.",
+        commercials: true,
+        pod_seconds: 180,
+        max_breaks: 6,
+        minutes_per_hour: 12,
+        mid_breaks: true,
+    },
+    AdPreset {
+        id: "after",
+        name: "After the show",
+        about: "No breaks inside shows; all the ads come together at the end.",
+        commercials: true,
+        pod_seconds: 120,
+        max_breaks: 4,
+        minutes_per_hour: 8,
+        mid_breaks: false,
+    },
 ];
 
 impl AdConfig {
@@ -226,11 +271,17 @@ impl AdConfig {
         let budget = slot_minutes.saturating_sub(show_minutes) as u64 * 60_000;
         let (slot, show) = (slot_minutes, show_minutes);
         if budget < MIN_BUDGET_MS {
-            return format!("A {slot}-minute slot with a {show}-minute show has no room for breaks.");
+            return format!(
+                "A {slot}-minute slot with a {show}-minute show has no room for breaks."
+            );
         }
         let target = (self.pod_seconds as u64 * 1000).max(MIN_POD_MS);
         let total = ((budget + target / 2) / target).max(1) as usize;
-        let mut mid = if self.mid_breaks && total > 1 { (total - 1).min(self.max_breaks as usize) } else { 0 };
+        let mut mid = if self.mid_breaks && total > 1 {
+            (total - 1).min(self.max_breaks as usize)
+        } else {
+            0
+        };
         while mid > 0 && budget / (mid as u64 + 1) < MIN_POD_MS {
             mid -= 1;
         }
@@ -241,7 +292,11 @@ impl AdConfig {
         } else {
             format!("about {each} seconds")
         };
-        let what = if self.commercials { "commercials" } else { "station cards" };
+        let what = if self.commercials {
+            "commercials"
+        } else {
+            "station cards"
+        };
         let places = match mid {
             0 => "one break after the show".to_string(),
             1 => "one break inside the show and one after it".to_string(),
@@ -274,7 +329,9 @@ impl AdConfig {
 
 fn capitalise(s: &str) -> String {
     let mut c = s.chars();
-    c.next().map_or_else(String::new, |f| f.to_uppercase().collect::<String>() + c.as_str())
+    c.next().map_or_else(String::new, |f| {
+        f.to_uppercase().collect::<String>() + c.as_str()
+    })
 }
 
 /// A commercial or bumper clip.
@@ -1062,7 +1119,10 @@ mod tests {
         c.pod_seconds = 77;
         assert_eq!(c.preset_id(), "custom");
         let classic = AdConfig::default().describe(30, 22);
-        assert!(classic.contains("8 minutes") && classic.contains("inside the show"), "{classic}");
+        assert!(
+            classic.contains("8 minutes") && classic.contains("inside the show"),
+            "{classic}"
+        );
         assert!(AdConfig::default().describe(30, 30).contains("no room"));
         let mut after = AdConfig::default();
         after.apply_preset(&AD_PRESETS[4]);

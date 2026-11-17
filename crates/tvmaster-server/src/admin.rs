@@ -422,11 +422,26 @@ mod ads_tests {
         assert_eq!(st, StatusCode::OK);
         assert_eq!(v["presets"].as_array().unwrap().len(), 5);
         assert_eq!(v["cards"].as_array().unwrap().len(), 5);
-        let (st, v) = call(&app, "POST", "/api/v1/ads/explain", r#"{"ads":{},"slot_minutes":60,"show_minutes":44}"#).await;
+        let (st, v) = call(
+            &app,
+            "POST",
+            "/api/v1/ads/explain",
+            r#"{"ads":{},"slot_minutes":60,"show_minutes":44}"#,
+        )
+        .await;
         assert_eq!(st, StatusCode::OK);
-        assert!(v["text"].as_str().unwrap().contains("60-minute slot"), "{v}");
+        assert!(
+            v["text"].as_str().unwrap().contains("60-minute slot"),
+            "{v}"
+        );
         assert_eq!(v["preset"], "classic");
-        let (st, _) = call(&app, "POST", "/api/v1/ads/explain", r#"{"ads":{"pod_seconds":3}}"#).await;
+        let (st, _) = call(
+            &app,
+            "POST",
+            "/api/v1/ads/explain",
+            r#"{"ads":{"pod_seconds":3}}"#,
+        )
+        .await;
         assert_eq!(st, StatusCode::BAD_REQUEST);
     }
 }

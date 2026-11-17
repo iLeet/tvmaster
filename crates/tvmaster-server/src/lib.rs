@@ -14,10 +14,10 @@ mod live;
 mod monitor;
 mod pip;
 mod plan;
-#[cfg(test)]
-mod soak;
 mod setup;
 mod shownames;
+#[cfg(test)]
+mod soak;
 mod station;
 mod stream;
 mod theme;
@@ -486,7 +486,10 @@ fn build_router(state: AppState, https: bool) -> Router {
             "/api/v1/libraries/:id",
             axum::routing::delete(libraries::remove).patch(libraries::patch),
         )
-        .route("/api/v1/media/station-folder", post(libraries::station_folder))
+        .route(
+            "/api/v1/media/station-folder",
+            post(libraries::station_folder),
+        )
         .route("/api/v1/libraries/:id/scan", post(libraries::scan))
         .route("/api/v1/libraries/:id/analyze", post(libraries::analyze))
         .route(
@@ -577,11 +580,20 @@ fn build_router(state: AppState, https: bool) -> Router {
         )
         .route("/api/v1/shows", get(admin::shows))
         .route("/api/v1/shows/names", get(shownames::get_names))
-        .route("/api/v1/shows/folder", axum::routing::put(shownames::put_folder))
+        .route(
+            "/api/v1/shows/folder",
+            axum::routing::put(shownames::put_folder),
+        )
         .route("/api/v1/shows/folder/reset", post(shownames::reset_folder))
         .route("/api/v1/shows/merge", post(shownames::merge))
-        .route("/api/v1/shows/info", axum::routing::put(shownames::put_info))
-        .route("/api/v1/shows/auto-clean", axum::routing::put(shownames::put_auto_clean))
+        .route(
+            "/api/v1/shows/info",
+            axum::routing::put(shownames::put_info),
+        )
+        .route(
+            "/api/v1/shows/auto-clean",
+            axum::routing::put(shownames::put_auto_clean),
+        )
         .route(
             "/api/v1/show-settings",
             get(admin::show_settings).put(admin::put_show_settings),

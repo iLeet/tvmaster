@@ -451,14 +451,7 @@ async fn run_rendered(
     let total_secs = (offset_ms + duration_ms) as f32 / 1000.0;
     let frames = (duration_ms as f64 / 1000.0 * FPS as f64).ceil() as u64;
     let (fw, fh) = theme.frame_size();
-    let args = rendered_args(
-        fw,
-        fh,
-        duration_ms,
-        ts_offset_ms,
-        &cfg.profile,
-        cfg.encoder,
-    );
+    let args = rendered_args(fw, fh, duration_ms, ts_offset_ms, &cfg.profile, cfg.encoder);
     let mut child = Command::new(&cfg.ffmpeg)
         .args(args)
         .stdin(Stdio::piped())
@@ -733,7 +726,10 @@ async fn slate(
 async fn card_png(cfg: &EngineConfig, spec: &ChannelSpec) -> Option<std::path::PathBuf> {
     let message = spec.options.off_air.message.clone();
     let theme = crate::spec_theme(spec);
-    let key = format!("{}|{}|{}|{}|{:?}", spec.id, spec.number, spec.name, message, theme);
+    let key = format!(
+        "{}|{}|{}|{}|{:?}",
+        spec.id, spec.number, spec.name, message, theme
+    );
     let dir = cfg.root.join("cache").join("cards");
     tokio::fs::create_dir_all(&dir).await.ok()?;
     let path = dir.join(format!("{:016x}.png", tvmaster_core::fnv1a(&key)));

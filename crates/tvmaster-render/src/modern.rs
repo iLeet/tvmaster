@@ -79,7 +79,15 @@ fn header(c: &mut Canvas, th: &Theme, name: &str, t: f32) {
     let f = arrive(t, 0.0);
     rect(c, 64, 56, 8, 44, faded(th.accent, th.dark, f));
     let (px, l) = fit(name, Face::Bold, &[40.0, 32.0], 900.0, 1);
-    draw(c, 92, 56, &l.join(" "), px, Face::Bold, faded(th.ink, th.dark, f));
+    draw(
+        c,
+        92,
+        56,
+        &l.join(" "),
+        px,
+        Face::Bold,
+        faded(th.ink, th.dark, f),
+    );
 }
 
 /// Lines of text, each arriving a little after the one before, centred or left.
@@ -156,7 +164,19 @@ pub fn render(scene: &Scene, th: &Theme, t: f32, dur: f32) -> Canvas {
                 1080.0,
                 2,
             );
-            block(&mut c, th, 96, 520, &ls, px, Face::Regular, th.accent, false, t, 0.5);
+            block(
+                &mut c,
+                th,
+                96,
+                520,
+                &ls,
+                px,
+                Face::Regular,
+                th.accent,
+                false,
+                t,
+                0.5,
+            );
         }
         Scene::BackTo { name, show } => {
             header(&mut c, th, name, t);
@@ -174,13 +194,37 @@ pub fn render(scene: &Scene, th: &Theme, t: f32, dur: f32) -> Canvas {
                 0.05,
             );
             let (px, ls) = fit(show, Face::Bold, &[132.0, 108.0, 88.0, 70.0], 1090.0, 3);
-            block(&mut c, th, 96, 270, &ls, px, Face::Bold, th.ink, false, t, 0.2);
+            block(
+                &mut c,
+                th,
+                96,
+                270,
+                &ls,
+                px,
+                Face::Bold,
+                th.ink,
+                false,
+                t,
+                0.2,
+            );
         }
         Scene::UpNext { name, title, time } => {
             header(&mut c, th, name, t);
             chip(&mut c, th, 96, 190, "UP NEXT", t, 0.05);
             let (px, ls) = fit(title, Face::Bold, &[120.0, 100.0, 82.0, 66.0], 1090.0, 2);
-            let end = block(&mut c, th, 96, 290, &ls, px, Face::Bold, th.ink, false, t, 0.2);
+            let end = block(
+                &mut c,
+                th,
+                96,
+                290,
+                &ls,
+                px,
+                Face::Bold,
+                th.ink,
+                false,
+                t,
+                0.2,
+            );
             if !time.is_empty() {
                 block(
                     &mut c,
@@ -208,7 +252,11 @@ pub fn render(scene: &Scene, th: &Theme, t: f32, dur: f32) -> Canvas {
                 th,
                 96,
                 170,
-                if *evening { "COMING UP TONIGHT" } else { "LATER TODAY" },
+                if *evening {
+                    "COMING UP TONIGHT"
+                } else {
+                    "LATER TODAY"
+                },
                 t,
                 0.05,
             );
@@ -217,9 +265,25 @@ pub fn render(scene: &Scene, th: &Theme, t: f32, dur: f32) -> Canvas {
                 let f = arrive(t, 0.2 + i as f32 * 0.12);
                 let bg = mix(th.dark, th.bottom, y as f32 / H as f32);
                 let yy = y + ((1.0 - f) * 30.0) as i32;
-                draw(&mut c, 96, yy, time, 46.0, Face::Bold, faded(th.accent, bg, f));
+                draw(
+                    &mut c,
+                    96,
+                    yy,
+                    time,
+                    46.0,
+                    Face::Bold,
+                    faded(th.accent, bg, f),
+                );
                 let (px, l) = fit(prog, Face::Regular, &[46.0, 38.0], 840.0, 1);
-                draw(&mut c, 360, yy, &l.join(" "), px, Face::Regular, faded(th.ink, bg, f));
+                draw(
+                    &mut c,
+                    360,
+                    yy,
+                    &l.join(" "),
+                    px,
+                    Face::Regular,
+                    faded(th.ink, bg, f),
+                );
                 y += 84;
             }
         }
@@ -239,7 +303,15 @@ fn chip(c: &mut Canvas, th: &Theme, x: i32, y: i32, label: &str, t: f32, delay: 
     let bg = mix(th.dark, th.bottom, y as f32 / H as f32);
     let col = faded(th.accent, bg, f);
     rect(c, x - off, y, w, 64, col);
-    draw(c, x - off + 28, y + 8, label, px, Face::Bold, faded(th.on_accent, bg, f));
+    draw(
+        c,
+        x - off + 28,
+        y + 8,
+        label,
+        px,
+        Face::Bold,
+        faded(th.on_accent, bg, f),
+    );
 }
 
 /// The station card (number, name, message) as a full-screen picture.
@@ -251,7 +323,15 @@ pub fn station_card(th: &Theme, number: u32, name: &str, message: &str) -> Graph
     let n = number.to_string();
     let ink = ink_on(th.primary);
     let size = if n.len() > 3 { 84.0 } else { 120.0 };
-    centred(&mut c, W / 2, 218 - (size * 0.5) as i32, &n, size, Face::Bold, ink);
+    centred(
+        &mut c,
+        W / 2,
+        218 - (size * 0.5) as i32,
+        &n,
+        size,
+        Face::Bold,
+        ink,
+    );
     let (px, l) = fit(name, Face::Bold, &[76.0, 62.0, 50.0], 1100.0, 1);
     centred(&mut c, W / 2, 372, &l.join(" "), px, Face::Bold, th.ink);
     let msg = if message.trim().is_empty() {
@@ -282,22 +362,43 @@ mod tests {
     use crate::guide::Palette;
 
     fn themes() -> Vec<Theme> {
-        [Palette::midnight(), Palette::snow(), Palette::paper(), Palette::amber(), Palette::mono()]
-            .iter()
-            .map(|p| Theme::from_palette(p, true))
-            .collect()
+        [
+            Palette::midnight(),
+            Palette::snow(),
+            Palette::paper(),
+            Palette::amber(),
+            Palette::mono(),
+        ]
+        .iter()
+        .map(|p| Theme::from_palette(p, true))
+        .collect()
     }
 
     fn scenes() -> Vec<Scene> {
         vec![
-            Scene::StationId { name: "Retro TV".into() },
-            Scene::Brb { name: "Retro TV".into(), show: "Cheers".into() },
-            Scene::BackTo { name: "Retro TV".into(), show: "Cheers".into() },
-            Scene::UpNext { name: "Retro TV".into(), title: "Taxi".into(), time: "8:30 PM".into() },
+            Scene::StationId {
+                name: "Retro TV".into(),
+            },
+            Scene::Brb {
+                name: "Retro TV".into(),
+                show: "Cheers".into(),
+            },
+            Scene::BackTo {
+                name: "Retro TV".into(),
+                show: "Cheers".into(),
+            },
+            Scene::UpNext {
+                name: "Retro TV".into(),
+                title: "Taxi".into(),
+                time: "8:30 PM".into(),
+            },
             Scene::LaterToday {
                 name: "Retro TV".into(),
                 evening: true,
-                items: vec![("8:30 PM".into(), "Taxi".into()), ("9:00 PM".into(), "Cheers".into())],
+                items: vec![
+                    ("8:30 PM".into(), "Taxi".into()),
+                    ("9:00 PM".into(), "Cheers".into()),
+                ],
             },
         ]
     }
@@ -308,7 +409,8 @@ mod tests {
             for s in scenes() {
                 let c = crate::render(&s, &th, 2.0, 5.0);
                 assert_eq!((c.w, c.h), th.frame_size());
-                let distinct: std::collections::HashSet<&[u8]> = c.px.chunks(3).step_by(997).collect();
+                let distinct: std::collections::HashSet<&[u8]> =
+                    c.px.chunks(3).step_by(997).collect();
                 assert!(distinct.len() > 6, "{s:?} looks blank");
             }
         }
@@ -319,9 +421,17 @@ mod tests {
         let th = &themes()[0];
         let s = &scenes()[3];
         let mean = |c: &Canvas| c.px.iter().map(|v| *v as f64).sum::<f64>() / c.px.len() as f64;
-        assert_ne!(crate::render(s, th, 1.0, 5.0).px, crate::render(s, th, 2.0, 5.0).px);
-        assert_eq!(crate::render(s, th, 2.0, 5.0).px, crate::render(s, th, 2.0, 5.0).px);
-        assert!(mean(&crate::render(s, th, 0.0, 5.0)) < mean(&crate::render(s, th, 2.5, 5.0)) * 0.2);
+        assert_ne!(
+            crate::render(s, th, 1.0, 5.0).px,
+            crate::render(s, th, 2.0, 5.0).px
+        );
+        assert_eq!(
+            crate::render(s, th, 2.0, 5.0).px,
+            crate::render(s, th, 2.0, 5.0).px
+        );
+        assert!(
+            mean(&crate::render(s, th, 0.0, 5.0)) < mean(&crate::render(s, th, 2.5, 5.0)) * 0.2
+        );
     }
 
     #[test]
@@ -329,12 +439,20 @@ mod tests {
         let long = "THE INCREDIBLY LONG ADVENTURES OF A SHOW WITH AN ABSURDLY VERBOSE NAME THAT KEEPS GOING AND GOING";
         let th = &themes()[1];
         for s in [
-            Scene::UpNext { name: long.into(), title: long.into(), time: long.into() },
-            Scene::StationId { name: String::new() },
+            Scene::UpNext {
+                name: long.into(),
+                title: long.into(),
+                time: long.into(),
+            },
+            Scene::StationId {
+                name: String::new(),
+            },
             Scene::LaterToday {
                 name: "N".into(),
                 evening: false,
-                items: (0..9).map(|i| (format!("{i}:00"), long.to_string())).collect(),
+                items: (0..9)
+                    .map(|i| (format!("{i}:00"), long.to_string()))
+                    .collect(),
             },
         ] {
             for t in [0.0, 1.0, 2.9] {

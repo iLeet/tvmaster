@@ -187,7 +187,13 @@ pub(crate) fn centred(c: &mut Canvas, cx: i32, y: i32, s: &str, px: f32, face: F
 }
 
 /// Words wrapped to `max_w` pixels; `None` when more than `max_lines` are needed.
-pub(crate) fn wrap(s: &str, px: f32, face: Face, max_w: f32, max_lines: usize) -> Option<Vec<String>> {
+pub(crate) fn wrap(
+    s: &str,
+    px: f32,
+    face: Face,
+    max_w: f32,
+    max_lines: usize,
+) -> Option<Vec<String>> {
     let mut lines: Vec<String> = Vec::new();
     let mut cur = String::new();
     for word in s.split_whitespace() {

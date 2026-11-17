@@ -120,7 +120,9 @@ pub async fn station_folder(State(s): State<AppState>) -> ApiResult<Json<Value>>
         };
         made.push(json!({ "id": lib.id, "path": lib.path, "kind": lib.kind }));
     }
-    Ok(Json(json!({ "root": data.join("media").to_string_lossy(), "libraries": made })))
+    Ok(Json(
+        json!({ "root": data.join("media").to_string_lossy(), "libraries": made }),
+    ))
 }
 
 pub async fn scan(State(s): State<AppState>, Path(id): Path<i64>) -> ApiResult<Json<Value>> {
@@ -779,11 +781,20 @@ mod tests {
             assert!(dir.join("media").join(k).is_dir(), "{k} folder");
         }
         let (_, again) = call(&app, "POST", "/api/v1/media/station-folder", "").await;
-        assert_eq!(again["libraries"], v["libraries"], "the same libraries, none added twice");
+        assert_eq!(
+            again["libraries"], v["libraries"],
+            "the same libraries, none added twice"
+        );
         let (_, libs) = call(&app, "GET", "/api/v1/libraries", "").await;
         assert_eq!(libs.as_array().unwrap().len(), 4);
         // No data folder, no station folder.
-        let (st, _) = call(&router(AppState::in_memory()), "POST", "/api/v1/media/station-folder", "").await;
+        let (st, _) = call(
+            &router(AppState::in_memory()),
+            "POST",
+            "/api/v1/media/station-folder",
+            "",
+        )
+        .await;
         assert_eq!(st, StatusCode::CONFLICT);
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -104,9 +104,16 @@ pub async fn guide(State(s): State<AppState>) -> ApiResult<Response> {
                     xml_escape(&p.title)
                 ));
             }
-            if let Some(i) = p.show.as_ref().and_then(|n| info.get(&n.trim().to_lowercase())) {
+            if let Some(i) = p
+                .show
+                .as_ref()
+                .and_then(|n| info.get(&n.trim().to_lowercase()))
+            {
                 if !i.description.trim().is_empty() {
-                    xml.push_str(&format!("    <desc>{}</desc>\n", xml_escape(i.description.trim())));
+                    xml.push_str(&format!(
+                        "    <desc>{}</desc>\n",
+                        xml_escape(i.description.trim())
+                    ));
                 }
                 for t in &i.tags {
                     xml.push_str(&format!("    <category>{}</category>\n", xml_escape(t)));

@@ -15,9 +15,7 @@ mod runner;
 mod sound;
 mod ts;
 
-pub use guide::{
-    background_image, card_theme, guide_look, guide_look_with_pictures, palette_for,
-};
+pub use guide::{background_image, card_theme, guide_look, guide_look_with_pictures, palette_for};
 pub use looks::{audio_chain, AudioFx, Burn, ClockFx, ItemPlan, OverlayInput};
 pub use manager::{ChannelHealth, Manager};
 pub use probe::{probe_encoder, EncoderProbe};

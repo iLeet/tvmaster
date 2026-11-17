@@ -25,7 +25,8 @@ pub async fn get(State(s): State<AppState>) -> ApiResult<Json<Value>> {
     let by_kind = |k: &str| libs.iter().filter(|l| l.kind == k).count();
     let station_folder = s.data_dir.as_ref().is_some_and(|d| {
         let root = d.join("media").to_string_lossy().replace('\\', "/");
-        libs.iter().any(|l| l.path.replace('\\', "/").starts_with(&root))
+        libs.iter()
+            .any(|l| l.path.replace('\\', "/").starts_with(&root))
     });
     Ok(Json(json!({
         // Offered until a station has channels or someone says "not now".
@@ -75,7 +76,11 @@ pub async fn starter(State(s): State<AppState>, Json(b): Json<Starter>) -> ApiRe
             "add some shows first (a folder, or upload files), then make the channels",
         ));
     }
-    let free = |from: u32, used: &[(String, u32)]| (from..).find(|n| !used.iter().any(|(_, u)| u == n)).unwrap_or(from);
+    let free = |from: u32, used: &[(String, u32)]| {
+        (from..)
+            .find(|n| !used.iter().any(|(_, u)| u == n))
+            .unwrap_or(from)
+    };
     let mut made = Vec::new();
     let mut used = taken.clone();
     let wanted: Vec<(&str, &str, Value)> = [
@@ -129,20 +134,28 @@ mod tests {
         {
             let db = state.db();
             let lib = tvmaster_db::add_library(&db, "/media/tv", "shows").unwrap();
-            tvmaster_db::upsert_media(&db, &tvmaster_db::NewMedia {
-                library_id: lib.id,
-                path: "/media/tv/Cheers/a.mkv".into(),
-                show: Some("Cheers".into()),
-                duration_ms: 1_320_000,
-                ..Default::default()
-            })
+            tvmaster_db::upsert_media(
+                &db,
+                &tvmaster_db::NewMedia {
+                    library_id: lib.id,
+                    path: "/media/tv/Cheers/a.mkv".into(),
+                    show: Some("Cheers".into()),
+                    duration_ms: 1_320_000,
+                    ..Default::default()
+                },
+            )
             .unwrap();
         }
         let (st, v) = call(&app, "POST", "/api/v1/setup/starter", "{}").await;
         assert_eq!(st, StatusCode::OK, "{v}");
         assert_eq!(v["channels"].as_array().unwrap().len(), 2);
         let (_, list) = call(&app, "GET", "/api/v1/channels", "").await;
-        let numbers: Vec<i64> = list.as_array().unwrap().iter().map(|c| c["number"].as_i64().unwrap()).collect();
+        let numbers: Vec<i64> = list
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c["number"].as_i64().unwrap())
+            .collect();
         assert_eq!(numbers, [1, 2]);
         let (_, v) = call(&app, "GET", "/api/v1/setup", "").await;
         assert_eq!(v["needed"], false);

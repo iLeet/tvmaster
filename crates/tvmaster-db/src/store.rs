@@ -277,13 +277,19 @@ pub fn list_shows(conn: &Connection, library_ids: &[i64]) -> Result<Vec<ShowSumm
             continue;
         }
         let (title, season) = map.resolve(&raw);
-        let e = merged.entry(title.to_lowercase()).or_insert_with(|| ShowSummary {
-            name: title.clone(),
-            ..Default::default()
-        });
+        let e = merged
+            .entry(title.to_lowercase())
+            .or_insert_with(|| ShowSummary {
+                name: title.clone(),
+                ..Default::default()
+            });
         e.episodes += episodes;
         e.total_ms += total_ms;
-        match e.folders.iter_mut().find(|f| f.raw.eq_ignore_ascii_case(&raw)) {
+        match e
+            .folders
+            .iter_mut()
+            .find(|f| f.raw.eq_ignore_ascii_case(&raw))
+        {
             Some(f) => f.episodes += episodes,
             None => e.folders.push(FolderSummary {
                 custom: map.has_rule(&raw),
@@ -295,7 +301,8 @@ pub fn list_shows(conn: &Connection, library_ids: &[i64]) -> Result<Vec<ShowSumm
     }
     let mut out: Vec<ShowSummary> = merged.into_values().collect();
     for s in &mut out {
-        s.folders.sort_by(|a, b| (a.season, &a.raw).cmp(&(b.season, &b.raw)));
+        s.folders
+            .sort_by(|a, b| (a.season, &a.raw).cmp(&(b.season, &b.raw)));
     }
     fill_languages(conn, &map, &mut out);
     Ok(out)
@@ -318,7 +325,9 @@ fn fill_languages(conn: &Connection, map: &crate::NameMap, shows: &mut [ShowSumm
         let Some(t) = tvmaster_core::Tracks::from_json(&json) else {
             continue;
         };
-        let e = found.entry(map.resolve(&show).0.to_lowercase()).or_default();
+        let e = found
+            .entry(map.resolve(&show).0.to_lowercase())
+            .or_default();
         e.0.extend(
             t.audio
                 .iter()

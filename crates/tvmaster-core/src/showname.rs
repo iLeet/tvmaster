@@ -54,7 +54,16 @@ mod tests {
 
     #[test]
     fn other_names_are_left_alone() {
-        for n in ["Bleach", "Season 1", "S Club 7", "Seasons of Love", "Show S", "Mr. Bean", "24", "The Office (US)"] {
+        for n in [
+            "Bleach",
+            "Season 1",
+            "S Club 7",
+            "Seasons of Love",
+            "Show S",
+            "Mr. Bean",
+            "24",
+            "The Office (US)",
+        ] {
             assert_eq!(split_season_suffix(n), (n.to_string(), None), "{n}");
         }
     }

@@ -38,7 +38,11 @@ pub(crate) async fn render_png(
     let (s, id, name, guide) = (s.clone(), id.to_string(), name.to_string(), guide.clone());
     tokio::task::spawn_blocking(move || {
         let id = if id.is_empty() { "guide" } else { &id };
-        let name = if name.trim().is_empty() { "Guide" } else { &name };
+        let name = if name.trim().is_empty() {
+            "Guide"
+        } else {
+            &name
+        };
         let data = {
             let db = s.db();
             let tz = crate::station::effective_timezone(&db);

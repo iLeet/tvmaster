@@ -91,7 +91,10 @@ pub fn lower_third_themed(title: &str, subtitle: &str, width: u32, th: &Theme) -
             }
             s
         };
-        let (t, sub) = (fit(title, big, Face::Bold), fit(subtitle, small, Face::Regular));
+        let (t, sub) = (
+            fit(title, big, Face::Bold),
+            fit(subtitle, small, Face::Regular),
+        );
         let has_sub = !sub.trim().is_empty();
         let h = pad * 2 + 40 + if has_sub { 32 } else { 0 };
         let mut c = Canvas::new(w as usize, h as usize);
@@ -100,7 +103,15 @@ pub fn lower_third_themed(title: &str, subtitle: &str, width: u32, th: &Theme) -
         c.rect(0, 0, 8, h, th.accent);
         crate::alert::draw(&mut c, pad + 8, pad - 2, &t, big, Face::Bold, th.ink);
         if has_sub {
-            crate::alert::draw(&mut c, pad + 8, pad + 38, &sub, small, Face::Regular, th.accent);
+            crate::alert::draw(
+                &mut c,
+                pad + 8,
+                pad + 38,
+                &sub,
+                small,
+                Face::Regular,
+                th.accent,
+            );
         }
         return to_png(&c, 235);
     }

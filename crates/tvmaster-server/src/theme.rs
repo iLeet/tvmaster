@@ -11,7 +11,9 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
-use tvmaster_core::{ChannelOptions, GraphicsStyle, GuideColors, GuideConfig, GuideTheme, ThemeChoice};
+use tvmaster_core::{
+    ChannelOptions, GraphicsStyle, GuideColors, GuideConfig, GuideTheme, ThemeChoice,
+};
 use tvmaster_playout::{card_theme, palette_for};
 use tvmaster_render::alert::{AlertLook, AlertStyle, AlertTheme, Severity};
 use tvmaster_render::Scene;
@@ -45,8 +47,16 @@ pub(crate) fn alert_theme(choice: &ThemeChoice, channel_id: &str) -> AlertTheme 
 
 /// The themes on offer: id, name and what it is like.
 const THEMES: &[(&str, &str, &str)] = &[
-    ("auto", "Automatic", "Colours made from each channel, so every channel has its own look"),
-    ("prevue", "Prevue", "Deep blue with yellow, the classic cable guide"),
+    (
+        "auto",
+        "Automatic",
+        "Colours made from each channel, so every channel has its own look",
+    ),
+    (
+        "prevue",
+        "Prevue",
+        "Deep blue with yellow, the classic cable guide",
+    ),
     ("amber", "Amber", "Amber on black, like an old monitor"),
     ("phosphor", "Phosphor", "Green phosphor"),
     ("neon", "Neon", "Bright colours on black"),
@@ -71,8 +81,7 @@ fn catalogue() -> Value {
     let list: Vec<Value> = THEMES
         .iter()
         .map(|(id, name, about)| {
-            let theme: GuideTheme =
-                serde_json::from_value(json!(id)).unwrap_or(GuideTheme::Auto);
+            let theme: GuideTheme = serde_json::from_value(json!(id)).unwrap_or(GuideTheme::Auto);
             let p = palette_for(theme, &GuideColors::default(), "preview");
             json!({
                 "id": id, "name": name, "about": about,
@@ -102,7 +111,10 @@ pub async fn get(State(s): State<AppState>) -> Json<Value> {
 }
 
 /// `PUT /api/v1/theme`: choose the station's theme. Channels that follow it pick it up within seconds.
-pub async fn put(State(s): State<AppState>, Json(choice): Json<ThemeChoice>) -> ApiResult<Json<Value>> {
+pub async fn put(
+    State(s): State<AppState>,
+    Json(choice): Json<ThemeChoice>,
+) -> ApiResult<Json<Value>> {
     choice
         .validate()
         .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, e))?;
@@ -162,8 +174,16 @@ pub async fn preview(State(s): State<AppState>, Json(b): Json<PreviewBody>) -> A
     b.theme
         .validate()
         .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, e))?;
-    let id = if b.id.is_empty() { "preview".to_string() } else { b.id.clone() };
-    let name = if b.name.trim().is_empty() { "Retro TV".to_string() } else { b.name.chars().take(30).collect() };
+    let id = if b.id.is_empty() {
+        "preview".to_string()
+    } else {
+        b.id.clone()
+    };
+    let name = if b.name.trim().is_empty() {
+        "Retro TV".to_string()
+    } else {
+        b.name.chars().take(30).collect()
+    };
     let number = b.number.unwrap_or(4);
     let t = b.t.clamp(0.0, 3600.0);
     let png: Vec<u8> = match b.what.as_str() {
@@ -193,7 +213,11 @@ pub async fn preview(State(s): State<AppState>, Json(b): Json<PreviewBody>) -> A
                             ("9:30 PM".into(), "Cheers".into()),
                         ],
                     },
-                    _ => Scene::UpNext { name, title: show, time: "9:00 PM".into() },
+                    _ => Scene::UpNext {
+                        name,
+                        title: show,
+                        time: "9:00 PM".into(),
+                    },
                 };
                 png_of(&tvmaster_render::render(&scene, &th, t.max(1.6), 6.0))
             })
@@ -205,7 +229,11 @@ pub async fn preview(State(s): State<AppState>, Json(b): Json<PreviewBody>) -> A
                 theme: alert_theme(&b.theme, &id),
                 severity: Severity::Emergency,
             };
-            let style = if b.what == "bar" { AlertStyle::Bar } else { AlertStyle::Full };
+            let style = if b.what == "bar" {
+                AlertStyle::Bar
+            } else {
+                AlertStyle::Full
+            };
             tokio::task::spawn_blocking(move || {
                 png_of(&tvmaster_render::alert::alert_preview(
                     &look,
@@ -257,19 +285,40 @@ mod tests {
         assert_eq!(st, StatusCode::OK);
         assert_eq!(v["station"]["theme"], "auto");
         assert!(v["themes"].as_array().unwrap().len() >= 16);
-        let (st, _) = call(&app, "PUT", "/api/v1/theme", r#"{"theme":"midnight","style":"modern"}"#).await;
+        let (st, _) = call(
+            &app,
+            "PUT",
+            "/api/v1/theme",
+            r#"{"theme":"midnight","style":"modern"}"#,
+        )
+        .await;
         assert_eq!(st, StatusCode::OK);
         let (_, v) = call(&app, "GET", "/api/v1/theme", "").await;
-        assert_eq!((v["station"]["theme"].as_str(), v["station"]["style"].as_str()), (Some("midnight"), Some("modern")));
-        let (st, _) = call(&app, "PUT", "/api/v1/theme", r#"{"theme":"custom","colors":{"primary":"nope"}}"#).await;
+        assert_eq!(
+            (
+                v["station"]["theme"].as_str(),
+                v["station"]["style"].as_str()
+            ),
+            (Some("midnight"), Some("modern"))
+        );
+        let (st, _) = call(
+            &app,
+            "PUT",
+            "/api/v1/theme",
+            r#"{"theme":"custom","colors":{"primary":"nope"}}"#,
+        )
+        .await;
         assert_eq!(st, StatusCode::BAD_REQUEST);
         for scene in ["brb", "back_to", "up_next", "later_today", "station_id"] {
-            let body = format!(r#"{{"what":"bumper","scene":"{scene}","theme":{{"theme":"neon","style":"modern"}}}}"#);
+            let body = format!(
+                r#"{{"what":"bumper","scene":"{scene}","theme":{{"theme":"neon","style":"modern"}}}}"#
+            );
             let (st, _) = call_raw(&app, "POST", "/api/v1/theme/preview", &body).await;
             assert_eq!(st, StatusCode::OK, "{scene}");
         }
         for what in ["card", "bumper", "guide", "alert", "bar"] {
-            let body = format!(r#"{{"what":"{what}","theme":{{"theme":"snow","style":"modern"}}}}"#);
+            let body =
+                format!(r#"{{"what":"{what}","theme":{{"theme":"snow","style":"modern"}}}}"#);
             let (st, png) = call_raw(&app, "POST", "/api/v1/theme/preview", &body).await;
             assert_eq!(st, StatusCode::OK, "{what}");
             assert!(png.starts_with("\u{fffd}PNG"), "{what} is a PNG");
@@ -282,11 +331,28 @@ mod tests {
     async fn a_channel_follows_the_station_theme_unless_it_has_its_own() {
         let state = AppState::in_memory();
         let db = state.db();
-        tvmaster_db::meta_set(&db, "station_theme", r#"{"theme":"forest","style":"modern"}"#).unwrap();
+        tvmaster_db::meta_set(
+            &db,
+            "station_theme",
+            r#"{"theme":"forest","style":"modern"}"#,
+        )
+        .unwrap();
         let mut opts = tvmaster_core::ChannelOptions::default();
-        assert_eq!(super::effective(&db, &opts).theme, tvmaster_core::GuideTheme::Forest);
-        opts.theme = Some(tvmaster_core::ThemeChoice { theme: tvmaster_core::GuideTheme::Amber, ..Default::default() });
+        assert_eq!(
+            super::effective(&db, &opts).theme,
+            tvmaster_core::GuideTheme::Forest
+        );
+        opts.theme = Some(tvmaster_core::ThemeChoice {
+            theme: tvmaster_core::GuideTheme::Amber,
+            ..Default::default()
+        });
         let own = super::effective(&db, &opts);
-        assert_eq!((own.theme, own.style), (tvmaster_core::GuideTheme::Amber, tvmaster_core::GraphicsStyle::Retro));
+        assert_eq!(
+            (own.theme, own.style),
+            (
+                tvmaster_core::GuideTheme::Amber,
+                tvmaster_core::GraphicsStyle::Retro
+            )
+        );
     }
 }

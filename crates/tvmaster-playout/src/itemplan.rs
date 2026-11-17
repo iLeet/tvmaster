@@ -294,7 +294,10 @@ pub(crate) async fn plan_item(
             let width = cfg.profile.width * 45 / 100;
             let th = crate::spec_theme(spec);
             let g = tvmaster_render::overlay::lower_third_themed(title, &sub, width, &th);
-            let name = format!("{:016x}.png", fnv1a(&format!("{title}|{sub}|{width}|{th:?}")));
+            let name = format!(
+                "{:016x}.png",
+                fnv1a(&format!("{title}|{sub}|{width}|{th:?}"))
+            );
             if let Some(png) = graphic(cfg, "titles", &name, &g.png).await {
                 let secs = ov.show_title.seconds;
                 plan.overlays.push(OverlayInput {
