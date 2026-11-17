@@ -66,6 +66,10 @@ public struct Language: Identifiable, Hashable, Sendable {
 public struct PictureSoundSettings: Equatable, Sendable {
     public var audioLanguages: [String] = []
     public var avoidCommentary = true
+    public var avoidDescription = true
+    /// Frame rate and video bitrate in kbit/s (nil = automatic).
+    public var fps: Int?
+    public var kbps: Int?
     public var loudness = "off"
     public var nightMode = false
     public var dialogueBoost = false
@@ -126,6 +130,9 @@ public struct PictureSoundSettings: Equatable, Sendable {
         theme = ThemeChoice(json: options?.get(["theme"]))
         audioLanguages = options?.get(["audio", "languages"])?.stringArray ?? []
         avoidCommentary = bool(["audio", "avoid_commentary"], true)
+        avoidDescription = bool(["audio", "avoid_description"], true)
+        fps = options?.get(["video", "fps"])?.intValue
+        kbps = options?.get(["video", "kbps"])?.intValue
         loudness = str(["audio", "loudness"], "off")
         nightMode = bool(["audio", "night_mode"], false)
         dialogueBoost = bool(["audio", "dialogue_boost"], false)
@@ -164,6 +171,9 @@ public struct PictureSoundSettings: Equatable, Sendable {
         o.set(["theme"], theme?.json ?? .null)
         o.set(["audio", "languages"], strings(audioLanguages))
         o.set(["audio", "avoid_commentary"], .bool(avoidCommentary))
+        o.set(["audio", "avoid_description"], .bool(avoidDescription))
+        o.set(["video", "fps"], fps.map { .number(Double($0)) } ?? .null)
+        o.set(["video", "kbps"], kbps.map { .number(Double($0)) } ?? .null)
         o.set(["audio", "loudness"], .string(loudness))
         o.set(["audio", "night_mode"], .bool(nightMode))
         o.set(["audio", "dialogue_boost"], .bool(dialogueBoost))

@@ -132,6 +132,8 @@ export interface ThemeCatalogue {
   styles: { id: GraphicsStyle; name: string; about: string }[];
   station: ThemeChoice;
 }
+export interface AdPreset { id: string; name: string; about: string; commercials: boolean; pod_seconds: number; max_breaks: number; minutes_per_hour: number; mid_breaks: boolean }
+export interface AdOptions { presets: AdPreset[]; cards: { id: 'brb' | 'back_to' | 'up_next' | 'later_today' | 'station_id'; name: string; about: string }[] }
 export type PipMode = 'off' | 'channel' | 'rotate';
 export type PipPlacement = 'top_left' | 'top_right' | 'side_left' | 'side_right';
 
@@ -398,4 +400,15 @@ export interface LiveState {
   overrides: LiveOverride[];
   samples: LiveSample[];
   options?: { styles: LiveChoice[]; themes: LiveChoice[]; severities: LiveChoice[]; sounds: LiveChoice[] };
+}
+
+export interface SetupState {
+  needed: boolean;
+  libraries: { shows: number; commercials: number; bumpers: number; music: number };
+  items: number;
+  shows: number;
+  channels: number;
+  station_folder: boolean;
+  can_upload: boolean;
+  theme: ThemeChoice;
 }

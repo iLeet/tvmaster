@@ -15,6 +15,7 @@ mod timefmt;
 mod tracks;
 
 pub use ads::{
+    AdPreset, AD_PRESETS,
     choose_break_points, loose_budget_ms, pack_pod, AdClip, AdConfig, AdInputs, AdPool, BumperKind,
     BumperToggles,
 };

@@ -43,3 +43,13 @@ public struct ThemeCatalogue: Decodable, Sendable {
     public let themes: [Item]
     public let styles: [Item]
 }
+
+/// Where a new station stands.
+public struct SetupState: Decodable, Sendable {
+    public let needed: Bool
+    public let items: Int
+    public let shows: Int
+    public let channels: Int
+    public let stationFolder: Bool
+    public let canUpload: Bool
+}

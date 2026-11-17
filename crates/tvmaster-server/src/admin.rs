@@ -201,6 +201,49 @@ pub async fn put_show_settings(
     ))
 }
 
+/// `GET /api/v1/ads/options`: the ready-made amounts of advertising and the cards around breaks, so
+/// every app offers the same choices in the same words.
+pub async fn ad_options() -> Json<Value> {
+    Json(json!({
+        "presets": tvmaster_core::AD_PRESETS,
+        "cards": [
+            { "id": "brb", "name": "We'll be right back", "about": "Opens each break." },
+            { "id": "back_to", "name": "Back to the show", "about": "Closes a break inside a show." },
+            { "id": "up_next", "name": "Up next", "about": "Closes the last break: what comes after this show." },
+            { "id": "later_today", "name": "Later today", "about": "Now and then, a list of the next few programmes instead of \"up next\"." },
+            { "id": "station_id", "name": "Station ID", "about": "The channel's name; also fills odd leftover seconds." },
+        ],
+    }))
+}
+
+#[derive(serde::Deserialize)]
+pub struct ExplainBody {
+    #[serde(default)]
+    ads: tvmaster_core::AdConfig,
+    #[serde(default = "d_slot")]
+    slot_minutes: u32,
+    #[serde(default = "d_show")]
+    show_minutes: u32,
+}
+fn d_slot() -> u32 {
+    30
+}
+fn d_show() -> u32 {
+    22
+}
+
+/// `POST /api/v1/ads/explain`: what some break settings do to a typical slot, in plain words.
+pub async fn ad_explain(Json(b): Json<ExplainBody>) -> ApiResult<Json<Value>> {
+    b.ads
+        .validate()
+        .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, e))?;
+    let (slot, show) = (b.slot_minutes.clamp(5, 240), b.show_minutes.clamp(1, 240));
+    Ok(Json(json!({
+        "text": b.ads.describe(slot, show),
+        "preset": b.ads.preset_id(),
+    })))
+}
+
 pub async fn system(State(s): State<AppState>) -> Json<Value> {
     let ffmpeg = s.ffmpeg.as_ref().map(|f| {
         json!({
@@ -363,5 +406,27 @@ mod tests {
         assert!(sys["version"].is_string() && sys["os"].is_string());
         assert_eq!(sys["auth_required"], false);
         assert_eq!(sys["ffmpeg"], serde_json::Value::Null);
+    }
+}
+
+#[cfg(test)]
+mod ads_tests {
+    use crate::test_util::call;
+    use crate::{router, AppState};
+    use axum::http::StatusCode;
+
+    #[tokio::test]
+    async fn break_presets_and_the_plain_words_come_from_the_server() {
+        let app = router(AppState::in_memory());
+        let (st, v) = call(&app, "GET", "/api/v1/ads/options", "").await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["presets"].as_array().unwrap().len(), 5);
+        assert_eq!(v["cards"].as_array().unwrap().len(), 5);
+        let (st, v) = call(&app, "POST", "/api/v1/ads/explain", r#"{"ads":{},"slot_minutes":60,"show_minutes":44}"#).await;
+        assert_eq!(st, StatusCode::OK);
+        assert!(v["text"].as_str().unwrap().contains("60-minute slot"), "{v}");
+        assert_eq!(v["preset"], "classic");
+        let (st, _) = call(&app, "POST", "/api/v1/ads/explain", r#"{"ads":{"pod_seconds":3}}"#).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST);
     }
 }

@@ -248,8 +248,9 @@ public struct TVMasterClient: Sendable {
     }
 
     /// A PNG of one of the station's graphics (`card`, `bumper`, `guide`, `alert`, `bar`) in a theme.
-    public func themePreview(what: String, choice: ThemeChoice, id: String? = nil, name: String? = nil, number: Int? = nil) async throws -> Data {
+    public func themePreview(what: String, choice: ThemeChoice, id: String? = nil, name: String? = nil, number: Int? = nil, scene: String? = nil) async throws -> Data {
         var body: [String: JSONValue] = ["what": .string(what), "theme": choice.json, "t": .number(2)]
+        if let scene { body["scene"] = .string(scene) }
         if let id { body["id"] = .string(id) }
         if let name { body["name"] = .string(name) }
         if let number { body["number"] = .number(Double(number)) }
@@ -465,6 +466,27 @@ public struct TVMasterClient: Sendable {
     public func deleteLibrary(_ id: Int) async throws { try await send("DELETE", "/libraries/\(id)") }
 
     public func shows() async throws -> [ShowSummary] { try await get("/shows") }
+
+    /// The ready-made amounts of advertising and the station cards, the same everywhere.
+    public func adOptions() async throws -> AdOptions { try await get("/ads/options") }
+
+    /// What some break settings do to a typical slot, in plain words (worked out by the server).
+    public func explainAds(_ ads: AdSettings, slotMinutes: Int, showMinutes: Int) async throws -> String {
+        let data = try await send("POST", "/ads/explain", body: .object(["ads": ads.json, "slot_minutes": .number(Double(slotMinutes)), "show_minutes": .number(Double(showMinutes))]))
+        return (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["text"] as? String ?? ""
+    }
+
+    /// Where a new station stands (what the setup walks through).
+    public func setupState() async throws -> SetupState { try await get("/setup") }
+
+    /// Make a guide and a shuffled "Mix" channel from the media added so far; returns their names.
+    public func makeStarterChannels() async throws -> [String] {
+        let data = try await send("POST", "/setup/starter", body: .object([:]))
+        let made = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["channels"] as? [[String: Any]] ?? []
+        return made.compactMap { $0["name"] as? String }
+    }
+
+    public func skipSetup() async throws { _ = try await send("POST", "/setup/skip") }
 
     /// Make the station's own media folder on the server, with a library for each kind inside it.
     public func createStationFolder() async throws {

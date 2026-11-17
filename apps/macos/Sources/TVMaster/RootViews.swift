@@ -147,6 +147,8 @@ struct TrustView: View {
 
 struct MainView: View {
     @Environment(AppModel.self) private var model
+    /// A new station is walked through setting up before anything else.
+    @State private var setupNeeded = false
 
     var body: some View {
         @Bindable var model = model
@@ -166,6 +168,9 @@ struct MainView: View {
         } detail: {
             ZStack(alignment: .top) {
                 Group {
+                    if setupNeeded {
+                        SetupView { setupNeeded = false }
+                    } else {
                     switch model.selection {
                     case .home: HomeView()
                     case .watch: WatchView()
@@ -177,6 +182,7 @@ struct MainView: View {
                     case .tvs: TVsView()
                     case .appearance: AppearanceView()
                     case .share: ShareView()
+                    }
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -192,6 +198,7 @@ struct MainView: View {
             }
             .animation(.snappy, value: model.lastError)
         }
+        .task { setupNeeded = (try? await model.client?.setupState().needed) ?? false }
         .toolbar {
             ToolbarItemGroup {
                 Button { Task { await model.refreshAll() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }

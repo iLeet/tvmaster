@@ -110,7 +110,61 @@ public struct AdSettings: Equatable, Sendable {
     public var midBreaks = true
     public var brb = true, backTo = true, upNext = true, stationId = true
     public var laterTodayEvery = 3
+    /// Only commercials from these years (nil = any).
+    public var years: ClosedRange<Int>?
     public init() {}
+
+    /// As the server's `ads` object, for explaining the settings.
+    public var json: JSONValue {
+        var o: JSONValue = .object([:])
+        o.set(["commercials"], .bool(commercials))
+        o.set(["minutes_per_hour"], .number(Double(minutesPerHour)))
+        o.set(["pod_seconds"], .number(Double(podSeconds)))
+        o.set(["max_breaks"], .number(Double(maxBreaks)))
+        o.set(["no_repeat"], .number(Double(noRepeat)))
+        o.set(["mid_breaks"], .bool(midBreaks))
+        o.set(["bumpers", "brb"], .bool(brb))
+        o.set(["bumpers", "back_to"], .bool(backTo))
+        o.set(["bumpers", "up_next"], .bool(upNext))
+        o.set(["bumpers", "station_id"], .bool(stationId))
+        o.set(["bumpers", "later_today_every"], .number(Double(laterTodayEvery)))
+        return o
+    }
+}
+
+/// A ready-made amount of advertising, from the server.
+public struct AdPreset: Decodable, Identifiable, Sendable, Hashable {
+    public let id: String
+    public let name: String
+    public let about: String
+    public let commercials: Bool
+    public let podSeconds: Int
+    public let maxBreaks: Int
+    public let minutesPerHour: Int
+    public let midBreaks: Bool
+}
+
+public struct AdCard: Decodable, Identifiable, Sendable, Hashable {
+    public let id: String
+    public let name: String
+    public let about: String
+}
+
+public struct AdOptions: Decodable, Sendable {
+    public let presets: [AdPreset]
+    public let cards: [AdCard]
+}
+
+extension AdSettings {
+    /// The preset these numbers are, or "custom".
+    public func presetID(in presets: [AdPreset]) -> String {
+        if !commercials { return "none" }
+        return presets.first { $0.commercials && $0.podSeconds == podSeconds && $0.maxBreaks == maxBreaks && $0.minutesPerHour == minutesPerHour && $0.midBreaks == midBreaks }?.id ?? "custom"
+    }
+
+    public mutating func apply(_ p: AdPreset) {
+        commercials = p.commercials; podSeconds = p.podSeconds; maxBreaks = p.maxBreaks; minutesPerHour = p.minutesPerHour; midBreaks = p.midBreaks
+    }
 }
 
 /// Everything about a programming channel's schedule that the Programming tab edits.
@@ -191,6 +245,7 @@ public struct LineupSettings: Equatable, Sendable {
             v.upNext = a.get(["bumpers", "up_next"])?.boolValue ?? true
             v.stationId = a.get(["bumpers", "station_id"])?.boolValue ?? true
             v.laterTodayEvery = a.get(["bumpers", "later_today_every"])?.intValue ?? 3
+            if let y = a.get(["years"])?.arrayValue, y.count == 2, let lo = y[0].intValue, let hi = y[1].intValue, lo <= hi { v.years = lo...hi }
             ads = v
         }
     }
@@ -243,6 +298,7 @@ public struct LineupSettings: Equatable, Sendable {
             l.set(["ads", "bumpers", "up_next"], .bool(a.upNext))
             l.set(["ads", "bumpers", "station_id"], .bool(a.stationId))
             l.set(["ads", "bumpers", "later_today_every"], .number(Double(a.laterTodayEvery)))
+            l.set(["ads", "years"], a.years.map { .array([.number(Double($0.lowerBound)), .number(Double($0.upperBound))]) } ?? .null)
         } else {
             l.set(["ads"], .null)
         }

@@ -88,10 +88,10 @@ export const PREVIEWS: { value: PreviewKind; label: string }[] = [
 ];
 
 /** A picture of one of the station's graphics in a theme, redrawn a moment after each change. */
-export function ThemePreview({ choice, what, id, name, number }: { choice: ThemeChoice; what: PreviewKind; id?: string; name?: string; number?: number }) {
+export function ThemePreview({ choice, what, id, name, number, scene }: { choice: ThemeChoice; what: PreviewKind; id?: string; name?: string; number?: number; scene?: string }) {
   const [url, setUrl] = useState<string | null>(null);
   const last = useRef<string | null>(null);
-  const key = JSON.stringify({ choice, what, id, name, number });
+  const key = JSON.stringify({ choice, what, id, name, number, scene });
   useEffect(() => {
     let live = true;
     const timer = setTimeout(async () => {
@@ -99,7 +99,7 @@ export function ThemePreview({ choice, what, id, name, number }: { choice: Theme
         const res = await fetch('/api/v1/theme/preview', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ what, theme: choice, id, name, number, t: 2 }),
+          body: JSON.stringify({ what, theme: choice, id, name, number, scene, t: 2 }),
           credentials: 'same-origin',
         });
         if (!res.ok || !live) return;

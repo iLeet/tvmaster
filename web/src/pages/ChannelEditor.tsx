@@ -34,7 +34,7 @@ const STRATEGIES: { value: Strategy; label: string; help: string }[] = [
   { value: 'sequential', label: 'In order', help: 'Episodes in order, shows interleaved, forever.' },
   { value: 'shuffle', label: 'Shuffle', help: 'Every episode once per pass, in random order.' },
   { value: 'chaos', label: 'Chaos', help: 'Anything, at random.' },
-  { value: 'block_grid', label: 'TV schedule', help: 'A real weekly lineup: time slots, seasons and events (see the Programming tab).' },
+  { value: 'block_grid', label: 'Weekly lineup', help: 'A real TV schedule: time slots by day and time, seasons and events (set them on the Programming tab).' },
 ];
 
 function soundSummary(o: ChannelOptions): string {
@@ -144,7 +144,7 @@ export function ChannelEditor({ id, tab }: { id: string; tab: string }) {
     ? [['general', 'General'], ['guide', 'Guide']]
     : draft.kind === 'test'
     ? [['general', 'General'], ['picture', 'Screen']]
-    : [['general', 'General'], ['programming', 'Programming'], ['picture', 'Sound & picture'], ['ads', 'Ads & bumpers']];
+    : [['general', 'General'], ['programming', 'Programming'], ['picture', 'Sound & picture'], ['ads', 'Breaks']];
   const goTab = (t: string) => navigate(`channels/${id}${t === 'general' ? '' : `?tab=${t}`}`);
 
   return (
@@ -219,10 +219,12 @@ export function ChannelEditor({ id, tab }: { id: string; tab: string }) {
                 <Field label="Strategy" hint={STRATEGIES.find((s) => s.value === draft.strategy)?.help}>
                   <Segmented value={draft.strategy} options={STRATEGIES} onChange={(strategy) => set({ strategy })} />
                 </Field>
-                <Field label={`Chaos: ${draft.chaos}%`} hint="Swaps this share of picks for something random, so a structured channel can drift towards chaos.">
-                  <input type="range" min={0} max={100} value={draft.chaos} onChange={(e) => set({ chaos: Number(e.target.value) })} />
-                </Field>
-                <Field label="When a show runs out" hint={RUN_OUT.find((r) => r.value === draft.run_out)?.help}>
+                {draft.strategy !== 'chaos' && (
+                  <Field label={`Surprises: ${draft.chaos}%`} hint="Swaps this share of picks for something random, so an orderly channel now and then airs something unexpected. 0 = never.">
+                    <input type="range" min={0} max={100} value={draft.chaos} onChange={(e) => set({ chaos: Number(e.target.value) })} />
+                  </Field>
+                )}
+                <Field label="When a show runs out of episodes" hint={RUN_OUT.find((r) => r.value === draft.run_out)?.help}>
                   <Segmented value={draft.run_out} options={RUN_OUT} onChange={(run_out) => set({ run_out })} />
                 </Field>
                 {draft.strategy !== 'block_grid' && draft.lineup.blocks.length > 0 && (
@@ -295,7 +297,7 @@ export function ChannelEditor({ id, tab }: { id: string; tab: string }) {
       )}
 
       {shownTab === 'ads' && draft.kind === 'programming' && (
-        <AdsEditor ads={draft.lineup.ads} libraries={libs.data ?? []} onChange={(ads) => set({ lineup: { ...draft.lineup, ads } })} />
+        <AdsEditor ads={draft.lineup.ads} theme={draft.options.theme} libraries={libs.data ?? []} onChange={(ads) => set({ lineup: { ...draft.lineup, ads } })} />
       )}
 
       {shownTab === 'guide' && draft.kind === 'guide' && (

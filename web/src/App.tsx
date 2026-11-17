@@ -14,6 +14,7 @@ import { Remote } from './pages/Remote';
 import { Shows } from './pages/Shows';
 import { Schedule } from './pages/Schedule';
 import { Settings } from './pages/Settings';
+import { Setup } from './pages/Setup';
 import { Tvs } from './pages/Tvs';
 
 const NAV: { path: string; label: string; icon: string }[] = [
@@ -65,12 +66,17 @@ function Login({ onDone }: { onDone: () => void }) {
 
 function Shell() {
   const route = useRoute();
+  const setup = useQuery(() => api.get<{ needed: boolean }>('/setup'));
+  const [dismissed, setDismissed] = useState(false);
   const section = route.parts[0] ?? 'dashboard';
   const standalone = matchMedia('(display-mode: standalone)').matches;
   const bare = section === 'remote' && standalone; // the installed phone remote fills the screen
 
   let page;
   switch (section) {
+    case 'setup':
+      page = <Setup onDone={() => { setDismissed(true); setup.reload(); }} />;
+      break;
     case 'channels':
       page = route.parts[1] ? <ChannelEditor key={route.parts[1]} id={route.parts[1]} tab={route.query.get('tab') ?? 'general'} /> : <Channels />;
       break;
@@ -101,6 +107,7 @@ function Shell() {
     default:
       page = <Dashboard />;
   }
+  if (setup.data?.needed && !dismissed && section !== 'setup') page = <Setup onDone={() => { setDismissed(true); setup.reload(); }} />;
 
   if (bare) return <div className="main">{page}</div>;
   return (

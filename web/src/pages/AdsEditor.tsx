@@ -1,33 +1,92 @@
+import { useEffect, useState } from 'react';
+import { api } from '../api';
 import { defaultAds } from '../lib';
-import type { AdConfig, Library } from '../types';
-import { Card, Chips, Field, Toggle } from '../ui';
+import { ThemePreview, emptyChoice, useThemeCatalogue } from '../ThemePicker';
+import type { AdConfig, AdOptions, AdPreset, Library, ThemeChoice } from '../types';
+import { Card, Chips, Field, Segmented, Toggle } from '../ui';
 
 const name = (l: Library) => l.path.split(/[\\/]/).filter(Boolean).pop() ?? l.path;
 
-export function AdsEditor({ ads, onChange, libraries }: { ads: AdConfig | null; onChange: (a: AdConfig | null) => void; libraries: Library[] }) {
+/** What these settings do to a typical slot, in words (worked out by the server). */
+function useExplain(ads: AdConfig | null, slot: number, show: number) {
+  const [text, setText] = useState('');
+  const key = JSON.stringify({ ads, slot, show });
+  useEffect(() => {
+    if (!ads) return;
+    let live = true;
+    const t = setTimeout(() => {
+      api.post<{ text: string }>('/ads/explain', { ads, slot_minutes: slot, show_minutes: show }).then((r) => live && setText(r.text)).catch(() => undefined);
+    }, 200);
+    return () => { live = false; clearTimeout(t); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  return text;
+}
+
+export function AdsEditor({ ads, onChange, libraries, theme }: { ads: AdConfig | null; onChange: (a: AdConfig | null) => void; libraries: Library[]; theme?: ThemeChoice | null }) {
   const commercial = libraries.filter((l) => l.kind === 'commercials');
   const clips = libraries.filter((l) => l.kind === 'bumpers');
   const set = (p: Partial<AdConfig>) => ads && onChange({ ...ads, ...p });
   const toggleId = (list: number[], id: number) => (list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
+  const [opts, setOpts] = useState<AdOptions | null>(null);
+  const [slot, setSlot] = useState(30);
+  const [more, setMore] = useState(false);
+  const station = useThemeCatalogue()?.station;
+  const look = theme ?? station ?? emptyChoice();
+  useEffect(() => { api.get<AdOptions>('/ads/options').then(setOpts).catch(() => undefined); }, []);
+  const show = Math.max(1, Math.round(slot * 0.73));
+  const words = useExplain(ads, slot, show);
+
+  const presets = opts?.presets ?? [];
+  const current = !ads ? 'custom' : !ads.commercials ? 'none' : presets.find((p) => p.commercials && p.pod_seconds === ads.pod_seconds && p.max_breaks === ads.max_breaks && p.minutes_per_hour === ads.minutes_per_hour && p.mid_breaks === ads.mid_breaks)?.id ?? 'custom';
+  const apply = (p: AdPreset) => set({ commercials: p.commercials, pod_seconds: p.pod_seconds, max_breaks: p.max_breaks, minutes_per_hour: p.minutes_per_hour, mid_breaks: p.mid_breaks });
+  const cardOn = (id: string) => (ads ? { brb: ads.bumpers.brb, back_to: ads.bumpers.back_to, up_next: ads.bumpers.up_next, station_id: ads.bumpers.station_id, later_today: ads.bumpers.later_today_every > 0 }[id] : false);
+  const setCard = (id: string, on: boolean) => {
+    if (!ads) return;
+    if (id === 'later_today') set({ bumpers: { ...ads.bumpers, later_today_every: on ? 3 : 0 } });
+    else set({ bumpers: { ...ads.bumpers, [id]: on } });
+  };
 
   return (
     <div className="stack gap-lg">
       <Card className="flat">
-        <Toggle checked={ads !== null} onChange={(on) => onChange(on ? defaultAds() : null)} label={<strong>Commercial breaks and bumpers</strong>} />
+        <Toggle checked={ads !== null} onChange={(on) => onChange(on ? defaultAds() : null)} label={<strong>Breaks between and inside shows</strong>} />
         <p className="small dim" style={{ marginTop: 6 }}>
-          Splits each show at natural breaks and fills every break to the exact second with commercials, "we'll be right back", "up next" and station IDs. Off = shows run clean.
+          Each show is cut at natural points and the time left in its slot is filled to the exact second with commercials and station cards. Off = shows run clean.
         </p>
       </Card>
 
       {ads && (
         <>
           <Card className="flat stack">
-            <h2>Commercials</h2>
-            <Toggle checked={ads.commercials} onChange={(v) => set({ commercials: v })} label="Air commercials (off = bumpers only)" />
-            <Field label="Commercial libraries" hint={commercial.length ? undefined : 'Add a library of kind "Commercials" first.'}>
+            <h2>How much advertising</h2>
+            <Segmented value={current} options={[...presets.map((p) => ({ value: p.id, label: p.name })), ...(current === 'custom' ? [{ value: 'custom', label: 'Custom' }] : [])]} onChange={(id) => { const p = presets.find((x) => x.id === id); if (p) apply(p); }} />
+            <p className="small dim">{presets.find((p) => p.id === current)?.about ?? 'Your own numbers (below).'}</p>
+            <div className="row wrap" style={{ alignItems: 'flex-end' }}>
+              <Field label="Try it on a slot of"><Segmented value={String(slot)} options={[{ value: '30', label: '30 min' }, { value: '60', label: '60 min' }, { value: '120', label: '2 hours' }]} onChange={(v) => setSlot(Number(v))} /></Field>
+            </div>
+            {words && <p className="callout">{words}</p>}
+            <button type="button" className="btn small" onClick={() => setMore(!more)} aria-expanded={more}>{more ? 'Hide the details' : 'Fine-tune…'}</button>
+            {more && (
+              <div className="stack nest">
+                <div className="row wrap" style={{ alignItems: 'flex-start' }}>
+                  <Field label="About how long is each break (seconds)" hint="The time left in a slot is split into breaks about this long."><input className="input num" type="number" min={20} max={900} value={ads.pod_seconds} onChange={(e) => set({ pod_seconds: Number(e.target.value) })} /></Field>
+                  <Field label="At most this many breaks inside one show" hint="The break after the show is extra."><input className="input num" type="number" min={0} max={8} value={ads.max_breaks} onChange={(e) => set({ max_breaks: Number(e.target.value) })} /></Field>
+                  <Field label="Don't repeat a commercial for" hint="this many commercials"><input className="input num" type="number" min={1} max={200} value={ads.no_repeat} onChange={(e) => set({ no_repeat: Number(e.target.value) })} /></Field>
+                  <Field label="Minutes of ads per hour" hint="Only for a channel with no weekly lineup (no time slots); with a lineup the ads fill whatever is left of each slot."><input className="input num" type="number" min={0} max={30} value={ads.minutes_per_hour} onChange={(e) => set({ minutes_per_hour: Number(e.target.value) })} /></Field>
+                </div>
+                <Toggle checked={ads.mid_breaks} onChange={(v) => set({ mid_breaks: v })} label="Breaks inside shows (off = all the ads after the show)" />
+              </div>
+            )}
+          </Card>
+
+          <Card className="flat stack">
+            <h2>Where commercials come from</h2>
+            <Toggle checked={ads.commercials} onChange={(v) => set({ commercials: v })} label="Air commercials (off = only station cards fill the breaks)" />
+            <Field label="Commercial libraries" hint={commercial.length ? undefined : 'Add a library of kind “Commercials” first (Libraries page), or upload some there.'}>
               <Chips options={commercial.map((l) => ({ value: l.id, label: `${name(l)} (${l.items})` }))} value={ads.library_ids} onToggle={(id) => set({ library_ids: toggleId(ads.library_ids, id) })} />
             </Field>
-            <Field label="Era" hint="Only air commercials from these years (the year comes from folder or file names).">
+            <Field label="Only from these years" hint="The year comes from folder or file names. Handy for a channel set in 1987.">
               <div className="row">
                 <Toggle checked={ads.years !== null} onChange={(on) => set({ years: on ? [1980, 1989] : null })} />
                 {ads.years && (
@@ -42,28 +101,22 @@ export function AdsEditor({ ads, onChange, libraries }: { ads: AdConfig | null; 
           </Card>
 
           <Card className="flat stack">
-            <h2>Breaks</h2>
-            <div className="row wrap" style={{ alignItems: 'flex-start' }}>
-              <Field label="Target break length (seconds)"><input className="input num" type="number" min={20} max={900} value={ads.pod_seconds} onChange={(e) => set({ pod_seconds: Number(e.target.value) })} /></Field>
-              <Field label="Most breaks per show"><input className="input num" type="number" min={0} max={8} value={ads.max_breaks} onChange={(e) => set({ max_breaks: Number(e.target.value) })} /></Field>
-              <Field label="No repeat within" hint="plays"><input className="input num" type="number" min={1} max={200} value={ads.no_repeat} onChange={(e) => set({ no_repeat: Number(e.target.value) })} /></Field>
-              <Field label="Ad minutes per hour" hint="Only when the channel has no time grid."><input className="input num" type="number" min={0} max={30} value={ads.minutes_per_hour} onChange={(e) => set({ minutes_per_hour: Number(e.target.value) })} /></Field>
+            <h2>Station cards</h2>
+            <p className="small dim">Short graphics in the station's look (change it under Appearance) that tell viewers what is happening. Turn off the ones you don't want.</p>
+            <div className="grid cols-3">
+              {(opts?.cards ?? []).map((c) => (
+                <div key={c.id} className="stack" style={{ gap: 6 }}>
+                  <ThemePreview choice={look} what="bumper" scene={c.id} id="preview" />
+                  <Toggle checked={!!cardOn(c.id)} onChange={(v) => setCard(c.id, v)} label={<span><strong>{c.name}</strong><br /><span className="small dim">{c.about}</span></span>} />
+                </div>
+              ))}
             </div>
-            <Toggle checked={ads.mid_breaks} onChange={(v) => set({ mid_breaks: v })} label="Breaks inside shows (off = all ads after the show)" />
-          </Card>
-
-          <Card className="flat stack">
-            <h2>Bumpers</h2>
-            <div className="row wrap">
-              <Toggle checked={ads.bumpers.brb} onChange={(v) => set({ bumpers: { ...ads.bumpers, brb: v } })} label="We'll be right back" />
-              <Toggle checked={ads.bumpers.back_to} onChange={(v) => set({ bumpers: { ...ads.bumpers, back_to: v } })} label="Back to the show" />
-              <Toggle checked={ads.bumpers.up_next} onChange={(v) => set({ bumpers: { ...ads.bumpers, up_next: v } })} label="Up next" />
-              <Toggle checked={ads.bumpers.station_id} onChange={(v) => set({ bumpers: { ...ads.bumpers, station_id: v } })} label="Station ID" />
-            </div>
-            <Field label='"Later today" every Nth slot' hint="0 = never. Shows the next few programmes instead of just the next one.">
-              <input className="input num" type="number" min={0} max={20} value={ads.bumpers.later_today_every} onChange={(e) => set({ bumpers: { ...ads.bumpers, later_today_every: Number(e.target.value) } })} />
-            </Field>
-            <Field label="Your own bumper clips" hint={clips.length ? 'Used to open breaks in place of "we\'ll be right back" when they fit.' : 'Add a library of kind "Bumper clips" to use your own.'}>
+            {ads.bumpers.later_today_every > 0 && (
+              <Field label="“Later today” replaces “Up next” every" hint="programmes. 1 = always.">
+                <input className="input num" type="number" min={1} max={20} value={ads.bumpers.later_today_every} onChange={(e) => set({ bumpers: { ...ads.bumpers, later_today_every: Math.max(1, Number(e.target.value)) } })} />
+              </Field>
+            )}
+            <Field label="Your own station clips" hint={clips.length ? 'Short videos of your own (idents, "we\'ll be right back" animations). One is used to open a break, in place of the generated card, when it fits.' : 'Add a library of kind “Bumper clips” (or upload some on the Libraries page) to use your own videos.'}>
               <Chips options={clips.map((l) => ({ value: l.id, label: `${name(l)} (${l.items})` }))} value={ads.bumper_library_ids} onToggle={(id) => set({ bumper_library_ids: toggleId(ads.bumper_library_ids, id) })} />
             </Field>
           </Card>

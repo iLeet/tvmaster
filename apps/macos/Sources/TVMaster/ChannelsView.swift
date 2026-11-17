@@ -105,8 +105,8 @@ struct ChannelEditorSheet: View {
     @State private var ls = LineupSettings()
     @State private var lsOriginal = LineupSettings()
     @State private var showNames: [String] = []
-    private enum Tab: String, CaseIterable { case general = "General", programming = "Programming", picture = "Picture & sound", guide = "Guide" }
-    private var tabs: [Tab] { isGuide ? [.general, .guide] : (isNew || isTest) ? [.general] : [.general, .programming, .picture] }
+    private enum Tab: String, CaseIterable { case general = "General", programming = "Programming", picture = "Picture & sound", breaks = "Breaks", guide = "Guide" }
+    private var tabs: [Tab] { isGuide ? [.general, .guide] : (isNew || isTest) ? [.general] : [.general, .programming, .picture, .breaks] }
 
     private var isNew: Bool { channel == nil }
     private var numberTaken: Bool { model.channels.contains { $0.number == number && $0.id != id } }
@@ -124,6 +124,8 @@ struct ChannelEditorSheet: View {
                 } else {
                     ProgrammingForm(ls: $ls, shows: showNames, libraries: model.libraries)
                 }
+            } else if tab == .breaks && !isGuide && !isNew && !isTest {
+                BreaksForm(ls: $ls, libraries: model.libraries, theme: ps.theme)
             } else if tab == .picture && !isGuide && !isNew {
                 PictureSoundForm(ps: $ps, sys: model.system, testOnly: isTest, oldServer: rawOptions == nil && !loadingRaw, channelID: id, channelName: name, channelNumber: number)
             } else if tab == .guide && isGuide {
@@ -158,8 +160,11 @@ struct ChannelEditorSheet: View {
                             Toggle("\(lib.name) (\(lib.items) files)", isOn: Binding(get: { libraryIDs.contains(lib.id) }, set: { on in if on { libraryIDs.insert(lib.id) } else { libraryIDs.remove(lib.id) } }))
                         }
                         Picker("Strategy", selection: $strategy) { ForEach(Strategy.allCases) { Text($0.label).tag($0) } }
-                        LabeledContent("Chaos \(Int(chaos))%") { Slider(value: $chaos, in: 0...100, step: 1) }
-                        Picker("When a show runs out", selection: $runOut) { ForEach(RunOut.allCases) { Text($0.label).tag($0) } }
+                        if strategy != .chaos {
+                            LabeledContent("Surprises \(Int(chaos))%") { Slider(value: $chaos, in: 0...100, step: 1) }
+                            Text("Swaps this share of picks for something random, so an orderly channel now and then airs something unexpected. 0 = never.").font(.caption).foregroundStyle(.secondary)
+                        }
+                        Picker("When a show runs out of episodes", selection: $runOut) { ForEach(RunOut.allCases) { Text($0.label).tag($0) } }
                     }
                 }
                 if !isGuide && !isTest && !isNew {
@@ -329,6 +334,7 @@ struct PictureSoundForm: View {
             Section("Audio") {
                 LanguageList(title: "Preferred languages", empty: "Any (the file's default track)", languages: $ps.audioLanguages)
                 Toggle("Skip commentary tracks", isOn: $ps.avoidCommentary)
+                Toggle("Skip audio description (the narrated-picture tracks)", isOn: $ps.avoidDescription)
                 Picker("Volume levelling", selection: $ps.loudness) { ForEach(PictureSoundSettings.loudnessModes, id: \.value) { Text($0.label).tag($0.value) } }
                 Toggle("Night mode (quieter explosions, clearer speech)", isOn: $ps.nightMode)
                 Toggle("Dialogue boost (surround sources)", isOn: $ps.dialogueBoost)
@@ -350,6 +356,8 @@ struct PictureSoundForm: View {
                 Picker("Quality", selection: $ps.quality) { ForEach(PictureSoundSettings.qualities, id: \.value) { Text($0.label).tag($0.value) } }
                 Picker("Screen shape", selection: $ps.aspect) { ForEach(PictureSoundSettings.aspects, id: \.value) { Text($0.label).tag($0.value) } }
                 Picker("Look", selection: $ps.look) { ForEach(PictureSoundSettings.looks, id: \.value) { Text($0.label).tag($0.value) } }
+                TextField("Frame rate (blank = 30)", value: $ps.fps, format: .number.grouping(.never)).frame(maxWidth: 260)
+                TextField("Bitrate in kbit/s (blank = the quality's default)", value: $ps.kbps, format: .number.grouping(.never)).frame(maxWidth: 360)
             }
             Section("Look") {
                 Toggle("Follow the station theme", isOn: Binding(get: { ps.theme == nil }, set: { ps.theme = $0 ? nil : ThemeChoice() }))

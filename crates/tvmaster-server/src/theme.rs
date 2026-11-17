@@ -139,6 +139,9 @@ pub struct PreviewBody {
     id: String,
     #[serde(default)]
     t: f32,
+    /// For `bumper`: `brb`, `back_to`, `up_next`, `later_today` or `station_id`.
+    #[serde(default)]
+    scene: Option<String>,
 }
 
 fn d_what() -> String {
@@ -174,8 +177,24 @@ pub async fn preview(State(s): State<AppState>, Json(b): Json<PreviewBody>) -> A
         }
         "bumper" => {
             let th = card_theme(&b.theme, &id);
+            let kind = b.scene.clone().unwrap_or_else(|| "up_next".into());
             tokio::task::spawn_blocking(move || {
-                let scene = Scene::UpNext { name, title: "The Late Show".into(), time: "9:00 PM".into() };
+                let show = "The Late Show".to_string();
+                let scene = match kind.as_str() {
+                    "brb" => Scene::Brb { name, show },
+                    "back_to" => Scene::BackTo { name, show },
+                    "station_id" => Scene::StationId { name },
+                    "later_today" => Scene::LaterToday {
+                        name,
+                        evening: false,
+                        items: vec![
+                            ("8:30 PM".into(), "Taxi".into()),
+                            ("9:00 PM".into(), show),
+                            ("9:30 PM".into(), "Cheers".into()),
+                        ],
+                    },
+                    _ => Scene::UpNext { name, title: show, time: "9:00 PM".into() },
+                };
                 png_of(&tvmaster_render::render(&scene, &th, t.max(1.6), 6.0))
             })
             .await
@@ -244,6 +263,11 @@ mod tests {
         assert_eq!((v["station"]["theme"].as_str(), v["station"]["style"].as_str()), (Some("midnight"), Some("modern")));
         let (st, _) = call(&app, "PUT", "/api/v1/theme", r#"{"theme":"custom","colors":{"primary":"nope"}}"#).await;
         assert_eq!(st, StatusCode::BAD_REQUEST);
+        for scene in ["brb", "back_to", "up_next", "later_today", "station_id"] {
+            let body = format!(r#"{{"what":"bumper","scene":"{scene}","theme":{{"theme":"neon","style":"modern"}}}}"#);
+            let (st, _) = call_raw(&app, "POST", "/api/v1/theme/preview", &body).await;
+            assert_eq!(st, StatusCode::OK, "{scene}");
+        }
         for what in ["card", "bumper", "guide", "alert", "bar"] {
             let body = format!(r#"{{"what":"{what}","theme":{{"theme":"snow","style":"modern"}}}}"#);
             let (st, png) = call_raw(&app, "POST", "/api/v1/theme/preview", &body).await;

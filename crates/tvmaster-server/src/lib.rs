@@ -16,6 +16,7 @@ mod pip;
 mod plan;
 #[cfg(test)]
 mod soak;
+mod setup;
 mod shownames;
 mod station;
 mod stream;
@@ -542,6 +543,9 @@ fn build_router(state: AppState, https: bool) -> Router {
             get(station::get_timezone).put(station::put_timezone),
         )
         .route("/api/v1/server/restart", post(station::server_restart))
+        .route("/api/v1/setup", get(setup::get))
+        .route("/api/v1/setup/starter", post(setup::starter))
+        .route("/api/v1/setup/skip", post(setup::skip))
         .route("/api/v1/theme", get(theme::get).put(theme::put))
         .route("/api/v1/theme/preview", post(theme::preview))
         .route("/api/v1/live", get(live::get_live).post(live::set_live))
@@ -582,6 +586,8 @@ fn build_router(state: AppState, https: bool) -> Router {
             "/api/v1/show-settings",
             get(admin::show_settings).put(admin::put_show_settings),
         )
+        .route("/api/v1/ads/options", get(admin::ad_options))
+        .route("/api/v1/ads/explain", post(admin::ad_explain))
         .route("/api/v1/system", get(admin::system))
         .route("/stream/:channel/:file", get(stream::hls))
         .route("/iptv/playlist.m3u", get(iptv::playlist))

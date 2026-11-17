@@ -100,7 +100,7 @@ public enum Strategy: String, Codable, Sendable, CaseIterable, Identifiable {
         case .sequential: "In order"
         case .shuffle: "Shuffle"
         case .chaos: "Chaos"
-        case .blockGrid: "TV schedule"
+        case .blockGrid: "Weekly lineup"
         }
     }
 }

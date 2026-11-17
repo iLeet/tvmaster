@@ -62,7 +62,7 @@ const ACCEPT: Record<string, string> = {
 interface QueueItem { file: File; path: string; progress: number; state: 'waiting' | 'sending' | 'done' | 'failed' | 'exists'; message?: string }
 
 /** Upload files (or a whole folder) from this device into a library's folder on the server. */
-function UploadFiles({ library, onClose, onDone }: { library: Library; onClose: () => void; onDone: () => void }) {
+export function UploadFiles({ library, onClose, onDone }: { library: Library; onClose: () => void; onDone: () => void }) {
   const [sub, setSub] = useState('');
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [running, setRunning] = useState(false);
@@ -130,7 +130,7 @@ function UploadFiles({ library, onClose, onDone }: { library: Library; onClose: 
   );
 }
 
-function AddLibrary({ onClose, onAdded }: { onClose: () => void; onAdded: () => void }) {
+export function AddLibrary({ onClose, onAdded }: { onClose: () => void; onAdded: () => void }) {
   const [kind, setKind] = useState<LibraryKind>('shows');
   const [path, setPath] = useState('');
   const [picking, setPicking] = useState(false);

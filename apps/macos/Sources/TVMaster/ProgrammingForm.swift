@@ -1,7 +1,7 @@
 import SwiftUI
 import TVMasterKit
 
-/// A channel's weekly time slots, specials, gap programming and commercial breaks.
+/// A channel's weekly time slots, specials and gap programming.
 struct ProgrammingForm: View {
     @Environment(AppModel.self) private var model
     @Binding var ls: LineupSettings
@@ -87,49 +87,11 @@ struct ProgrammingForm: View {
                 Text("Off: carry on from where it left off (the usual choice). On: episodes advance while the server was off.").font(.caption).foregroundStyle(.secondary)
             }
 
-            Section("Commercials and bumpers") {
-                Toggle("Commercial breaks and bumpers", isOn: Binding(get: { ls.ads != nil }, set: { on in ls.ads = on ? AdSettings() : nil }))
-                if let ads = ls.ads {
-                    let commercial = libraries.filter { $0.kind == .commercials }
-                    let clips = libraries.filter { $0.kind == .bumpers }
-                    Toggle("Air commercials (off = bumpers only)", isOn: adBinding(\.commercials, ads))
-                    if commercial.isEmpty { Text("Add a library of kind “Commercials” to draw ads from.").font(.caption).foregroundStyle(.secondary) }
-                    ForEach(commercial) { lib in
-                        Toggle(lib.name + " (\(lib.items))", isOn: Binding(get: { (ls.ads?.libraryIds ?? []).contains(lib.id) }, set: { on in toggle(lib.id, on, \.libraryIds) }))
-                    }
-                    ForEach(clips) { lib in
-                        Toggle("Bumper clips: " + lib.name, isOn: Binding(get: { (ls.ads?.bumperLibraryIds ?? []).contains(lib.id) }, set: { on in toggle(lib.id, on, \.bumperLibraryIds) }))
-                    }
-                    Stepper("Break length \(ads.podSeconds) s", value: adBinding(\.podSeconds, ads), in: 20...900, step: 10)
-                    Stepper("Most breaks per show: \(ads.maxBreaks)", value: adBinding(\.maxBreaks, ads), in: 0...8)
-                    Stepper("No repeat within \(ads.noRepeat) plays", value: adBinding(\.noRepeat, ads), in: 1...200)
-                    Stepper("Ad minutes per hour (no time grid): \(ads.minutesPerHour)", value: adBinding(\.minutesPerHour, ads), in: 0...30)
-                    Toggle("Breaks inside shows (off = all ads after)", isOn: adBinding(\.midBreaks, ads))
-                    Toggle("“We'll be right back”", isOn: adBinding(\.brb, ads))
-                    Toggle("“Back to the show”", isOn: adBinding(\.backTo, ads))
-                    Toggle("“Up next”", isOn: adBinding(\.upNext, ads))
-                    Toggle("Station ID", isOn: adBinding(\.stationId, ads))
-                    Stepper("“Later today” every \(ads.laterTodayEvery) slots (0 = never)", value: adBinding(\.laterTodayEvery, ads), in: 0...12)
-                }
-            }
-
             if let p = ls.problem {
                 Section { Label(p, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange).font(.callout) }
             }
         }
         .formStyle(.grouped)
-    }
-
-    private func adBinding<T>(_ key: WritableKeyPath<AdSettings, T>, _ current: AdSettings) -> Binding<T> {
-        Binding(get: { ls.ads?[keyPath: key] ?? current[keyPath: key] }, set: { ls.ads?[keyPath: key] = $0 })
-    }
-
-    private func toggle(_ id: Int, _ on: Bool, _ key: WritableKeyPath<AdSettings, [Int]>) {
-        guard var a = ls.ads else { return }
-        var ids = a[keyPath: key]
-        if on { if !ids.contains(id) { ids.append(id) } } else { ids.removeAll { $0 == id } }
-        a[keyPath: key] = ids
-        ls.ads = a
     }
 }
 

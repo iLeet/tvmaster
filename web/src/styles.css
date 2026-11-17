@@ -208,3 +208,4 @@ html.native-glass.mac .main { padding-top: 34px; }
 .wg-seg:hover .wg-h::after, .wg-seg.sel .wg-h::after { opacity: .55; }
 .wg-shadow { position: absolute; left: 0; right: 0; pointer-events: none; z-index: 1;
   background: repeating-linear-gradient(135deg, rgba(0,0,0,.45) 0 5px, transparent 5px 10px); border-top: 1px dashed var(--warn); border-bottom: 1px dashed var(--warn); }
+.callout { margin: 0; padding: 10px 12px; border-radius: 8px; background: var(--surface-2, rgba(127,127,127,.12)); border-left: 3px solid var(--accent); }

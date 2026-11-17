@@ -81,6 +81,7 @@ struct ThemePreviewView: View {
     var id: String?
     var name: String?
     var number: Int?
+    var scene: String?
     @State private var image: NSImage?
 
     var body: some View {
@@ -91,10 +92,10 @@ struct ThemePreviewView: View {
                 RoundedRectangle(cornerRadius: 10).fill(.black.opacity(0.4)).aspectRatio(16.0 / 9.0, contentMode: .fit).overlay(ProgressView())
             }
         }
-        .task(id: "\(choice.theme)|\(choice.primary)|\(choice.accent)|\(choice.background)|\(choice.style)|\(what)|\(id ?? "")|\(name ?? "")") {
+        .task(id: "\(choice.theme)|\(choice.primary)|\(choice.accent)|\(choice.background)|\(choice.style)|\(what)|\(scene ?? "")|\(id ?? "")|\(name ?? "")") {
             try? await Task.sleep(nanoseconds: 300_000_000)
             guard !Task.isCancelled, let client = model.client else { return }
-            if let data = try? await client.themePreview(what: what, choice: choice, id: id, name: name, number: number), let img = NSImage(data: data) { image = img }
+            if let data = try? await client.themePreview(what: what, choice: choice, id: id, name: name, number: number, scene: scene), let img = NSImage(data: data) { image = img }
         }
     }
 }
