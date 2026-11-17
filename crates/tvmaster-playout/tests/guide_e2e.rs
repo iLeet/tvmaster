@@ -99,6 +99,8 @@ async fn guide_channel_draws_frames_and_loops_music() {
     cfg.readrate_burst = info.has_readrate_burst;
     let manager = Manager::new(cfg);
     assert!(manager.start_if_absent(ChannelSpec {
+        dayparts: Default::default(),
+        info: None,
         id: "guide".into(),
         name: "Guide".into(),
         always_on: true,
@@ -348,6 +350,8 @@ async fn a_rotating_video_window_shows_each_channel_in_turn_without_breaking_the
     cfg.readrate_burst = info.has_readrate_burst;
     let manager = Manager::new(cfg);
     assert!(manager.start_if_absent(ChannelSpec {
+        dayparts: Default::default(),
+        info: None,
         id: "guide".into(),
         name: "Guide".into(),
         always_on: true,
@@ -544,6 +548,8 @@ async fn a_video_window_whose_channel_is_missing_shows_no_signal_and_the_guide_c
     cfg.readrate_burst = info.has_readrate_burst;
     let manager = Manager::new(cfg);
     assert!(manager.start_if_absent(ChannelSpec {
+        dayparts: Default::default(),
+        info: None,
         id: "guide".into(),
         name: "Guide".into(),
         always_on: true,
@@ -630,6 +636,8 @@ async fn a_modern_guide_with_a_picture_background_streams_at_full_resolution() {
     cfg.readrate_burst = info.has_readrate_burst;
     let manager = Manager::new(cfg);
     assert!(manager.start_if_absent(ChannelSpec {
+        dayparts: Default::default(),
+        info: None,
         id: "guide".into(),
         name: "Guide".into(),
         always_on: true,

@@ -10,22 +10,22 @@ use crate::{mix, png, Canvas, Photo, PromoKind, PromoSpec, Rgb, Scene, Theme};
 const W: i32 = 1280;
 const H: i32 = 720;
 
-fn ease(p: f32) -> f32 {
+pub(crate) fn ease(p: f32) -> f32 {
     let p = p.clamp(0.0, 1.0);
     1.0 - (1.0 - p) * (1.0 - p) * (1.0 - p)
 }
 
 /// 0 = just arrived, 1 = settled, for an element that starts at `delay` seconds.
-fn arrive(t: f32, delay: f32) -> f32 {
+pub(crate) fn arrive(t: f32, delay: f32) -> f32 {
     ease((t - delay) / 0.6)
 }
 
 /// Where `col` is when it has faded `f` of the way in from the background.
-fn faded(col: Rgb, bg: Rgb, f: f32) -> Rgb {
+pub(crate) fn faded(col: Rgb, bg: Rgb, f: f32) -> Rgb {
     mix(bg, col, f)
 }
 
-fn backdrop(c: &mut Canvas, th: &Theme, t: f32) {
+pub(crate) fn backdrop(c: &mut Canvas, th: &Theme, t: f32) {
     vgrad(c, th.dark, th.bottom);
     // A soft glow that drifts slowly, in the main colour.
     let cx = (W as f32 * 0.78 + (t * 0.35).sin() * 60.0) as i32;
@@ -56,7 +56,13 @@ fn glow(c: &mut Canvas, cx: i32, cy: i32, r: i32, col: Rgb, k: f32) {
 }
 
 /// The largest of `sizes` at which `s` fits `max_w` over at most `lines` lines.
-fn fit(s: &str, face: Face, sizes: &[f32], max_w: f32, lines: usize) -> (f32, Vec<String>) {
+pub(crate) fn fit(
+    s: &str,
+    face: Face,
+    sizes: &[f32],
+    max_w: f32,
+    lines: usize,
+) -> (f32, Vec<String>) {
     let s = if s.trim().is_empty() { "TV" } else { s.trim() };
     for &px in sizes {
         if let Some(l) = wrap(s, px, face, max_w, lines) {
@@ -75,7 +81,7 @@ fn fit(s: &str, face: Face, sizes: &[f32], max_w: f32, lines: usize) -> (f32, Ve
     (px, l)
 }
 
-fn header(c: &mut Canvas, th: &Theme, name: &str, t: f32) {
+pub(crate) fn header(c: &mut Canvas, th: &Theme, name: &str, t: f32) {
     let f = arrive(t, 0.0);
     rect(c, 64, 56, 8, 44, faded(th.accent, th.dark, f));
     let (px, l) = fit(name, Face::Bold, &[40.0, 32.0], 900.0, 1);
@@ -92,7 +98,7 @@ fn header(c: &mut Canvas, th: &Theme, name: &str, t: f32) {
 
 /// Lines of text, each arriving a little after the one before, centred or left.
 #[allow(clippy::too_many_arguments)]
-fn block(
+pub(crate) fn block(
     c: &mut Canvas,
     th: &Theme,
     x: i32,

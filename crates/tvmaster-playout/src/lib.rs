@@ -6,6 +6,7 @@
 //! behind, so a channel never goes dark.
 
 mod guide;
+mod info;
 mod itemplan;
 mod looks;
 mod manager;
@@ -16,6 +17,7 @@ mod sound;
 mod ts;
 
 pub use guide::{background_image, card_theme, guide_look, guide_look_with_pictures, palette_for};
+pub use info::{page_count as info_page_count, preview_png as info_preview_png};
 pub use looks::{audio_chain, look_chain, AudioFx, Burn, ClockFx, ItemPlan, OverlayInput};
 pub use manager::{ChannelHealth, Manager};
 pub use probe::{probe_encoder, EncoderProbe};
@@ -134,6 +136,43 @@ pub trait ScheduleSource: Send + Sync + 'static {
     fn guide_data(&self, _channel: &str, _now_ms: i64) -> Option<GuideData> {
         None
     }
+    /// What is on now and next on each programming channel, for an info channel's "on tonight"
+    /// pages.
+    fn tonight(&self, _channel: &str, _now_ms: i64) -> Vec<TonightRow> {
+        Vec::new()
+    }
+}
+
+/// What is on now, and what comes next, on one channel.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct TonightRow {
+    pub number: u32,
+    pub channel: String,
+    /// What is on, and when it ends ("9:00 PM").
+    pub now: String,
+    pub until: String,
+    /// What follows, and when it starts.
+    pub next: String,
+    pub at: String,
+}
+
+/// What an info channel needs besides the schedule source.
+#[derive(Clone, Default)]
+pub struct InfoSpec {
+    pub config: tvmaster_core::InfoConfig,
+    /// Music files to loop under the pages (silence if empty).
+    pub music: Vec<PathBuf>,
+    /// The time zone the clock shows.
+    pub zone: Option<tvmaster_core::Zone>,
+}
+
+impl std::fmt::Debug for InfoSpec {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InfoSpec")
+            .field("pages", &self.config.slides.len())
+            .field("music", &self.music)
+            .finish()
+    }
 }
 
 /// Lets a guide show another channel live in a window.
@@ -176,6 +215,8 @@ pub struct ChannelSpec {
     pub source: Arc<dyn ScheduleSource>,
     /// Set for guide channels, which are rendered instead of scheduled.
     pub guide: Option<GuideSpec>,
+    /// Set for info channels, which are rendered instead of scheduled.
+    pub info: Option<InfoSpec>,
     /// Audio, subtitles, picture and graphics.
     pub options: tvmaster_core::ChannelOptions,
     /// The channel number, for the on-screen logo.
@@ -184,11 +225,20 @@ pub struct ChannelSpec {
     pub can_burn_text: bool,
     /// What airs during the sign-off hours.
     pub signoff: tvmaster_core::SignOffStyle,
+    /// The station's day parts that cover this channel; one may give the graphics a look of its own
+    /// for its hours (a kids' look in the morning, say).
+    pub dayparts: tvmaster_core::DaypartSet,
 }
 
-/// The look of a channel's cards, bumpers and on-screen graphics.
-pub(crate) fn spec_theme(spec: &ChannelSpec) -> tvmaster_render::Theme {
-    let choice = spec.options.theme.clone().unwrap_or_default();
+/// The look of a channel's cards, bumpers and on-screen graphics at `at_ms`: the look of the day
+/// part in force, else the channel's own.
+pub(crate) fn spec_theme_at(spec: &ChannelSpec, at_ms: i64) -> tvmaster_render::Theme {
+    let choice = spec
+        .dayparts
+        .look_at(at_ms)
+        .cloned()
+        .or_else(|| spec.options.theme.clone())
+        .unwrap_or_default();
     card_theme(&choice, &spec.id)
 }
 

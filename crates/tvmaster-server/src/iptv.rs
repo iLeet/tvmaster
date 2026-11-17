@@ -75,16 +75,28 @@ pub async fn guide(State(s): State<AppState>) -> ApiResult<Response> {
     let end = start + GUIDE_HOURS * 3_600_000;
     let info = tvmaster_db::list_show_info(&s.db())?;
     for c in channels {
-        if c.kind == tvmaster_core::ChannelKind::Guide {
-            // One long programme, so clients show the guide channel as "on".
+        if matches!(
+            c.kind,
+            tvmaster_core::ChannelKind::Guide | tvmaster_core::ChannelKind::Info
+        ) {
+            // One long programme, so clients show the guide or info channel as "on".
             let hour = 3_600_000;
             let from = start.div_euclid(hour) * hour;
+            let (title, desc) = if c.kind == tvmaster_core::ChannelKind::Info {
+                (c.name.clone(), c.info.describe())
+            } else {
+                (
+                    format!("{} Guide", c.name),
+                    "Live listing of what is on every channel.".to_string(),
+                )
+            };
             xml.push_str(&format!(
-                "  <programme start=\"{}\" stop=\"{}\" channel=\"{}\">\n    <title>{}</title>\n    <desc>Live listing of what is on every channel.</desc>\n  </programme>\n",
+                "  <programme start=\"{}\" stop=\"{}\" channel=\"{}\">\n    <title>{}</title>\n    <desc>{}</desc>\n  </programme>\n",
                 xmltv_time(from),
                 xmltv_time(end),
                 xml_escape(&c.id),
-                xml_escape(&format!("{} Guide", c.name)),
+                xml_escape(&title),
+                xml_escape(&desc),
             ));
             continue;
         }

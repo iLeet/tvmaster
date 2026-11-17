@@ -145,8 +145,14 @@ pub fn refresh(s: &AppState) {
     let wanted: Vec<(String, Vec<String>)> = tvmaster_db::list_channels(&s.db())
         .unwrap_or_default()
         .into_iter()
-        .filter(|c| c.options.overlay.ticker.enabled && !c.options.overlay.ticker.feeds.is_empty())
-        .map(|c| (c.id, c.options.overlay.ticker.feeds))
+        .filter_map(|c| {
+            // An info channel follows its own feeds; any other channel, the ones its ticker names.
+            if c.kind == tvmaster_core::ChannelKind::Info {
+                return (!c.info.feeds.is_empty()).then_some((c.id, c.info.feeds));
+            }
+            (c.options.overlay.ticker.enabled && !c.options.overlay.ticker.feeds.is_empty())
+                .then_some((c.id, c.options.overlay.ticker.feeds))
+        })
         .collect();
     for (id, feeds) in wanted {
         let due = s

@@ -103,6 +103,8 @@ fn rig(test: &str) -> Option<Rig> {
 impl Rig {
     fn start(&self, source: &Arc<Schedule>) {
         let spec = ChannelSpec {
+            dayparts: Default::default(),
+            info: None,
             id: "t".into(),
             name: "Test TV".into(),
             always_on: true,

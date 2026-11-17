@@ -432,11 +432,15 @@ fn channel_from(r: &Row) -> Result<Channel> {
             .get::<_, Option<String>>(14)?
             .and_then(|j| serde_json::from_str(&j).ok())
             .unwrap_or_default(),
+        info: r
+            .get::<_, Option<String>>(15)?
+            .and_then(|j| serde_json::from_str(&j).ok())
+            .unwrap_or_default(),
     })
 }
 
 const CHANNEL_COLS: &str =
-    "id, number, name, strategy, run_out, autopilot, chaos, seed, epoch_ms, always_on, lineup_json, kind, grp, guide_json, options_json";
+    "id, number, name, strategy, run_out, autopilot, chaos, seed, epoch_ms, always_on, lineup_json, kind, grp, guide_json, options_json, info_json";
 
 fn channel_library_ids(conn: &Connection, channel_id: &str) -> Result<Vec<i64>> {
     let mut st = conn.prepare(
@@ -448,14 +452,15 @@ fn channel_library_ids(conn: &Connection, channel_id: &str) -> Result<Vec<i64>> 
 
 pub fn upsert_channel(conn: &Connection, c: &Channel) -> Result<()> {
     conn.execute(
-        "INSERT INTO channels (id, number, name, strategy, run_out, autopilot, chaos, seed, epoch_ms, always_on, lineup_json, kind, grp, guide_json, options_json)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+        "INSERT INTO channels (id, number, name, strategy, run_out, autopilot, chaos, seed, epoch_ms, always_on, lineup_json, kind, grp, guide_json, options_json, info_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
          ON CONFLICT(id) DO UPDATE SET
             number = excluded.number, name = excluded.name, strategy = excluded.strategy,
             run_out = excluded.run_out, autopilot = excluded.autopilot, chaos = excluded.chaos,
             seed = excluded.seed, epoch_ms = excluded.epoch_ms, always_on = excluded.always_on,
             lineup_json = excluded.lineup_json, kind = excluded.kind, grp = excluded.grp,
-            guide_json = excluded.guide_json, options_json = excluded.options_json",
+            guide_json = excluded.guide_json, options_json = excluded.options_json,
+            info_json = excluded.info_json",
         params![
             c.id,
             c.number as i64,
@@ -471,7 +476,8 @@ pub fn upsert_channel(conn: &Connection, c: &Channel) -> Result<()> {
             c.kind.as_str(),
             c.group,
             serde_json::to_string(&c.guide).unwrap_or_else(|_| "{}".into()),
-            serde_json::to_string(&c.options).unwrap_or_else(|_| "{}".into())
+            serde_json::to_string(&c.options).unwrap_or_else(|_| "{}".into()),
+            serde_json::to_string(&c.info).unwrap_or_else(|_| "{}".into())
         ],
     )?;
     conn.execute(
@@ -900,6 +906,7 @@ mod tests {
             kind: ChannelKind::Programming,
             group: None,
             guide: Default::default(),
+            info: Default::default(),
             options: Default::default(),
         }
     }

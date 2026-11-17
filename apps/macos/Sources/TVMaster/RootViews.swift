@@ -177,6 +177,7 @@ struct MainView: View {
                     case .live: LiveControlView()
                     case .channels: ChannelsView()
                     case .schedule: ScheduleView()
+                    case .dayparts: DaypartsView()
                     case .libraries: LibrariesView()
                     case .shows: ShowsView()
                     case .promos: PromosView()

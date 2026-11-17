@@ -199,6 +199,8 @@ impl Rig {
             defaults,
         });
         let spec = ChannelSpec {
+            dayparts: Default::default(),
+            info: None,
             id: "t".into(),
             name: "Test TV".into(),
             always_on: true,
@@ -399,6 +401,8 @@ async fn a_failing_extra_never_takes_the_programme_off_the_air() {
         defaults: None,
     });
     let spec = ChannelSpec {
+        dayparts: Default::default(),
+        info: None,
         id: "t".into(),
         name: "Test TV".into(),
         always_on: true,

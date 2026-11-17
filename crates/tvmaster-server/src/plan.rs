@@ -243,24 +243,40 @@ pub fn build_guide_with(
     let start = zone.floor_grid(now_ms, step.min(30 * 60_000));
     let window_ms = cfg.hours as i64 * 3_600_000;
 
-    // The channels to list: the ones the guide names, in its order, or all by number.
-    let programming = || {
+    // The channels to list: the ones the guide names, in its order, or all by number. Info
+    // channels are listed beside the programming ones.
+    let listable = || {
         channels
             .iter()
-            .filter(|c| c.kind == ChannelKind::Programming)
+            .filter(|c| matches!(c.kind, ChannelKind::Programming | ChannelKind::Info))
     };
     let listed: Vec<&Channel> = if cfg.channels.is_empty() {
-        programming().collect()
+        listable().collect()
     } else {
         cfg.channels
             .iter()
-            .filter_map(|id| programming().find(|c| &c.id == id))
+            .filter_map(|id| listable().find(|c| &c.id == id))
             .collect()
     };
 
     let mut rows = Vec::new();
     let mut ticker: Vec<String> = cfg.ticker.clone();
     for ch in listed {
+        if ch.kind == ChannelKind::Info {
+            // One long entry for the whole window: what the channel is.
+            rows.push(GuideRow {
+                id: ch.id.clone(),
+                number: ch.number,
+                name: ch.name.clone(),
+                cells: vec![GuideCell {
+                    start_ms: start,
+                    end_ms: start + window_ms,
+                    range: String::new(),
+                    title: ch.info.describe(),
+                }],
+            });
+            continue;
+        }
         let progs = programs(db, &ch.id, start, start + window_ms).unwrap_or_default();
         if cfg.ticker_options.now_on {
             if let (Some(now), _) = now_and_next(&progs, now_ms) {
@@ -314,6 +330,57 @@ pub fn build_guide_with(
         rows,
         ticker: ticker.join("   *   "),
     })
+}
+
+/// What is on now, and what is next, on every programming channel (for an info channel's "on
+/// tonight" pages), in the time zone and clock style of the info channel.
+pub fn tonight_rows(
+    db: &Connection,
+    info_channel: &str,
+    now_ms: i64,
+) -> Vec<tvmaster_playout::TonightRow> {
+    let Some(me) = tvmaster_db::get_channel(db, info_channel).ok().flatten() else {
+        return Vec::new();
+    };
+    let zone = Zone::parse(&me.lineup.timezone).unwrap_or_else(Zone::utc);
+    tonight_rows_in(db, &zone, me.info.hour12, now_ms)
+}
+
+/// The same, for a given time zone and clock style (a channel that is not saved yet).
+pub fn tonight_rows_in(
+    db: &Connection,
+    zone: &Zone,
+    hour12: bool,
+    now_ms: i64,
+) -> Vec<tvmaster_playout::TonightRow> {
+    let channels = tvmaster_db::list_channels(db).unwrap_or_default();
+    let mut rows = Vec::new();
+    for ch in channels
+        .iter()
+        .filter(|c| c.kind == ChannelKind::Programming)
+    {
+        let progs = programs(db, &ch.id, now_ms, now_ms + 12 * 3_600_000).unwrap_or_default();
+        let (now, next) = now_and_next(&progs, now_ms);
+        if now.is_none() && next.is_none() {
+            continue;
+        }
+        let title = |p: &Program| p.show.clone().unwrap_or_else(|| p.title.clone());
+        rows.push(tvmaster_playout::TonightRow {
+            number: ch.number,
+            channel: ch.name.clone(),
+            now: now.as_ref().map(title).unwrap_or_default(),
+            until: now
+                .as_ref()
+                .map(|p| clock_label(zone, p.end_ms, hour12))
+                .unwrap_or_default(),
+            next: next.as_ref().map(title).unwrap_or_default(),
+            at: next
+                .as_ref()
+                .map(|p| clock_label(zone, p.start_ms, hour12))
+                .unwrap_or_default(),
+        });
+    }
+    rows
 }
 
 /// "S01E02 - Title" for the on-screen programme card.
@@ -380,12 +447,7 @@ impl ScheduleSource for DbSchedule {
         let book = self.live.lock().unwrap_or_else(|p| p.into_inner());
         let station_look = {
             let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
-            let options = tvmaster_db::get_channel(&db, channel)
-                .ok()
-                .flatten()
-                .map(|c| c.options)
-                .unwrap_or_default();
-            crate::theme::alert_theme(&crate::theme::effective(&db, &options), channel)
+            crate::theme::alert_theme(&crate::theme::effective_at(&db, channel, now_ms()), channel)
         };
         crate::live::current(&book, channel, now_ms(), station_look)
     }
@@ -407,6 +469,11 @@ impl ScheduleSource for DbSchedule {
     fn guide_data(&self, channel: &str, now_ms: i64) -> Option<GuideData> {
         let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
         build_guide(&db, channel, now_ms)
+    }
+
+    fn tonight(&self, channel: &str, now_ms: i64) -> Vec<tvmaster_playout::TonightRow> {
+        let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
+        tonight_rows(&db, channel, now_ms)
     }
 
     fn upcoming(&self, channel: &str, after_ms: i64, limit: usize) -> Upcoming {
@@ -524,6 +591,7 @@ mod tests {
                 kind: Default::default(),
                 group: None,
                 guide: Default::default(),
+                info: Default::default(),
                 options: Default::default(),
             },
         )

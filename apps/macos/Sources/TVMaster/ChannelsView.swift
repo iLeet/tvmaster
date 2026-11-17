@@ -18,26 +18,34 @@ struct ChannelsView: View {
                 if model.channels.isEmpty {
                     Text("No channels yet. Create your first one to put something on air.").foregroundStyle(.secondary)
                 }
-                GlassGroup(spacing: 10) {
-                    VStack(spacing: 10) {
-                        ForEach(model.channels) { ch in
-                            HStack(spacing: 12) {
-                                NumberBadge(number: ch.number)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    HStack(spacing: 6) {
-                                        Text(ch.name).fontWeight(.semibold)
-                                        if ch.isGuide { Badge(text: "Guide") }
-                                        if ch.isTest { Badge(text: "Test pattern") }
-                                        Badge(text: ch.autopilot ? "Autopilot" : "Locked", color: ch.autopilot ? .green : .orange)
-                                        if let g = ch.group { Text(g).font(.caption).foregroundStyle(.secondary) }
+                ForEach(sections, id: \.title) { section in
+                    VStack(alignment: .leading, spacing: 8) {
+                        if sections.count > 1 {
+                            (Text(section.title).font(.title3.bold()) + Text("  \(section.about)").font(.callout).foregroundStyle(.secondary))
+                        }
+                        GlassGroup(spacing: 10) {
+                            VStack(spacing: 10) {
+                                ForEach(section.channels) { ch in
+                                    HStack(spacing: 12) {
+                                        NumberBadge(number: ch.number)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            HStack(spacing: 6) {
+                                                Text(ch.name).fontWeight(.semibold)
+                                                if ch.isGuide { Badge(text: "Guide") }
+                                                if ch.isInfo { Badge(text: "Info") }
+                                                if ch.isTest { Badge(text: "Test pattern") }
+                                                if ch.kind == .programming { Badge(text: ch.autopilot ? "Autopilot" : "Locked", color: ch.autopilot ? .green : .orange) }
+                                                if let g = ch.group { Text(g).font(.caption).foregroundStyle(.secondary) }
+                                            }
+                                            Text(summary(ch)).font(.callout).foregroundStyle(.secondary)
+                                        }
+                                        Spacer()
+                                        Button("Watch") { model.watch(ch) }.glassButton()
+                                        Button("Edit") { editing = ch }.glassButton()
                                     }
-                                    Text(summary(ch)).font(.callout).foregroundStyle(.secondary)
+                                    .padding(14).glassCard(cornerRadius: 20)
                                 }
-                                Spacer()
-                                Button("Watch") { model.watch(ch) }.glassButton()
-                                Button("Edit") { editing = ch }.glassButton()
                             }
-                            .padding(14).glassCard(cornerRadius: 20)
                         }
                     }
                 }
@@ -49,9 +57,23 @@ struct ChannelsView: View {
         .sheet(isPresented: $model.showNewChannel) { ChannelEditorSheet(channel: nil) }
     }
 
+    /// TV channels, info channels, the guide and test patterns, each under its own heading.
+    private var sections: [(title: String, about: String, channels: [Channel])] {
+        let defs: [(kind: ChannelKind, title: String, about: String)] = [
+            (.programming, "TV channels", "Shows from your libraries, on a schedule"),
+            (.info, "Info channels", "News, notices, what is on tonight, the time and pictures"),
+            (.guide, "Guide", "The scrolling listing of every channel"),
+            (.test, "Test patterns", ""),
+        ]
+        return defs
+            .map { d in (title: d.title, about: d.about, channels: model.channels.filter { $0.kind == d.kind }) }
+            .filter { !$0.channels.isEmpty }
+    }
+
     private func summary(_ ch: Channel) -> String {
         if ch.isGuide { return "\(ch.guide.hours)-hour live guide" }
         if ch.isTest { return "Test pattern" }
+        if ch.isInfo { return ch.infoSummary }
         let l = ch.lineupSummary
         return l.isEmpty ? "\(ch.strategy.label)\(ch.chaos > 0 ? " · chaos \(ch.chaos)%" : "")" : l
     }
@@ -78,6 +100,14 @@ struct ChannelEditorSheet: View {
     @State private var group = ""
     @State private var isGuide = false
     @State private var isTest = false
+    @State private var isInfo = false
+    /// The kind chosen for a new channel (nil = still choosing).
+    @State private var template: ChannelTemplate?
+    @State private var templates: ChannelTemplates?
+    /// An info channel's pages, read from the server's raw JSON.
+    @State private var info = InfoSettings()
+    @State private var infoOriginal = InfoSettings()
+    @State private var rawInfo: JSONValue?
     @State private var strategy: Strategy = .sequential
     @State private var runOut: RunOut = .keepGoing
     @State private var chaos = 0.0
@@ -89,7 +119,7 @@ struct ChannelEditorSheet: View {
     @State private var confirmProgressReset = false
     @State private var loaded = false
     @State private var tab: Tab = {
-        switch ProcessInfo.processInfo.environment["TVM_EDIT_TAB"] { case "picture": .picture; case "guide": .guide; case "programming": .programming; default: .general }
+        switch ProcessInfo.processInfo.environment["TVM_EDIT_TAB"] { case "picture": .picture; case "guide": .guide; case "programming": .programming; case "info": .info; default: .general }
     }()
     /// The channel's picture and sound settings, read from the server's raw JSON.
     @State private var ps = PictureSoundSettings()
@@ -105,28 +135,54 @@ struct ChannelEditorSheet: View {
     @State private var ls = LineupSettings()
     @State private var lsOriginal = LineupSettings()
     @State private var showNames: [String] = []
-    private enum Tab: String, CaseIterable { case general = "General", programming = "Programming", picture = "Picture & sound", breaks = "Breaks", guide = "Guide" }
-    private var tabs: [Tab] { isGuide ? [.general, .guide] : (isNew || isTest) ? [.general] : [.general, .programming, .picture, .breaks] }
+    private enum Tab: String, CaseIterable { case general = "General", programming = "Programming", picture = "Picture & sound", breaks = "Breaks", guide = "Guide", info = "Pages" }
+    private var tabs: [Tab] { isGuide ? [.general, .guide] : isInfo ? [.general, .info] : (isNew || isTest) ? [.general] : [.general, .programming, .picture, .breaks] }
 
     private var isNew: Bool { channel == nil }
     private var numberTaken: Bool { model.channels.contains { $0.number == number && $0.id != id } }
-    private var valid: Bool { !name.trimmingCharacters(in: .whitespaces).isEmpty && Format.isValidID(id) && number > 0 && !numberTaken && (!isGuide || gs.problem == nil) }
+    private var valid: Bool { !name.trimmingCharacters(in: .whitespaces).isEmpty && Format.isValidID(id) && number > 0 && !numberTaken && (!isGuide || gs.problem == nil) && (!isInfo || info.problem == nil) }
 
     var body: some View {
+        if isNew && template == nil && templates != nil {
+            VStack(spacing: 0) {
+                ChannelTemplateChooser(templates: templates!) { pick($0) }
+                HStack { Spacer(); Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction) }.padding(16)
+            }
+            .frame(width: 600, height: 680)
+        } else {
+            editor
+        }
+    }
+
+    /// Start a new channel from the kind that was chosen: its name, number and the settings that make it work.
+    private func pick(_ t: ChannelTemplate) {
+        template = t
+        name = t.suggestedName; id = t.suggestedId; idTouched = true
+        number = Format.nextFreeNumber(taken: model.channels.map(\.number))
+        if t.suggestedNumber > 0, !model.channels.contains(where: { $0.number == t.suggestedNumber }) { number = t.suggestedNumber }
+        isGuide = t.kind == "guide"; isTest = t.kind == "test"; isInfo = t.kind == "info"
+        if isTest { ps.offAirScreen = "bars"; ps.offAirTone = true }
+        if isInfo { rawInfo = t.body.get(["info"]); info = InfoSettings(info: rawInfo); infoOriginal = InfoSettings() }
+        tab = .general
+    }
+
+    private var editor: some View {
         VStack(spacing: 0) {
             if tabs.count > 1 {
                 Picker("", selection: $tab) { ForEach(tabs, id: \.self) { Text($0.rawValue).tag($0) } }
                     .pickerStyle(.segmented).labelsHidden().padding([.horizontal, .top], 16)
             }
-            if tab == .programming && !isGuide && !isNew && !isTest {
+            if tab == .info && isInfo {
+                InfoForm(info: $info, raw: rawInfo, id: isNew ? nil : id, name: name, feedSuggestions: templates?.feeds ?? [])
+            } else if tab == .programming && !isGuide && !isNew && !isTest && !isInfo {
                 if rawLineup == nil && !loadingRaw {
                     Text("This server did not send the channel's lineup. Update the TVMaster server.").foregroundStyle(.secondary).padding(30)
                 } else {
                     ProgrammingForm(ls: $ls, shows: showNames, libraries: model.libraries)
                 }
-            } else if tab == .breaks && !isGuide && !isNew && !isTest {
+            } else if tab == .breaks && !isGuide && !isNew && !isTest && !isInfo {
                 BreaksForm(ls: $ls, libraries: model.libraries, theme: ps.theme)
-            } else if tab == .picture && !isGuide && !isNew {
+            } else if tab == .picture && !isGuide && !isNew && !isInfo {
                 PictureSoundForm(ps: $ps, sys: model.system, testOnly: isTest, oldServer: rawOptions == nil && !loadingRaw, channelID: id, channelName: name, channelNumber: number)
             } else if tab == .guide && isGuide {
                 GuideForm(gs: $gs, id: id, name: name, raw: rawGuide)
@@ -141,8 +197,33 @@ struct ChannelEditorSheet: View {
                     TextField("Group", text: $group, prompt: Text("Kids, Movies, …"))
                     if isNew {
                         TextField("Id", text: $id).font(.body.monospaced())
-                        Picker("Kind", selection: Binding(get: { isGuide ? 2 : isTest ? 1 : 0 }, set: { isGuide = $0 == 2; isTest = $0 == 1; if isTest { ps.offAirScreen = "bars"; ps.offAirTone = true } })) {
-                            Text("Programming channel").tag(0); Text("Test pattern").tag(1); Text("Guide channel").tag(2)
+                        if let t = template {
+                            HStack {
+                                Badge(text: t.name)
+                                Text(t.about).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                                Spacer()
+                                Button("Choose a different kind") { template = nil }.glassButton()
+                            }
+                            if !t.needs.isEmpty {
+                                let words = ["libraries": "pick the libraries it draws from below", "feeds": "add a news feed on the Pages tab", "pages": "add your pages on the Pages tab", "music": "choose some music on the Pages tab"]
+                                Text("Before it is worth airing: " + t.needs.map { words[$0] ?? $0 }.joined(separator: "; ") + ".").font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+                if isInfo {
+                    Section("Info channel") {
+                        Text("An info channel has nothing to schedule: it draws its pages itself, round and round. Add and arrange them on the Pages tab. It appears on the guide, with what it is.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Button("Open the Pages tab") { tab = .info }.glassButton()
+                    }
+                    Section("Look") {
+                        Toggle("Follow the station theme", isOn: Binding(get: { ps.theme == nil }, set: { ps.theme = $0 ? nil : ThemeChoice() }))
+                        if ps.theme != nil {
+                            let t = Binding(get: { ps.theme ?? ThemeChoice() }, set: { ps.theme = $0 })
+                            ThemeChoiceEditorView(choice: t, autoName: "Per channel", autoAbout: "Colours made from this channel.")
+                        } else {
+                            Text("The pages use the look chosen under Appearance (and any day part's look).").font(.caption).foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -152,7 +233,7 @@ struct ChannelEditorSheet: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
-                if !isGuide && !isTest {
+                if !isGuide && !isTest && !isInfo {
                     Section("What it airs") {
                         let shows = model.libraries.filter { $0.kind == .shows }
                         if shows.isEmpty { Text("Add a TV shows library first.").foregroundStyle(.secondary) }
@@ -167,7 +248,7 @@ struct ChannelEditorSheet: View {
                         Picker("When a show runs out of episodes", selection: $runOut) { ForEach(RunOut.allCases) { Text($0.label).tag($0) } }
                     }
                 }
-                if !isGuide && !isTest && !isNew {
+                if !isGuide && !isTest && !isNew && !isInfo {
                     Section("Controls") {
                         Text("Act on this channel right now. None of these change your settings.").font(.caption).foregroundStyle(.secondary)
                         HStack {
@@ -190,10 +271,10 @@ struct ChannelEditorSheet: View {
                     }
                 }
                 Section("Running it") {
-                    Toggle("Autopilot (edits re-roll the future automatically)", isOn: $autopilot)
+                    if !isInfo { Toggle("Autopilot (edits re-roll the future automatically)", isOn: $autopilot) }
                     Toggle("Always on (keep encoding with no viewers)", isOn: $alwaysOn)
                 }
-                if let channel, !isGuide {
+                if let channel, !isGuide, !isInfo {
                     Section("More") {
                         Button("Edit time slots, specials and ads (Programming tab)") { tab = .programming }
                         Button("Seasons and rotations in the web admin…") { model.openInBrowser("/admin/#/channels/\(channel.id)?tab=programming") }
@@ -220,7 +301,7 @@ struct ChannelEditorSheet: View {
             }
             .padding(16)
         }
-        .frame(width: 600, height: (isGuide && tab == .guide) || tab == .programming ? 780 : 680)
+        .frame(width: 600, height: (isGuide && tab == .guide) || tab == .programming || tab == .info ? 780 : 680)
         .confirmationDialog("Delete “\(name)”?", isPresented: $confirmDelete) {
             Button("Delete channel", role: .destructive) { Task { await delete() } }
         } message: { Text("TVs tuned to it will lose the channel. Your files are not touched.") }
@@ -228,7 +309,7 @@ struct ChannelEditorSheet: View {
             guard !loaded else { return }
             loaded = true
             if let c = channel {
-                name = c.name; id = c.id; number = c.number; group = c.group ?? ""; isGuide = c.isGuide; isTest = c.isTest
+                name = c.name; id = c.id; number = c.number; group = c.group ?? ""; isGuide = c.isGuide; isTest = c.isTest; isInfo = c.isInfo
                 strategy = c.strategy; runOut = c.runOut; chaos = Double(c.chaos); autopilot = c.autopilot; alwaysOn = c.alwaysOn; libraryIDs = Set(c.libraryIds)
                 // Picture and sound live in parts of the channel the typed model does not carry: fetch it raw.
                 if let client = model.client, let raw = try? await client.channelRaw(c.id) {
@@ -237,6 +318,8 @@ struct ChannelEditorSheet: View {
                         gs = GuideSettings(guide: rawGuide)
                         gsOriginal = gs
                     } else {
+                        rawInfo = raw.get(["info"])
+                        if c.isInfo { info = InfoSettings(info: rawInfo); infoOriginal = info }
                         rawOptions = raw.get(["options"]); rawLineup = raw.get(["lineup"])
                         ps = PictureSoundSettings(options: rawOptions, lineup: rawLineup)
                         psOriginal = ps
@@ -249,6 +332,11 @@ struct ChannelEditorSheet: View {
             } else {
                 number = Format.nextFreeNumber(taken: model.channels.map(\.number))
                 libraryIDs = Set(model.libraries.filter { $0.kind == .shows }.map(\.id))
+                templates = try? await model.client?.channelTemplates()
+                if templates == nil || (templates?.templates.isEmpty ?? true) {
+                    // An older server has no creator: fall back to a plain TV channel.
+                    templates = nil
+                }
             }
         }
     }
@@ -259,13 +347,20 @@ struct ChannelEditorSheet: View {
         var f: [String: JSONValue] = [
             "id": .string(id), "number": .number(Double(number)), "name": .string(name.trimmingCharacters(in: .whitespaces)),
             "autopilot": .bool(autopilot), "always_on": .bool(alwaysOn),
-            "kind": .string(isGuide ? "guide" : isTest ? "test" : "programming"),
+            "kind": .string(isGuide ? "guide" : isTest ? "test" : isInfo ? "info" : "programming"),
         ]
         if !group.trimmingCharacters(in: .whitespaces).isEmpty { f["group"] = .string(group) }
         if isTest, isNew {
             f["options"] = ps.apply(to: nil)
         }
-        if !isGuide && !isTest {
+        if isInfo, isNew || info != infoOriginal {
+            if let p = info.problem { model.lastError = p; saving = false; return }
+            f["info"] = info.apply(to: rawInfo)
+        }
+        if isInfo, ps != psOriginal || (isNew && ps.theme != nil) {
+            f["options"] = ps.apply(to: rawOptions)
+        }
+        if !isGuide && !isTest && !isInfo {
             f["strategy"] = .string(strategy.rawValue); f["run_out"] = .string(runOut.rawValue)
             f["chaos"] = .number(chaos); f["library_ids"] = .array(libraryIDs.sorted().map { .number(Double($0)) })
         }
@@ -275,12 +370,12 @@ struct ChannelEditorSheet: View {
             f["guide"] = gs.apply(to: rawGuide)
         }
         // Only touch options and the sign-off hours when the user changed them.
-        if !isGuide, !isNew, ps != psOriginal, rawOptions != nil || rawLineup != nil || isTest {
+        if !isGuide, !isNew, !isInfo, ps != psOriginal, rawOptions != nil || rawLineup != nil || isTest {
             f["options"] = ps.apply(to: rawOptions)
             f["lineup"] = ps.apply(toLineup: rawLineup)
         }
         // Time slots, specials, ads and timing, when they were changed.
-        if !isGuide, !isTest, !isNew, ls != lsOriginal, rawLineup != nil {
+        if !isGuide, !isTest, !isNew, !isInfo, ls != lsOriginal, rawLineup != nil {
             if let p = ls.problem { model.lastError = p; saving = false; return }
             f["lineup"] = ls.apply(to: f["lineup"] ?? rawLineup)
             // A channel with time slots is a TV-schedule channel.
@@ -363,9 +458,7 @@ struct PictureSoundForm: View {
                 Toggle("Follow the station theme", isOn: Binding(get: { ps.theme == nil }, set: { ps.theme = $0 ? nil : ThemeChoice() }))
                 if ps.theme != nil {
                     let t = Binding(get: { ps.theme ?? ThemeChoice() }, set: { ps.theme = $0 })
-                    ThemePickerView(theme: t.theme, primary: t.primary, accent: t.accent, background: t.background,
-                                    autoName: "Per channel", autoAbout: "Colours made from this channel.")
-                    StylePickerView(style: t.style)
+                    ThemeChoiceEditorView(choice: t, autoName: "Per channel", autoAbout: "Colours made from this channel.")
                     ThemePreviewView(choice: ps.theme ?? ThemeChoice(), what: "card", id: channelID, name: channelName, number: channelNumber)
                 } else {
                     Text("Cards, break screens, the stand-by screen, alerts and on-screen graphics use the look chosen under Appearance.").font(.caption).foregroundStyle(.secondary)
@@ -445,6 +538,49 @@ struct LanguageList: View {
                 }
             }
             .fixedSize()
+        }
+    }
+}
+
+
+/// The first step of a new channel: what kind is it? Each choice starts the editor with a sensible name, number and settings.
+struct ChannelTemplateChooser: View {
+    let templates: ChannelTemplates
+    var onPick: (ChannelTemplate) -> Void
+    private let about = [
+        "TV channels": "Plays shows from your libraries on a schedule.",
+        "Guide": "Lists every channel, TV and info, with what is on now and next.",
+        "Info channels": "Nothing to schedule: pages that draw themselves.",
+        "Test patterns": "Colour bars, snow, a card or a picture, all day.",
+    ]
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                PageHeader(title: "New channel", subtitle: "What kind of channel is it?")
+                ForEach(templates.groups, id: \.self) { g in
+                    VStack(alignment: .leading, spacing: 8) {
+                        (Text(g).font(.title3.bold()) + Text("  \(about[g] ?? "")").font(.callout).foregroundStyle(.secondary))
+                        ForEach(templates.templates.filter { $0.group == g }) { t in
+                            Button { onPick(t) } label: {
+                                HStack(spacing: 12) {
+                                    NumberBadge(number: t.suggestedNumber)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(t.name).fontWeight(.semibold)
+                                        Text(t.about).font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.leading)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "chevron.right").foregroundStyle(.secondary)
+                                }
+                                .padding(12).contentShape(Rectangle())
+                                .foregroundStyle(.primary)
+                            }
+                            .buttonStyle(.plain).glassCard(cornerRadius: 16)
+                        }
+                    }
+                }
+            }
+            .padding(24)
         }
     }
 }

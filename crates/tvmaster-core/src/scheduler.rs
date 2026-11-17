@@ -10,6 +10,7 @@ use crate::ads::{expand_slot, loose_budget_ms, AdConfig, AdInputs, BumperKind, S
 use crate::catalog::{Catalog, Ep};
 use crate::clock::Zone;
 use crate::cursor::EpisodeCursor;
+use crate::daypart::{DaypartSet, PartBreaks, Rating};
 use crate::lineup::{Advance, CBlock, Compiled, Lineup, Order, Source};
 use crate::model::{RunOutPolicy, Strategy};
 use crate::rng::{fnv1a, shuffled, splitmix64, GOLDEN};
@@ -64,6 +65,8 @@ pub struct SchedConfig<'a> {
     pub seed: u64,
     /// When the channel "started broadcasting" (anchors rotation weeks).
     pub epoch_ms: i64,
+    /// The station's day parts that cover this channel: rating limits and clean (no-break) hours.
+    pub dayparts: Option<&'a DaypartSet>,
 }
 
 fn scoped(base: String, scope: Option<&str>) -> String {
@@ -146,6 +149,9 @@ fn default_fill(cfg: &SchedConfig, has_blocks: bool) -> Source {
 }
 
 struct Gen<'a> {
+    /// The rating limit in force for the slot being filled: the highest rating, and whether
+    /// unrated shows may air.
+    cap: Option<(Rating, bool)>,
     cfg: &'a SchedConfig<'a>,
     zone: Zone,
     cursors: &'a mut Cursors,
@@ -161,6 +167,9 @@ impl Gen<'_> {
     }
 
     fn pick_show(&mut self, show: &str, scope: Option<&str>) -> Option<Pick> {
+        if !self.cfg.catalog.allowed(&show.to_lowercase(), self.cap) {
+            return None;
+        }
         let eps = &self.cfg.catalog.show(show)?.eps;
         let key = scoped(format!("show:{}", show.to_lowercase()), scope);
         let wrap = self.wrap();
@@ -185,6 +194,12 @@ impl Gen<'_> {
                 .filter(|k| catalog.by_key(k).is_some())
                 .collect()
         };
+        // Under a rating limit only the shows that may air are in the pool, and it keeps its own
+        // place so the rest of the week's rotation is not disturbed.
+        let keys: Vec<String> = keys
+            .into_iter()
+            .filter(|k| catalog.allowed(k, self.cap))
+            .collect();
         if keys.is_empty() {
             return None;
         }
@@ -192,6 +207,12 @@ impl Gen<'_> {
             "all".to_string()
         } else {
             format!("{:016x}", fnv1a(&keys.join("|")))
+        };
+        let ident = match self.cap {
+            Some((max, unrated)) => {
+                format!("{ident}@{}{}", max.as_str(), if unrated { "+" } else { "" })
+            }
+            None => ident,
         };
         let key = scoped(format!("pool:{order:?}:{ident}"), scope);
         let pos = {
@@ -339,6 +360,7 @@ pub fn generate(
     let fill = default_fill(cfg, has_blocks);
     let grid = compiled.grid_ms;
     let mut gen = Gen {
+        cap: None,
         cfg,
         zone: compiled.zone,
         cursors,
@@ -377,6 +399,13 @@ pub fn generate(
             t = end;
             continue;
         }
+        let part = cfg.dayparts.and_then(|d| d.at(t));
+        gen.cap = part.and_then(|p| p.max_rating.map(|r| (r, p.allow_unrated)));
+        let ads_cfg = if part.is_some_and(|p| p.breaks == PartBreaks::Off) {
+            None
+        } else {
+            ads_cfg
+        };
         let active = resolve(&compiled, t);
         let (src, scope, label) = match &active {
             Some(a) => (
@@ -514,6 +543,7 @@ pub fn rebuild_reservations(kept: &[ScheduledItem], cursors: &mut Cursors) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ads::AdClip;
     use crate::catalog::MediaRef;
     use crate::lineup::SignOff;
 
@@ -559,6 +589,7 @@ mod tests {
         seed: u64,
         epoch: i64,
         ads: Option<AdInputs>,
+        parts: Option<DaypartSet>,
     }
 
     impl Setup {
@@ -572,6 +603,7 @@ mod tests {
                 seed: 7,
                 epoch: at("UTC", "2026-11-16 00:00"),
                 ads: None,
+                parts: None,
             }
         }
 
@@ -585,6 +617,7 @@ mod tests {
                 chaos: self.chaos,
                 seed: self.seed,
                 epoch_ms: self.epoch,
+                dayparts: self.parts.as_ref(),
             };
             generate(&cfg, cursors, from, to)
         }
@@ -1425,5 +1458,156 @@ mod tests {
         }
         .validate()
         .is_ok());
+    }
+
+    fn rated(shows: &[(&str, u32, Option<Rating>)]) -> Catalog {
+        let plain: Vec<(&str, u32)> = shows.iter().map(|(n, c, _)| (*n, *c)).collect();
+        let ratings = shows
+            .iter()
+            .filter_map(|(n, _, r)| r.map(|r| (n.to_lowercase(), r)))
+            .collect();
+        catalog(&plain).with_ratings(ratings)
+    }
+
+    fn kids_morning(max: Rating, unrated: bool, breaks: PartBreaks) -> DaypartSet {
+        let p = crate::daypart::Daypart {
+            name: "Kids".into(),
+            days: vec![],
+            start: "06:00".into(),
+            end: "09:00".into(),
+            channels: vec![],
+            max_rating: Some(max),
+            allow_unrated: unrated,
+            breaks,
+            look: None,
+        };
+        DaypartSet::new(Zone::utc(), &[p], "c")
+    }
+
+    #[test]
+    fn a_rating_limit_keeps_unsuitable_shows_out_of_the_morning() {
+        let cat = rated(&[
+            ("Toons", 20, Some(Rating::AllAges)),
+            ("Crime", 20, Some(Rating::Adult)),
+            ("Mystery", 20, None),
+        ]);
+        let mut s = Setup::new(cat, lineup(r#"{"grid_minutes":30}"#));
+        s.strategy = Strategy::Sequential;
+        s.parts = Some(kids_morning(Rating::AllAges, false, PartBreaks::Normal));
+        let from = at("UTC", "2026-11-16 05:00");
+        let items = s.gen(&mut Cursors::new(), from, from + 8 * HOUR);
+        let morning = (at("UTC", "2026-11-16 06:00"), at("UTC", "2026-11-16 09:00"));
+        let mut early = 0;
+        let mut later_other = 0;
+        for it in shows(&items) {
+            let id = it.media_id.unwrap();
+            if it.start_ms >= morning.0 && it.start_ms < morning.1 {
+                early += 1;
+                assert!(
+                    (1..=20).contains(&id),
+                    "only Toons in the morning, got {id}"
+                );
+            } else if id > 100 {
+                later_other += 1;
+            }
+        }
+        assert_eq!(early, 6);
+        assert!(later_other > 0, "the rest of the day is unchanged");
+    }
+
+    #[test]
+    fn unrated_shows_air_under_a_limit_only_when_allowed() {
+        let cat = rated(&[("Toons", 20, Some(Rating::Kids)), ("Mystery", 20, None)]);
+        let mut s = Setup::new(cat, lineup(r#"{"grid_minutes":30}"#));
+        s.strategy = Strategy::Sequential;
+        let from = at("UTC", "2026-11-16 06:00");
+        s.parts = Some(kids_morning(Rating::Kids, true, PartBreaks::Normal));
+        let with = s.gen(&mut Cursors::new(), from, from + 3 * HOUR);
+        assert!(ids(&with).iter().any(|i| *i > 100));
+        s.parts = Some(kids_morning(Rating::Kids, false, PartBreaks::Normal));
+        let without = s.gen(&mut Cursors::new(), from, from + 3 * HOUR);
+        assert!(ids(&without).iter().all(|i| *i <= 100));
+        // A rating above the limit never airs, even when unrated shows may.
+        s.parts = Some(kids_morning(Rating::AllAges, true, PartBreaks::Normal));
+        let strict = s.gen(&mut Cursors::new(), from, from + 3 * HOUR);
+        assert!(ids(&strict).iter().all(|i| *i > 100));
+    }
+
+    #[test]
+    fn nothing_suitable_leaves_the_slot_on_the_test_screen() {
+        let cat = rated(&[("Crime", 20, Some(Rating::Adult))]);
+        let mut s = Setup::new(cat, lineup(r#"{"grid_minutes":30}"#));
+        s.strategy = Strategy::Sequential;
+        s.parts = Some(kids_morning(Rating::AllAges, false, PartBreaks::Normal));
+        let from = at("UTC", "2026-11-16 06:00");
+        let items = s.gen(&mut Cursors::new(), from, from + 2 * HOUR);
+        assert!(shows(&items).is_empty());
+        assert!(items.iter().all(|i| i.kind == ItemKind::Filler));
+        assert_contiguous(&items);
+    }
+
+    #[test]
+    fn a_show_named_in_a_block_is_held_back_when_it_is_too_strong() {
+        let cat = rated(&[
+            ("Crime", 20, Some(Rating::Adult)),
+            ("Toons", 20, Some(Rating::AllAges)),
+        ]);
+        let l = lineup(
+            r#"{"grid_minutes":30,"blocks":[{"name":"Morning","start":"06:00","end":"09:00","source":{"type":"show","show":"Crime"}}]}"#,
+        );
+        let mut s = Setup::new(cat, l);
+        s.parts = Some(kids_morning(Rating::AllAges, false, PartBreaks::Normal));
+        let from = at("UTC", "2026-11-16 06:00");
+        let items = s.gen(&mut Cursors::new(), from, from + 3 * HOUR);
+        // The block's show is not allowed, so the fallback takes over, and it is filtered too.
+        assert!(ids(&items).iter().all(|i| *i > 100), "{:?}", ids(&items));
+    }
+
+    #[test]
+    fn a_rating_limit_does_not_use_up_the_regular_rotation() {
+        let cat = rated(&[
+            ("Toons", 20, Some(Rating::AllAges)),
+            ("Crime", 20, Some(Rating::Adult)),
+        ]);
+        let mut s = Setup::new(cat, lineup(r#"{"grid_minutes":30}"#));
+        s.strategy = Strategy::Sequential;
+        s.parts = Some(kids_morning(Rating::AllAges, false, PartBreaks::Normal));
+        let mut cur = Cursors::new();
+        let from = at("UTC", "2026-11-16 06:00");
+        let _ = s.gen(&mut cur, from, from + 3 * HOUR);
+        // The evening starts at the very beginning of the unrestricted rotation (Crime, then Toons).
+        let eve = at("UTC", "2026-11-16 18:00");
+        let items = s.gen(&mut cur, eve, eve + HOUR);
+        assert_eq!(ids(&items), vec![101, 1]);
+    }
+
+    #[test]
+    fn clean_hours_have_no_commercials() {
+        let mut s = Setup::new(catalog(&[("A", 20)]), lineup(r#"{"grid_minutes":30}"#));
+        s.strategy = Strategy::Sequential;
+        let from = at("UTC", "2026-11-16 06:00");
+        let mut l = lineup(r#"{"grid_minutes":30}"#);
+        l.ads = Some(serde_json::from_str("{}").unwrap());
+        s.lineup = l;
+        s.ads = Some(AdInputs {
+            pool: crate::ads::AdPool {
+                ads: (0..40)
+                    .map(|i| AdClip {
+                        id: 900 + i,
+                        dur_ms: 30_000,
+                        year: None,
+                    })
+                    .collect(),
+                clips: vec![],
+            },
+            ..Default::default()
+        });
+        s.parts = None;
+        let with = s.gen(&mut Cursors::new(), from, from + 3 * HOUR);
+        assert!(with.iter().any(|i| i.kind == ItemKind::Commercial));
+        s.parts = Some(kids_morning(Rating::Adult, true, PartBreaks::Off));
+        let clean = s.gen(&mut Cursors::new(), from, from + 3 * HOUR);
+        assert!(clean.iter().all(|i| i.kind != ItemKind::Commercial));
+        assert_contiguous(&clean);
     }
 }

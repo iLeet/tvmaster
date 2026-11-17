@@ -27,11 +27,15 @@ pub enum AlertTheme {
     Mono,
     /// Smooth, in the station theme's own colours.
     Station(Palette),
+    /// For children: soft colours and friendly words, nothing flashing. Takes the station
+    /// theme's colours.
+    Gentle(Palette),
 }
 
 impl AlertTheme {
-    pub const ALL: [(&'static str, &'static str); 8] = [
+    pub const ALL: [(&'static str, &'static str); 9] = [
         ("retro", "Retro"),
+        ("gentle", "Gentle (for children)"),
         ("modern", "Modern"),
         ("midnight", "Midnight"),
         ("graphite", "Graphite"),
@@ -44,6 +48,7 @@ impl AlertTheme {
     pub fn parse(s: &str) -> Option<Self> {
         Some(match s {
             "retro" => Self::Retro,
+            "gentle" => Self::Gentle(Palette::kids()),
             "modern" => Self::Modern,
             "midnight" => Self::Midnight,
             "graphite" => Self::Graphite,
@@ -64,7 +69,7 @@ impl AlertTheme {
             Self::Forest => Palette::forest(),
             Self::Berry => Palette::berry(),
             Self::Mono => Palette::mono(),
-            Self::Station(p) => p,
+            Self::Station(p) | Self::Gentle(p) => p,
         }
     }
 }
@@ -110,6 +115,23 @@ impl Severity {
         }
     }
 
+    /// The same, in words and colours that will not frighten a child.
+    fn gentle_accent(self) -> Rgb {
+        match self {
+            Self::Emergency => [255, 128, 104],
+            Self::Warning => [255, 192, 48],
+            Self::Info => [72, 164, 236],
+        }
+    }
+
+    fn gentle_label(self) -> &'static str {
+        match self {
+            Self::Emergency => "IMPORTANT MESSAGE",
+            Self::Warning => "HEADS UP",
+            Self::Info => "GOOD TO KNOW",
+        }
+    }
+
     fn mark(self) -> &'static str {
         match self {
             Self::Info => "i",
@@ -140,6 +162,29 @@ impl AlertStyle {
 pub struct AlertLook {
     pub theme: AlertTheme,
     pub severity: Severity,
+}
+
+impl AlertLook {
+    /// Soft colours and words, and nothing flashing.
+    pub fn gentle(&self) -> bool {
+        matches!(self.theme, AlertTheme::Gentle(_))
+    }
+
+    pub fn accent(&self) -> Rgb {
+        if self.gentle() {
+            self.severity.gentle_accent()
+        } else {
+            self.severity.accent()
+        }
+    }
+
+    fn label(&self) -> &'static str {
+        if self.gentle() {
+            self.severity.gentle_label()
+        } else {
+            self.severity.label()
+        }
+    }
 }
 
 /// Ink that reads on `bg`.
@@ -255,12 +300,12 @@ pub fn alert_screen(look: &AlertLook, event: &str, message: &str, t: f32) -> Can
         return crate::retro_alert(look.severity, event, message, t);
     }
     let pal = look.theme.palette();
-    let acc = look.severity.accent();
+    let acc = look.accent();
     let acc_ink = ink_on(acc);
     let mut c = Canvas::new(WIDTH * 2, HEIGHT * 2);
     vgrad(&mut c, pal.bg_top, pal.bg_bottom);
     // The header band.
-    let flash = (t * 1.6) as i64 % 2 == 0;
+    let flash = look.gentle() || (t * 1.6) as i64 % 2 == 0;
     rect(
         &mut c,
         0,
@@ -275,15 +320,7 @@ pub fn alert_screen(look: &AlertLook, event: &str, message: &str, t: f32) -> Can
     );
     disc(&mut c, 88, 60, 34, acc_ink);
     centred(&mut c, 88, 28, look.severity.mark(), 54.0, Face::Bold, acc);
-    draw(
-        &mut c,
-        150,
-        30,
-        look.severity.label(),
-        52.0,
-        Face::Bold,
-        acc_ink,
-    );
+    draw(&mut c, 150, 30, look.label(), 52.0, Face::Bold, acc_ink);
     // The event, as large as fits.
     let ink = pal.text_now;
     let body_ink = pal.text;
@@ -324,7 +361,7 @@ pub fn alert_screen(look: &AlertLook, event: &str, message: &str, t: f32) -> Can
     rect(&mut c, 0, 636, 1280, 84, acc);
     let crawl = format!("{}        •        ", message.replace('\n', " "));
     let w = (text::width(Face::Bold, &crawl, 38.0) as i32).max(1);
-    let x0 = -(((t * 200.0) as i32) % w);
+    let x0 = -(((t * if look.gentle() { 110.0 } else { 200.0 }) as i32) % w);
     let mut x = x0;
     while x < 1280 {
         draw(&mut c, x, 660, &crawl, 38.0, Face::Bold, acc_ink);
@@ -425,7 +462,7 @@ impl Rgba {
 /// The bar for a picture `width` pixels wide.
 pub fn alert_bar(look: &AlertLook, event: &str, message: &str, width: u32) -> AlertBar {
     let k = width as f32 / 1280.0;
-    let acc = look.severity.accent();
+    let acc = look.accent();
     let acc_ink = ink_on(acc);
     let crawl_text = format!("{}        •        ", message.replace('\n', " "));
     if look.theme == AlertTheme::Retro {
@@ -449,7 +486,7 @@ pub fn alert_bar(look: &AlertLook, event: &str, message: &str, width: u32) -> Al
     r.fill(0, 0, (14.0 * k) as i32, bar_h as i32, acc, 255);
     // The label chip, then the event.
     let chip_px = 26.0 * k;
-    let label = look.severity.label();
+    let label = look.label();
     let chip_w = text::width(Face::Bold, label, chip_px) as i32 + (36.0 * k) as i32;
     let (cx, cy, ch) = ((36.0 * k) as i32, (12.0 * k) as i32, (40.0 * k) as i32);
     r.fill(cx, cy, chip_w, ch, acc, 255);
@@ -491,7 +528,7 @@ pub fn alert_bar(look: &AlertLook, event: &str, message: &str, width: u32) -> Al
 
 fn retro_bar(look: &AlertLook, event: &str, crawl_text: &str, width: u32) -> AlertBar {
     // Drawn in 640-wide points and scaled with the picture, like the other pixel graphics.
-    let acc = look.severity.accent();
+    let acc = look.accent();
     let scale = (width / 640).max(1) as i32;
     let (w, bar_h, band_h) = (width as i32, 56 * scale, 16 * scale);
     let mut c = Canvas::new(w as usize, bar_h as usize);
@@ -500,7 +537,7 @@ fn retro_bar(look: &AlertLook, event: &str, crawl_text: &str, width: u32) -> Ale
     c.rect(0, bar_h - band_h, w, band_h, acc);
     c.rect(0, 0, w, 2 * scale, WHITE);
     c.rect(0, 0, 6 * scale, bar_h, acc);
-    let label = look.severity.label();
+    let label = look.label();
     c.text(12 * scale, 5 * scale, label, scale, WHITE);
     let mut ev: String = event.to_uppercase();
     let max = ((w - 24 * scale) / (8 * 2 * scale)).max(4) as usize;
@@ -594,5 +631,49 @@ pub(crate) fn blit_png(c: &mut Canvas, g: &Graphic, x: i32, y: i32) {
                 px[i + 3],
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod gentle_tests {
+    use super::*;
+
+    fn look(theme: AlertTheme, severity: Severity) -> AlertLook {
+        AlertLook { theme, severity }
+    }
+
+    #[test]
+    fn a_gentle_alert_is_soft_in_colour_words_and_movement() {
+        let gentle = look(AlertTheme::Gentle(Palette::kids()), Severity::Emergency);
+        let normal = look(AlertTheme::Station(Palette::kids()), Severity::Emergency);
+        assert!(gentle.gentle() && !normal.gentle());
+        assert_ne!(gentle.accent(), normal.accent());
+        // Never the hard emergency red, whatever the severity.
+        for sev in [Severity::Emergency, Severity::Warning, Severity::Info] {
+            let c = look(AlertTheme::Gentle(Palette::kids()), sev).accent();
+            assert!(c[1] >= 120 || c[2] >= 200, "{sev:?} is too harsh: {c:?}");
+        }
+        assert_eq!(gentle.label(), "IMPORTANT MESSAGE");
+        assert_eq!(
+            look(AlertTheme::Gentle(Palette::kids()), Severity::Warning).label(),
+            "HEADS UP"
+        );
+        assert_eq!(normal.label(), "EMERGENCY ALERT");
+        // Nothing flashes: the header is the same colour a moment apart.
+        let (a, b) = (
+            alert_screen(&gentle, "Storm", "Stay inside.", 0.0),
+            alert_screen(&gentle, "Storm", "Stay inside.", 0.7),
+        );
+        assert_eq!(
+            a.px[3 * (10 * a.w + 10)..][..3],
+            b.px[3 * (10 * b.w + 10)..][..3]
+        );
+        // Both bar and screen draw.
+        let bar = alert_bar(&gentle, "Storm", "Stay inside.", 1280);
+        assert!(bar.bar.w == 1280 && !bar.bar.png.is_empty());
+        assert_eq!(
+            AlertTheme::parse("gentle").map(|t| look(t, Severity::Info).gentle()),
+            Some(true)
+        );
     }
 }

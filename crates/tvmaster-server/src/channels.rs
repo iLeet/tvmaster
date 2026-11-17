@@ -136,6 +136,8 @@ pub struct ChannelInput {
     kind: Option<ChannelKind>,
     group: Option<String>,
     guide: Option<GuideConfig>,
+    /// Pages, feeds, ticker and music of an info channel.
+    info: Option<tvmaster_core::InfoConfig>,
     /// Audio tracks, subtitles, picture and on-screen graphics. Replaces the old settings as a whole.
     options: Option<tvmaster_core::ChannelOptions>,
 }
@@ -148,6 +150,19 @@ fn valid_id(id: &str) -> bool {
             .map(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
             .unwrap_or(false)
         && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
+}
+
+/// Whether `path` is a picture file the station can draw.
+fn picture_ok(path: &str) -> bool {
+    let p = std::path::Path::new(path);
+    p.is_file()
+        && matches!(
+            p.extension()
+                .and_then(|e| e.to_str())
+                .map(str::to_lowercase)
+                .as_deref(),
+            Some("png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp")
+        )
 }
 
 /// Do these two channels differ in anything that changes what airs?
@@ -166,6 +181,7 @@ fn restart_needed(old: &Channel, new: &Channel) -> bool {
     old.options != new.options
         // A guide's colours, layout, video window and music are read when it starts.
         || old.guide != new.guide
+        || old.info != new.info
         || old.lineup.signoff != new.lineup.signoff
         || (new.options.overlay.bug.enabled && (old.name != new.name || old.number != new.number))
 }
@@ -313,6 +329,31 @@ pub async fn upsert(
             }
         }
     }
+    if let Some(i) = &body.info {
+        i.validate()
+            .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, e))?;
+        for id in &i.music_library_ids {
+            match tvmaster_db::get_library(&s.db(), *id)? {
+                Some(l) if l.kind == "music" => {}
+                _ => {
+                    return Err(ApiError::new(
+                        StatusCode::BAD_REQUEST,
+                        format!("library {id} is not a 'music' library"),
+                    ))
+                }
+            }
+        }
+        for (n, slide) in i.slides.iter().enumerate() {
+            if let Some(p) = slide.picture.as_deref().filter(|p| !p.trim().is_empty()) {
+                if !picture_ok(p) {
+                    return Err(ApiError::new(
+                        StatusCode::BAD_REQUEST,
+                        format!("page {}: '{p}' is not a png, jpg, gif, webp or bmp picture on this server", n + 1),
+                    ));
+                }
+            }
+        }
+    }
     let group = body
         .group
         .as_deref()
@@ -398,6 +439,10 @@ pub async fn upsert(
             options: body
                 .options
                 .or(existing.as_ref().map(|e| e.options.clone()))
+                .unwrap_or_default(),
+            info: body
+                .info
+                .or(existing.as_ref().map(|e| e.info.clone()))
                 .unwrap_or_default(),
         };
         tvmaster_db::upsert_channel(&db, &channel)?;

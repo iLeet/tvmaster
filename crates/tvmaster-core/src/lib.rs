@@ -5,6 +5,7 @@ mod ads;
 mod catalog;
 mod clock;
 mod cursor;
+mod daypart;
 mod lineup;
 mod model;
 mod options;
@@ -21,6 +22,7 @@ pub use ads::{
 pub use catalog::{Catalog, Ep, MediaRef, ShowEps};
 pub use clock::Zone;
 pub use cursor::EpisodeCursor;
+pub use daypart::{validate_parts, Daypart, DaypartSet, PartBreaks, Rating, MAX_PARTS};
 pub use lineup::{
     Advance, Block, CatchUp, Event, Lineup, Order, Season, SignOff, SignOffStyle, Source,
     OFF_AIR_LABEL, SIGNOFF_LABEL,
@@ -29,8 +31,8 @@ pub use model::{
     parse_hex_color, BackgroundStyle, Channel, ChannelKind, GraphicsStyle, GuideAppearance,
     GuideBackground, GuideColors, GuideConfig, GuideCorners, GuideHeader, GuideLayout, GuidePip,
     GuideScroll, GuideStyle, GuideTextSize, GuideTheme, GuideTicker, GuideTypeface, HeaderStyle,
-    PipAudio, PipMode, PipPlacement, PipSize, RunOutPolicy, Strategy, ThemeChoice, TickerPosition,
-    TickerSpeed, Tv,
+    InfoConfig, InfoSlide, PipAudio, PipMode, PipPlacement, PipSize, RunOutPolicy, SlideKind,
+    Strategy, ThemeChoice, TickerPosition, TickerSpeed, Tv,
 };
 pub use options::{
     Aspect, AudioPrefs, BugOptions, ChannelOptions, ClockOptions, Corner, Deinterlace, Effective,

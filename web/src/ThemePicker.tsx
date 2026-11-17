@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from './api';
 import { cleanColor } from './guide';
 import type { GraphicsStyle, ThemeCatalogue, ThemeChoice } from './types';
-import { Field, Segmented } from './ui';
+import { Field, Segmented, Toggle } from './ui';
 
 /** The themes the server offers (one list for every screen and every app). */
 export function useThemeCatalogue() {
@@ -15,7 +15,10 @@ export function useThemeCatalogue() {
   return cat;
 }
 
-export const emptyChoice = (): ThemeChoice => ({ theme: 'auto', colors: { primary: null, accent: null, background: null }, style: 'retro' });
+export const emptyChoice = (): ThemeChoice => ({ theme: 'auto', colors: { primary: null, accent: null, background: null }, style: 'retro', gentle: false });
+
+/** The look children's channels get: bright colours, smooth type and gentle alerts. */
+export const kidsChoice = (): ThemeChoice => ({ theme: 'kids', colors: { primary: null, accent: null, background: null }, style: 'modern', gentle: true });
 
 /** Swatches for every theme, and the two colours to pick for a custom one. */
 export function ThemePicker({ value, onChange, autoName, autoAbout }: {
@@ -75,6 +78,30 @@ export function StylePicker({ value, onChange }: { value: GraphicsStyle; onChang
     <Field label="Graphics style" hint={styles.find((s) => s.id === value)?.about}>
       <Segmented value={value} options={styles.map((s) => ({ value: s.id, label: s.name }))} onChange={onChange} />
     </Field>
+  );
+}
+
+/** Gentle alerts: soft colours and words, a chime, nothing flashing (always on in the kids theme). */
+export function GentleToggle({ value, onChange }: { value: ThemeChoice; onChange: (gentle: boolean) => void }) {
+  const kids = value.theme === 'kids';
+  return (
+    <Toggle
+      checked={kids || !!value.gentle}
+      disabled={kids}
+      onChange={onChange}
+      label={<span><strong>Gentle alerts</strong> <span className="dim small">{kids ? 'always on in the kids theme: ' : ''}soft colours and words, a soft chime, nothing flashing, so a child is not frightened</span></span>}
+    />
+  );
+}
+
+/** The whole look in one place: colours, style and gentle alerts. */
+export function ThemeChoiceEditor({ value, onChange, autoName, autoAbout }: { value: ThemeChoice; onChange: (v: ThemeChoice) => void; autoName?: string; autoAbout?: string }) {
+  return (
+    <div className="stack">
+      <ThemePicker value={value} onChange={(v) => onChange({ ...value, ...v, ...(v.theme === 'kids' && value.theme !== 'kids' ? { style: 'modern' as GraphicsStyle } : {}) })} autoName={autoName} autoAbout={autoAbout} />
+      <StylePicker value={value.style} onChange={(style) => onChange({ ...value, style })} />
+      <GentleToggle value={value} onChange={(gentle) => onChange({ ...value, gentle })} />
+    </div>
   );
 }
 

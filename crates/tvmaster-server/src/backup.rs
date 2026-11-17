@@ -381,6 +381,7 @@ fn apply(conn: &Connection, old_dir: &str, new_dir: &str) -> Result<(), String> 
             ("channels", "lineup_json"),
             ("channels", "guide_json"),
             ("channels", "options_json"),
+            ("channels", "info_json"),
             ("show_info", "json"),
             ("show_settings", "json"),
             ("meta", "value"),

@@ -191,6 +191,8 @@ async fn mixed_clips_slate_and_missing_file_become_one_continuous_stream() {
     cfg.readrate_burst = info.has_readrate_burst;
     let manager = Manager::new(cfg);
     let spec = || ChannelSpec {
+        dayparts: Default::default(),
+        info: None,
         id: "test".into(),
         name: "Test TV".into(),
         always_on: true,

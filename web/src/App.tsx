@@ -6,6 +6,8 @@ import type { AuthStatus } from './types';
 import { Btn, Card, Field, Icon, Spinner, ToastProvider, useToast } from './ui';
 import { Appearance } from './pages/Appearance';
 import { Channels } from './pages/Channels';
+import { NewChannel } from './pages/NewChannel';
+import { Dayparts } from './pages/Dayparts';
 import { ChannelEditor } from './pages/ChannelEditor';
 import { Dashboard } from './pages/Dashboard';
 import { LiveControl } from './pages/LiveControl';
@@ -23,6 +25,7 @@ const NAV: { path: string; label: string; icon: string }[] = [
   { path: 'live', label: 'Live control', icon: 'live' },
   { path: 'channels', label: 'Channels', icon: 'channels' },
   { path: 'schedule', label: 'Schedule', icon: 'calendar' },
+  { path: 'dayparts', label: 'Day parts', icon: 'clock' },
   { path: 'libraries', label: 'Libraries', icon: 'folder' },
   { path: 'shows', label: 'Shows', icon: 'tv' },
   { path: 'promos', label: 'Promos', icon: 'play' },
@@ -80,7 +83,7 @@ function Shell() {
       page = <Setup onDone={() => { setDismissed(true); setup.reload(); }} />;
       break;
     case 'channels':
-      page = route.parts[1] ? <ChannelEditor key={route.parts[1]} id={route.parts[1]} tab={route.query.get('tab') ?? 'general'} /> : <Channels />;
+      page = route.parts[1] === 'new' && !route.query.get('template') ? <NewChannel /> : route.parts[1] ? <ChannelEditor key={`${route.parts[1]}-${route.query.get('template') ?? ''}`} id={route.parts[1]} tab={route.query.get('tab') ?? 'general'} template={route.query.get('template')} /> : <Channels />;
       break;
     case 'schedule':
       page = <Schedule channelId={route.parts[1]} />;
@@ -90,6 +93,9 @@ function Shell() {
       break;
     case 'libraries':
       page = <Libraries />;
+      break;
+    case 'dayparts':
+      page = <Dayparts />;
       break;
     case 'promos':
       page = <Promos />;

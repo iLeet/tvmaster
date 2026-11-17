@@ -295,6 +295,32 @@ RGB="$(ffmpeg -hide_banner -loglevel error -i "$W/ticker.png" -vf "crop=1:1:700:
 api -XPOST "$H/api/v1/channels" -d "{\"id\":\"chaos\",\"number\":$N,\"name\":\"$NM\",\"options\":{\"overlay\":{\"ticker\":{\"enabled\":false}}}}" >/dev/null
 api -XPUT "$H/api/v1/theme" -d '{"theme":"auto","style":"retro"}' >/dev/null
 
+# ---- day parts, the kids look and info channels ---------------------------
+section "Day parts, kids look, info channels"
+api -XPUT "$H/api/v1/shows/info" -d '{"show":"Alpha","info":{"rating":"TV-Y"}}' >/dev/null
+api -XPUT "$H/api/v1/shows/info" -d '{"show":"Beta","info":{"rating":"TV-MA"}}' >/dev/null
+api -XPUT "$H/api/v1/dayparts" -d '{"parts":[{"name":"All day kids","start":"00:00","end":"24:00","max_rating":"kids","breaks":"off","look":{"theme":"kids","style":"modern","gentle":true}}]}' >/dev/null
+[[ "$(api "$H/api/v1/dayparts" | json "d['check'][0]['airing']")" == "1" ]] && ok "a rating limit lets one of two shows through" || bad "day part check"
+sleep 1
+# (what is about to air was already handed to the encoder, so look a little further ahead)
+FIRST="$(api "$H/api/v1/channels/chaos/schedule?hours=3" | python3 -c "
+import json,sys,time
+d=json.load(sys.stdin); items=d if isinstance(d,list) else d.get('items',d.get('programs',[]))
+later=time.time()*1000+600000
+print(sorted({i.get('show') or i.get('title') for i in items if i.get('start_ms',0)>later}))")"
+[[ "$FIRST" != *Beta* ]] && ok "the strong show is kept off the air under the limit ($FIRST)" || bad "rating limit on the schedule" "$FIRST"
+curl -s -o "$W/gentle.png" -XPOST "${auth[@]}" -H 'content-type: application/json' -d '{"what":"alert","theme":{"theme":"kids","style":"modern","gentle":true}}' "$H/api/v1/theme/preview"
+[[ -s "$W/gentle.png" ]] && ok "a gentle alert is drawn in the kids look" || bad "gentle alert preview"
+api -XPUT "$H/api/v1/dayparts" -d '{"parts":[]}' >/dev/null
+api -XPOST "$H/api/v1/channels" -d '{"id":"bulletin","number":88,"name":"Bulletin","kind":"info","info":{"slides":[{"kind":"text","title":"Garage sale","lines":["Saturday 8 to 2"]},{"kind":"clock"}],"seconds":4}}' >/dev/null
+[[ "$(api "$H/api/v1/channel-templates" | json "len(d['templates'])>=8")" == "True" ]] && ok "the channel creator offers every kind" || bad "channel templates"
+curl -s -D "$W/info.hdr" -o "$W/info.png" -XPOST "${auth[@]}" -H 'content-type: application/json' -d '{"info":{"slides":[{"kind":"text","title":"Garage sale","lines":["Saturday"]},{"kind":"clock"}]},"name":"Bulletin","page":1}' "$H/api/v1/info/preview"
+grep -qi 'x-page-count: 2' "$W/info.hdr" && [[ -s "$W/info.png" ]] && ok "an info page is drawn for the editor" || bad "info preview" "$(cat "$W/info.hdr" | head -3)"
+OUT="$(ffmpeg -hide_banner -loglevel error -y -t 5 -i "$H/stream/bulletin/index.m3u8?token=$TOKEN" -f null - 2>&1 | grep -v 'non monotonically' | tail -2)"
+[[ -z "$OUT" ]] && ok "an info channel streams and decodes" || bad "info channel stream" "$OUT"
+[[ "$(api "$H/iptv/guide.xml" 2>/dev/null | grep -c 'channel="bulletin"')" -ge 1 ]] && ok "and shows on the XMLTV guide" || bad "info channel in the XMLTV guide"
+api -XDELETE "$H/api/v1/channels/bulletin" >/dev/null
+
 # docker stop and systemd send SIGTERM: it must stop cleanly, like Ctrl-C does
 "$BIN" serve --bind "127.0.0.1:$HP2" --data-dir "$W/data3" >"$W/server4.log" 2>&1 &
 PID2=$!

@@ -123,7 +123,7 @@ export interface ChannelOptions {
   theme?: ThemeChoice | null;
 }
 
-export type GuideTheme = 'auto' | 'prevue' | 'amber' | 'phosphor' | 'neon' | 'sunset' | 'ocean' | 'slate' | 'paper' | 'midnight' | 'graphite' | 'snow' | 'forest' | 'berry' | 'mono' | 'custom';
+export type GuideTheme = 'auto' | 'prevue' | 'amber' | 'phosphor' | 'neon' | 'sunset' | 'ocean' | 'slate' | 'paper' | 'midnight' | 'graphite' | 'snow' | 'forest' | 'berry' | 'mono' | 'kids' | 'bubblegum' | 'lavender' | 'mint' | 'arctic' | 'cherry' | 'gold' | 'coffee' | 'custom';
 export interface TickerOptions {
   enabled: boolean;
   lines: string[];
@@ -137,7 +137,7 @@ export interface TickerOptions {
 export type GraphicsStyle = 'retro' | 'modern';
 export interface ThemeColors { primary: string | null; accent: string | null; background: string | null }
 /** One look for everything the station draws: guide, cards, bumpers, stand-by, alerts, graphics. */
-export interface ThemeChoice { theme: GuideTheme; colors: ThemeColors; style: GraphicsStyle }
+export interface ThemeChoice { theme: GuideTheme; colors: ThemeColors; style: GraphicsStyle; /** Soft alerts: gentle colours and words, a chime, nothing flashing. The kids theme is always gentle. */ gentle?: boolean }
 export interface ThemeCatalogue {
   themes: { id: GuideTheme; name: string; about: string; swatch: [string, string, string] }[];
   styles: { id: GraphicsStyle; name: string; about: string }[];
@@ -208,9 +208,11 @@ export interface Channel {
   always_on: boolean;
   library_ids: number[];
   lineup: Lineup;
-  kind: 'programming' | 'guide' | 'test';
+  kind: 'programming' | 'guide' | 'test' | 'info';
   group: string | null;
   guide: GuideConfig;
+  /** Pages, feeds, ticker and music of an info channel. */
+  info: InfoConfig;
   options: ChannelOptions;
 }
 
@@ -439,4 +441,60 @@ export interface PromoDraft {
   kind: 'sponsor' | 'coming_up' | 'slides';
   title: string; tagline: string; contact: string; slides: string[];
   seconds: number; picture: string | null; theme: ThemeChoice | null; look: string; sound: 'jingle' | 'music' | 'none'; music: string | null; year: number | null; name: string;
+}
+
+// ---- info channels, day parts and the channel creator
+
+export type SlideKind = 'text' | 'headlines' | 'tonight' | 'clock' | 'photo';
+export interface InfoSlide { kind: SlideKind; title: string; lines: string[]; picture: string | null; seconds: number | null }
+export interface InfoConfig {
+  about: string | null;
+  title: string | null;
+  slides: InfoSlide[];
+  seconds: number;
+  feeds: string[];
+  ticker: string[];
+  ticker_enabled: boolean;
+  clock: boolean;
+  hour12: boolean;
+  music_library_ids: number[];
+}
+
+export type Rating = 'all_ages' | 'kids' | 'pg' | 'teen' | 'adult';
+export interface Daypart {
+  name: string;
+  /** 0 = Monday ... 6 = Sunday; empty = every day. */
+  days: number[];
+  start: string;
+  end: string;
+  /** Channel ids; empty = every channel. */
+  channels: string[];
+  max_rating: Rating | null;
+  allow_unrated: boolean;
+  breaks: 'normal' | 'off';
+  look: ThemeChoice | null;
+}
+export interface DaypartState {
+  parts: Daypart[];
+  check: { shows: number; airing: number; held_back: number; unrated: number }[];
+  channels: { id: string; number: number; name: string }[];
+  ratings: { id: Rating; name: string; about: string }[];
+  presets: { about: string; part: Daypart }[];
+  timezone: string;
+}
+
+export interface ChannelTemplate {
+  id: string;
+  group: string;
+  kind: Channel['kind'];
+  name: string;
+  about: string;
+  needs: string[];
+  suggested: { id: string; number: number; name: string };
+  body: Record<string, unknown> & { info?: Partial<InfoConfig> };
+}
+export interface ChannelTemplates {
+  templates: ChannelTemplate[];
+  feeds: { name: string; url: string }[];
+  slides: { id: SlideKind; name: string; about: string }[];
 }

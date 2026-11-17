@@ -10,10 +10,18 @@ now-playing card, the channel logo and the clock.
 settings ("Look"); otherwise it follows the station.
 
 - **Theme:** Automatic (colours made from each channel, so every channel has its own look), Prevue, Amber,
-  Phosphor, Neon, Sunset, Ocean, Slate, Paper, Midnight, Graphite, Snow, Forest, Berry, Mono, or Custom
+  Phosphor, Neon, Sunset, Ocean, Slate, Paper, Midnight, Graphite, Snow, Forest, Berry, Mono, Kids, Bubblegum,
+  Lavender, Mint, Arctic, Cherry, Gold, Coffee, or Custom
   (a main colour, a highlight and optionally a background).
 - **Style:** *Retro* is chunky pixel type with scanlines at 640x360, scaled up. *Modern* is smooth type,
   soft shapes and gentle motion at 1280x720.
+
+- **Gentle alerts:** soft colours and friendlier words ("Heads up", "Important message", "Good to know"
+  instead of "Emergency alert"), a soft chime whatever sound the alert has, and nothing flashing, so a child is
+  not frightened. The **Kids** theme is always gentle; any other theme can switch it on
+  (`"gentle": true`). Gentle alerts are always drawn in the smooth style.
+
+A theme can also change with the time of day: see [DAYPARTS.md](DAYPARTS.md).
 
 A guide whose own theme is "follow the station" (the default) takes the station's theme and style. Pick a
 theme on the guide to give that guide its own colours. Alerts offer "Match the station theme" (the
@@ -23,7 +31,7 @@ default), or any of their own looks.
 
 - `GET /api/v1/theme` - the chosen theme (`station`), the themes (`themes`: id, name, about, three swatch
   colours) and the styles.
-- `PUT /api/v1/theme` - `{ "theme": "midnight", "colors": {"primary": null, "accent": null, "background": null}, "style": "modern" }`.
+- `PUT /api/v1/theme` - `{ "theme": "midnight", "colors": {"primary": null, "accent": null, "background": null}, "style": "modern", "gentle": false }`.
   Channels that follow it pick it up within seconds.
 - `POST /api/v1/theme/preview` - one graphic as a PNG. `what` is `card`, `bumper` (with `scene`:
   `brb`, `back_to`, `up_next`, `later_today`, `station_id`), `guide`, `alert` or `bar`; `theme` is a theme

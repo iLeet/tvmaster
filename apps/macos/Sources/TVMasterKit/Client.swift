@@ -133,6 +133,11 @@ public struct TVMasterClient: Sendable {
 
     @discardableResult
     func send(_ method: String, _ path: String, query: [URLQueryItem] = [], body: JSONValue? = nil) async throws -> Data {
+        try await sendHTTP(method, path, query: query, body: body).0
+    }
+
+    /// The same, with the response (for its headers).
+    func sendHTTP(_ method: String, _ path: String, query: [URLQueryItem] = [], body: JSONValue? = nil) async throws -> (Data, HTTPURLResponse) {
         let req = try makeRequest(method, path, query: query, body: body)
         let data: Data, response: URLResponse
         do {
@@ -151,7 +156,7 @@ public struct TVMasterClient: Sendable {
                 ?? "Server error \(http.statusCode)"
             throw TVMasterError.http(http.statusCode, message)
         }
-        return data
+        return (data, http)
     }
 
     func get<T: Decodable>(_ path: String, query: [URLQueryItem] = [], as type: T.Type = T.self) async throws -> T {
@@ -234,6 +239,31 @@ public struct TVMasterClient: Sendable {
 
     /// The station's themes (the one list every screen and app uses) and the one chosen.
     public func themeCatalogue() async throws -> ThemeCatalogue { try await get("/theme") }
+
+    // MARK: day parts, info channels and the channel creator
+
+    private func rawJSON(_ method: String, _ path: String, body: JSONValue? = nil) async throws -> JSONValue {
+        let data = try await send(method, path, body: body)
+        guard let any = try? JSONSerialization.jsonObject(with: data) else { throw TVMasterError.invalidResponse }
+        return JSONValue(any: any)
+    }
+
+    public func dayparts() async throws -> DaypartsState { DaypartsState(json: try await rawJSON("GET", "/dayparts")) }
+
+    @discardableResult
+    public func setDayparts(_ parts: [DaypartSetting]) async throws -> DaypartsState {
+        DaypartsState(json: try await rawJSON("PUT", "/dayparts", body: .object(["parts": .array(parts.map(\.json))])))
+    }
+
+    public func channelTemplates() async throws -> ChannelTemplates { ChannelTemplates(json: try await rawJSON("GET", "/channel-templates")) }
+
+    /// One page of an info channel as a PNG, and how many pages it has.
+    public func infoPreview(info: JSONValue, name: String, id: String?, page: Int) async throws -> (Data, Int) {
+        var body: [String: JSONValue] = ["info": info, "name": .string(name), "page": .number(Double(page))]
+        if let id { body["id"] = .string(id) }
+        let (data, http) = try await sendHTTP("POST", "/info/preview", body: .object(body))
+        return (data, Int(http.value(forHTTPHeaderField: "x-page-count") ?? "") ?? 1)
+    }
 
     /// The station's chosen theme, as the server wrote it.
     public func stationThemeJSON() async throws -> JSONValue? {

@@ -55,7 +55,11 @@ struct ShowDetailsSheet: View {
                     HStack(alignment: .top, spacing: 14) {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Rating").font(.headline)
-                            TextField("TV-PG, 14+, …", text: $info.rating).textFieldStyle(.roundedBorder).frame(width: 120)
+                            HStack(spacing: 6) {
+                                TextField("TV-PG, 14+, …", text: $info.rating).textFieldStyle(.roundedBorder).frame(width: 120)
+                                Menu("Pick…") { ForEach(["TV-Y", "TV-Y7", "TV-G", "TV-PG", "TV-14", "TV-MA", "G", "PG", "PG-13", "R", "C", "C8", "14+", "18+"], id: \.self) { r in Button(r) { info.rating = r } } }.fixedSize()
+                            }
+                            Text("Day parts use it to keep strong shows out of the morning.").font(.caption).foregroundStyle(.secondary)
                         }
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Tags").font(.headline)

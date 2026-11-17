@@ -100,6 +100,7 @@ fn world() -> World {
         kind: Default::default(),
         group: None,
         guide: Default::default(),
+        info: Default::default(),
         options: Default::default(),
     };
     let channels = vec![

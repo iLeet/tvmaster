@@ -29,7 +29,7 @@ use tvmaster_render::{
 
 /// How long the encoder may go without producing anything before the run is
 /// abandoned (a video window whose channel stalled would otherwise freeze the guide).
-const STALL: Duration = Duration::from_secs(8);
+pub(crate) const STALL: Duration = Duration::from_secs(8);
 /// After a window's channel fails, leave it alone this long.
 const PIP_RETRY: Duration = Duration::from_secs(30);
 /// How often the listing is re-read, in stream seconds.
@@ -59,6 +59,14 @@ pub fn palette_for(
         GuideTheme::Forest => Palette::forest(),
         GuideTheme::Berry => Palette::berry(),
         GuideTheme::Mono => Palette::mono(),
+        GuideTheme::Kids => Palette::kids(),
+        GuideTheme::Bubblegum => Palette::bubblegum(),
+        GuideTheme::Lavender => Palette::lavender(),
+        GuideTheme::Mint => Palette::mint(),
+        GuideTheme::Arctic => Palette::arctic(),
+        GuideTheme::Cherry => Palette::cherry(),
+        GuideTheme::Gold => Palette::gold(),
+        GuideTheme::Coffee => Palette::coffee(),
         GuideTheme::Custom => {
             let auto = Theme::for_channel(channel_id);
             let pick = |s: &Option<String>, fallback| {
@@ -209,7 +217,7 @@ pub fn guide_look_with_pictures(c: &GuideConfig, channel_id: &str, ffmpeg: &Path
 
 /// Stops a background task when dropped, so cancelling the guide (stopping the
 /// channel drops its future) also ends the tasks it started.
-struct StopOnDrop<T>(tokio::task::JoinHandle<T>);
+pub(crate) struct StopOnDrop<T>(pub(crate) tokio::task::JoinHandle<T>);
 
 impl<T> Drop for StopOnDrop<T> {
     fn drop(&mut self) {
@@ -219,7 +227,7 @@ impl<T> Drop for StopOnDrop<T> {
 
 /// The guide's music, converted to one format, with each track's length so a
 /// new run can pick up where the last one was.
-struct Music {
+pub(crate) struct Music {
     tracks: Vec<(PathBuf, f64)>,
     total: f64,
 }
@@ -249,7 +257,7 @@ fn parse_duration(banner: &str) -> Option<f64> {
     Some(h * 3600.0 + m * 60.0 + s)
 }
 
-async fn load_music(cfg: &EngineConfig, files: &[PathBuf]) -> Option<Music> {
+pub(crate) async fn load_music(cfg: &EngineConfig, files: &[PathBuf]) -> Option<Music> {
     let mut tracks = Vec::new();
     for f in files.iter().take(24) {
         if let Some(c) = cache_music(cfg, f).await {
@@ -266,7 +274,7 @@ async fn load_music(cfg: &EngineConfig, files: &[PathBuf]) -> Option<Music> {
 
 /// The concat list that plays the music from `offset` seconds in (wrapping
 /// round the whole set), so a later run carries on instead of starting over.
-fn music_list_text(m: &Music, offset: f64) -> String {
+pub(crate) fn music_list_text(m: &Music, offset: f64) -> String {
     let mut at = if m.total > 1.0 {
         offset.rem_euclid(m.total)
     } else {

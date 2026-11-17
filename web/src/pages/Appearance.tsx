@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { api, errorMessage } from '../api';
-import { PREVIEWS, StylePicker, ThemePicker, ThemePreview, emptyChoice, useThemeCatalogue, type PreviewKind } from '../ThemePicker';
+import { PREVIEWS, ThemeChoiceEditor, ThemePreview, emptyChoice, kidsChoice, useThemeCatalogue, type PreviewKind } from '../ThemePicker';
 import type { ThemeChoice } from '../types';
+import { href } from '../router';
 import { Badge, Btn, Card, Segmented, Spinner, useToast } from '../ui';
 
 /** One look for the whole station: the guide, the cards, the stand-by screen, alerts and on-screen graphics. */
@@ -39,8 +40,11 @@ export function Appearance() {
       <p className="dim">One look for everything the station draws itself: the guide, station and break cards, the stand-by and sign-off screens, alerts, the now-playing card, the channel logo and the clock. A channel can choose its own under its settings.</p>
       <Card className="stack">
         <h2>Theme</h2>
-        <ThemePicker value={draft} onChange={(v) => setDraft({ ...draft, ...v })} autoName="Per channel" autoAbout="Colours made from each channel, so every channel has its own look." />
-        <StylePicker value={draft.style} onChange={(style) => setDraft({ ...draft, style })} />
+        <ThemeChoiceEditor value={draft} onChange={setDraft} autoName="Per channel" autoAbout="Colours made from each channel, so every channel has its own look." />
+        <div className="row wrap">
+          <Btn small onClick={() => setDraft(kidsChoice())}>Use the kids look</Btn>
+          <span className="small dim">Bright colours, smooth type and gentle alerts. To use it only for some hours of the day, or some channels, set it on <a href={href('dayparts')}>Day parts</a> or on a channel.</span>
+        </div>
       </Card>
       <Card className="stack">
         <div className="row wrap between">

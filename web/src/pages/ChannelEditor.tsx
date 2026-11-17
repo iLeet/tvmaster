@@ -5,20 +5,22 @@ import { useQuery } from '../live';
 import { emptyGuide, guideProblem, withGuideDefaults } from '../guide';
 import { SCREENS, emptyOptions, langName, withDefaults } from '../options';
 import { href, navigate } from '../router';
-import type { Channel, ChannelOptions, ChannelView, GuideConfig, Library, RunOut, ShowSummary, Strategy, System } from '../types';
+import type { Channel, ChannelOptions, ChannelTemplates, ChannelView, GuideConfig, InfoConfig, Library, RunOut, ShowSummary, Strategy, System } from '../types';
 import { Badge, Btn, Card, Chips, ConfirmBtn, Field, Segmented, Spinner, Toggle, useToast } from '../ui';
 import { AdsEditor } from './AdsEditor';
 import { GuideEditor } from './GuideEditor';
+import { InfoEditor } from './InfoEditor';
+import { infoProblem, withInfoDefaults } from '../info';
 import { LineupEditor } from './LineupEditor';
 import { PictureSound } from './PictureSound';
-import { StylePicker, ThemePicker, ThemePreview, emptyChoice, useThemeCatalogue } from '../ThemePicker';
+import { ThemeChoiceEditor, ThemePreview, emptyChoice, useThemeCatalogue } from '../ThemePicker';
 
 interface Draft {
   id: string;
   number: number;
   name: string;
   group: string;
-  kind: 'programming' | 'guide' | 'test';
+  kind: 'programming' | 'guide' | 'test' | 'info';
   strategy: Strategy;
   run_out: RunOut;
   chaos: number;
@@ -27,6 +29,7 @@ interface Draft {
   library_ids: number[];
   lineup: Channel['lineup'];
   guide: GuideConfig;
+  info: InfoConfig;
   options: ChannelOptions;
 }
 
@@ -55,10 +58,10 @@ const RUN_OUT: { value: RunOut; label: string; help: string }[] = [
 
 const fromChannel = (c: Channel): Draft => ({
   id: c.id, number: c.number, name: c.name, group: c.group ?? '', kind: c.kind, strategy: c.strategy, run_out: c.run_out,
-  chaos: c.chaos, autopilot: c.autopilot, always_on: c.always_on, library_ids: c.library_ids, lineup: { ...c.lineup, signoff: c.lineup.signoff ?? null }, guide: withGuideDefaults(c.guide), options: withDefaults(c.options),
+  chaos: c.chaos, autopilot: c.autopilot, always_on: c.always_on, library_ids: c.library_ids, lineup: { ...c.lineup, signoff: c.lineup.signoff ?? null }, guide: withGuideDefaults(c.guide), info: withInfoDefaults(c.info), options: withDefaults(c.options),
 });
 
-export function ChannelEditor({ id, tab }: { id: string; tab: string }) {
+export function ChannelEditor({ id, tab, template }: { id: string; tab: string; template?: string | null }) {
   const isNew = id === 'new';
   const { say, attempt } = useToast();
   const station = useThemeCatalogue()?.station;
@@ -67,6 +70,8 @@ export function ChannelEditor({ id, tab }: { id: string; tab: string }) {
   const libs = useQuery(() => api.get<Library[]>('/libraries'));
   const shows = useQuery(() => api.get<ShowSummary[]>('/shows'));
   const sys = useQuery(() => api.get<System>('/system'));
+  const templates = useQuery(() => api.get<ChannelTemplates>('/channel-templates'));
+  const tpl = isNew ? templates.data?.templates.find((t) => t.id === (template ?? 'tv')) ?? null : null;
 
   const [draft, setDraft] = useState<Draft | null>(null);
   const [saved, setSaved] = useState('');
@@ -77,24 +82,28 @@ export function ChannelEditor({ id, tab }: { id: string; tab: string }) {
   // Fill the form once the data is in.
   useEffect(() => {
     if (draft) return;
-    if (isNew && all.data && sys.data) {
+    if (isNew && all.data && sys.data && templates.data) {
+      // A new channel starts from the kind chosen on the first screen: its name, the next free number and the settings that make it work.
+      const t = templates.data.templates.find((x) => x.id === (template ?? 'tv')) ?? templates.data.templates[0];
+      const b = t.body as Record<string, unknown>;
       const d: Draft = {
-        id: '', number: nextFreeNumber(all.data.map((c) => c.number)), name: '', group: '', kind: 'programming', strategy: 'sequential',
+        id: t.suggested.id, number: t.suggested.number || nextFreeNumber(all.data.map((c) => c.number)), name: t.suggested.name, group: '', kind: t.kind, strategy: 'sequential',
         run_out: 'keep_going', chaos: 0, autopilot: true, always_on: false, library_ids: [], lineup: emptyLineup(sys.data.timezone),
-        guide: emptyGuide(), options: emptyOptions(),
+        guide: emptyGuide(), info: withInfoDefaults(b.info as Partial<InfoConfig> | undefined), options: withDefaults(b.options as Partial<ChannelOptions> | undefined) ?? emptyOptions(),
       };
       setDraft(d);
       setSaved(JSON.stringify(d));
+      setIdTouched(true);
     } else if (!isNew && channel.data) {
       const d = fromChannel(channel.data);
       setDraft(d);
       setSaved(JSON.stringify(d));
     }
-  }, [draft, isNew, all.data, sys.data, channel.data]);
+  }, [draft, isNew, all.data, sys.data, channel.data, templates.data, template]);
 
   const dirty = draft !== null && JSON.stringify(draft) !== saved;
   const groups = useMemo(() => Array.from(new Set((all.data ?? []).map((c) => c.group).filter(Boolean) as string[])), [all.data]);
-  const shownTab = draft?.kind === 'test' && (tab === 'programming' || tab === 'ads' || tab === 'guide') ? 'general' : draft?.kind === 'guide' && (tab === 'programming' || tab === 'ads') ? 'guide' : draft?.kind === 'programming' && tab === 'guide' ? 'general' : tab;
+  const shownTab = draft?.kind === 'info' ? (tab === 'info' ? 'info' : 'general') : draft?.kind === 'test' && (tab === 'programming' || tab === 'ads' || tab === 'guide' || tab === 'info') ? 'general' : draft?.kind === 'guide' && (tab === 'programming' || tab === 'ads' || tab === 'info') ? 'guide' : draft?.kind === 'programming' && (tab === 'guide' || tab === 'info') ? 'general' : tab;
 
   if (!draft) {
     return (
@@ -110,7 +119,7 @@ export function ChannelEditor({ id, tab }: { id: string; tab: string }) {
   const showLibs = (libs.data ?? []).filter((l) => l.kind === 'shows');
   const idError = isNew ? validateId(draft.id) : null;
   const numberTaken = (all.data ?? []).some((c) => c.number === draft.number && c.id !== draft.id);
-  const problem = draft.kind === 'guide' ? guideProblem(draft.guide) : null;
+  const problem = draft.kind === 'guide' ? guideProblem(draft.guide) : draft.kind === 'info' ? infoProblem(draft.info) : null;
   const canSave = dirty && !saving && draft.name.trim() !== '' && !idError && draft.number > 0 && !numberTaken && !problem;
 
   const save = async () => {
@@ -124,6 +133,9 @@ export function ChannelEditor({ id, tab }: { id: string; tab: string }) {
       if (draft.kind === 'programming') {
         Object.assign(body, { strategy: draft.strategy, run_out: draft.run_out, chaos: draft.chaos, library_ids: draft.library_ids, lineup: draft.lineup, options: draft.options });
       } else if (draft.kind === 'test') {
+        body.options = draft.options;
+      } else if (draft.kind === 'info') {
+        body.info = draft.info;
         body.options = draft.options;
       } else {
         body.guide = draft.guide;
@@ -142,16 +154,18 @@ export function ChannelEditor({ id, tab }: { id: string; tab: string }) {
 
   const tabs = draft.kind === 'guide'
     ? [['general', 'General'], ['guide', 'Guide']]
+    : draft.kind === 'info'
+    ? [['general', 'General'], ['info', 'Pages']]
     : draft.kind === 'test'
     ? [['general', 'General'], ['picture', 'Screen']]
     : [['general', 'General'], ['programming', 'Programming'], ['picture', 'Sound & picture'], ['ads', 'Breaks']];
-  const goTab = (t: string) => navigate(`channels/${id}${t === 'general' ? '' : `?tab=${t}`}`);
+  const goTab = (t: string) => navigate(isNew ? `channels/new?template=${template ?? 'tv'}${t === 'general' ? '' : `&tab=${t}`}` : `channels/${id}${t === 'general' ? '' : `?tab=${t}`}`);
 
   return (
     <div className="page">
       <div className="page-head">
         <a href={href('channels')} className="small">← Channels</a>
-        <h1>{isNew ? 'New channel' : draft.name || id}</h1>
+        <h1>{isNew ? `New ${tpl?.name.toLowerCase() ?? 'channel'}` : draft.name || id}</h1>
         {!isNew && <a className="btn small" href={href(`schedule/${id}`)}>View schedule</a>}
         <span className="right row">
           {dirty && <Badge tone="warn">Unsaved</Badge>}
@@ -186,10 +200,16 @@ export function ChannelEditor({ id, tab }: { id: string; tab: string }) {
                 <input className="input mono" style={{ width: 180 }} disabled={!isNew} value={draft.id} onChange={(e) => { setIdTouched(true); set({ id: e.target.value }); }} />
               </Field>
             </div>
-            {isNew && (
-              <Field label="Kind">
-                <Segmented value={draft.kind} options={[{ value: 'programming', label: 'Programming channel' }, { value: 'guide', label: 'Guide channel' }, { value: 'test', label: 'Test pattern' }]} onChange={(kind) => set(kind === 'test' ? { kind, options: { ...draft.options, off_air: { ...draft.options.off_air, screen: 'bars', tone: true } } } : { kind })} />
-              </Field>
+            {isNew && tpl && (
+              <div className="stack" style={{ gap: 6 }}>
+                <div className="row wrap"><Badge tone="accent">{tpl.name}</Badge><span className="small dim">{tpl.about}</span><a className="small" href={href('channels/new')}>Choose a different kind</a></div>
+                {tpl.needs.length > 0 && (
+                  <p className="small dim">
+                    Before it is worth airing: {tpl.needs.map((n) => ({ libraries: 'pick the libraries it draws from below', feeds: 'add a news feed on the Pages tab', pages: 'add your pages on the Pages tab', music: 'choose some music on the Pages tab' } as Record<string, string>)[n] ?? n).join('; ')}.
+                  </p>
+                )}
+                {draft.kind === 'guide' && <p className="small dim">The guide lists every TV and info channel by number, with what is on now and next. Choose only some on the Guide tab.</p>}
+              </div>
             )}
           </Card>
 
@@ -244,6 +264,7 @@ export function ChannelEditor({ id, tab }: { id: string; tab: string }) {
             </Card>
           )}
 
+          {draft.kind === 'info' && <p className="small dim">An info channel has nothing to schedule: it draws its pages itself, round and round. Add and arrange them on the Pages tab. It appears on the guide, with what it is.</p>}
           {draft.kind === 'test' && <p className="small dim">A test pattern channel airs only its screen: colour bars and a tone by default, or snow, black, a station card or a picture of your own. Choose it on the Screen tab.</p>}
 
           <Card className="stack">
@@ -252,8 +273,7 @@ export function ChannelEditor({ id, tab }: { id: string; tab: string }) {
             <Toggle checked={!draft.options.theme} onChange={(on) => set({ options: { ...draft.options, theme: on ? null : { ...emptyChoice(), ...(station ?? {}) } } })} label={<span><strong>Follow the station theme</strong> <span className="dim small">{station ? `${station.theme === 'auto' ? 'per channel' : station.theme}, ${station.style}` : ''}</span></span>} />
             {draft.options.theme && (
               <div className="stack nest">
-                <ThemePicker value={draft.options.theme} onChange={(v) => set({ options: { ...draft.options, theme: { ...draft.options.theme!, ...v } } })} autoName="Per channel" autoAbout="Colours made from this channel." />
-                <StylePicker value={draft.options.theme.style} onChange={(style) => set({ options: { ...draft.options, theme: { ...draft.options.theme!, style } } })} />
+                <ThemeChoiceEditor value={draft.options.theme} onChange={(theme) => set({ options: { ...draft.options, theme } })} autoName="Per channel" autoAbout="Colours made from this channel." />
                 <ThemePreview choice={draft.options.theme} what="card" id={draft.id} name={draft.name} number={draft.number} />
               </div>
             )}
@@ -298,6 +318,10 @@ export function ChannelEditor({ id, tab }: { id: string; tab: string }) {
 
       {shownTab === 'ads' && draft.kind === 'programming' && (
         <AdsEditor ads={draft.lineup.ads} theme={draft.options.theme} libraries={libs.data ?? []} onChange={(ads) => set({ lineup: { ...draft.lineup, ads } })} />
+      )}
+
+      {shownTab === 'info' && draft.kind === 'info' && (
+        <InfoEditor id={isNew ? '' : draft.id} name={draft.name} info={draft.info} onChange={(info) => set({ info })} libs={libs.data ?? []} templates={templates.data ?? null} />
       )}
 
       {shownTab === 'guide' && draft.kind === 'guide' && (

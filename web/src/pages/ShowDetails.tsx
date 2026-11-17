@@ -58,7 +58,7 @@ export function ShowDetails({ show, onClose, onChanged }: { show: ShowSummary; o
           <textarea className="input" rows={3} maxLength={2000} value={info.description} onChange={(e) => setInfo({ ...info, description: e.target.value })} />
         </Field>
         <div className="row wrap" style={{ alignItems: 'flex-start' }}>
-          <Field label="Rating" hint="TV-PG, 14+, …"><input className="input" style={{ width: 110 }} maxLength={20} value={info.rating} onChange={(e) => setInfo({ ...info, rating: e.target.value })} /></Field>
+          <Field label="Rating" hint="Day parts use it to keep strong shows out of the morning."><input className="input" style={{ width: 110 }} maxLength={20} list="ratings" value={info.rating} onChange={(e) => setInfo({ ...info, rating: e.target.value })} /><datalist id="ratings">{['TV-Y', 'TV-Y7', 'TV-G', 'TV-PG', 'TV-14', 'TV-MA', 'G', 'PG', 'PG-13', 'R', 'C', 'C8', '14+', '18+'].map((r) => <option key={r} value={r} />)}</datalist></Field>
           <Field label="Tags" hint="Separated by commas: sitcom, 80s"><input className="input" style={{ width: 260 }} value={tags} onChange={(e) => setTags(e.target.value)} /></Field>
         </div>
         <Field label="Poster"><PictureField value={info.poster} onChange={(poster) => setInfo({ ...info, poster })} /></Field>

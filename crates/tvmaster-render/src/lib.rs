@@ -8,6 +8,7 @@
 
 pub mod alert;
 pub mod guide;
+pub mod info;
 pub mod modern;
 pub mod overlay;
 pub mod png;
@@ -230,13 +231,21 @@ impl Theme {
 
     /// The graphics' look taken from a guide palette, so one theme dresses everything.
     pub fn from_palette(p: &Palette, modern: bool) -> Self {
+        // On a light background the pale tick colour and a bright highlight are hard to read as
+        // text or bars, so the strong header colour takes their place.
+        let lum = |c: Rgb| 0.299 * c[0] as f32 + 0.587 * c[1] as f32 + 0.114 * c[2] as f32;
+        let (primary, accent) = if lum(p.bg_top) > 150.0 {
+            (p.header, mix(p.header, [0, 0, 0], 0.15))
+        } else {
+            (p.tick, p.accent)
+        };
         Self {
             dark: p.bg_top,
-            primary: p.tick,
-            accent: p.accent,
+            primary,
+            accent,
             bottom: p.bg_bottom,
             ink: p.text_now,
-            on_accent: alert::ink_on(p.accent),
+            on_accent: alert::ink_on(accent),
             modern,
         }
     }

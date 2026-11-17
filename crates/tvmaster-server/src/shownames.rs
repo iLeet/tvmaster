@@ -147,7 +147,19 @@ pub async fn put_info(
             "description up to 2000 characters, rating up to 20, up to 20 tags",
         ));
     }
-    tvmaster_db::set_show_info(&s.db(), &title, &b.info)?;
+    let rating_changed = {
+        let db = s.db();
+        let before = tvmaster_db::list_show_info(&db)?
+            .get(&title.to_lowercase())
+            .map(|i| i.rating.trim().to_uppercase())
+            .unwrap_or_default();
+        tvmaster_db::set_show_info(&db, &title, &b.info)?;
+        before != b.info.rating.trim().to_uppercase() && crate::dayparts::any(&db)
+    };
+    // A rating can change what may air in a day part, so plan again.
+    if rating_changed {
+        crate::dayparts::replanned(&s)?;
+    }
     Ok(Json(json!({ "show": title, "info": b.info })))
 }
 

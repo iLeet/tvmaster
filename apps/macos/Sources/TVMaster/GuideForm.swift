@@ -13,7 +13,7 @@ struct GuideForm: View {
     @State private var preview: NSImage?
     @State private var previewError: String?
 
-    private var programming: [Channel] { model.channels.filter { $0.kind == .programming }.sorted { $0.number < $1.number } }
+    private var programming: [Channel] { model.channels.filter { $0.kind == .programming || $0.kind == .info }.sorted { $0.number < $1.number } }
     private var showable: [Channel] { model.channels.filter { !$0.isGuide }.sorted { $0.number < $1.number } }
 
     var body: some View {
@@ -110,7 +110,7 @@ struct GuideForm: View {
             Toggle("Channel names", isOn: $gs.channelNames)
             Toggle("Progress bar on what is airing", isOn: $gs.progress)
             DisclosureGroup("Which channels (\(gs.channels.isEmpty ? "all" : "\(gs.channels.count) chosen"))") {
-                Text(gs.channels.isEmpty ? "Every programming channel, by number. Tick some to list only those, in the order you tick them." : "Only these, in the order you ticked them.")
+                Text(gs.channels.isEmpty ? "Every TV and info channel, by number. Tick some to list only those, in the order you tick them." : "Only these, in the order you ticked them.")
                     .font(.caption).foregroundStyle(.secondary)
                 ForEach(programming) { c in
                     let pos = gs.channels.firstIndex(of: c.id)

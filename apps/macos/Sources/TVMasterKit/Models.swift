@@ -83,6 +83,8 @@ public enum ChannelKind: String, Codable, Sendable {
     case programming, guide
     /// A test-pattern channel: only airs its off-air screen.
     case test
+    /// An information channel: pages of notices, headlines, what is on tonight, the time and pictures.
+    case info
 
     /// A kind this app does not know yet (a newer server) is treated as ordinary programming.
     public init(from decoder: Decoder) throws {
@@ -145,6 +147,8 @@ public struct Channel: Codable, Sendable, Hashable, Identifiable {
     public var kind: ChannelKind
     public var group: String?
     public var guide: GuideConfig
+    /// An info channel's pages, feeds and ticker (read it raw with `channelRaw` to edit).
+    public var info: JSONValue?
     /// Audio, subtitles, picture and on-screen graphics (the server's `options`; absent on old servers).
     public var options: JSONValue?
     public var onAir: Bool?
@@ -153,6 +157,14 @@ public struct Channel: Codable, Sendable, Hashable, Identifiable {
 
     public var isGuide: Bool { kind == .guide }
     public var isTest: Bool { kind == .test }
+    public var isInfo: Bool { kind == .info }
+    /// What an info channel is, for list rows: what it says, or the pages it has.
+    public var infoSummary: String {
+        let about = info?["about"]?.stringValue?.trimmingCharacters(in: .whitespaces) ?? ""
+        let pages = info?["slides"]?.arrayValue?.count ?? 0
+        let base = about.isEmpty ? "Info channel" : about
+        return pages > 0 ? "\(base) · \(pages) page\(pages == 1 ? "" : "s")" : base
+    }
     /// Has a schedule worth showing (neither the live guide nor a test pattern).
     public var isScheduled: Bool { kind == .programming }
     public var timeZone: TimeZone? {

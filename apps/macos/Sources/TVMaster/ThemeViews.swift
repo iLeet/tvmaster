@@ -73,6 +73,37 @@ struct StylePickerView: View {
     }
 }
 
+/// Gentle alerts: soft colours and words, a soft chime, nothing flashing (always on in the kids theme).
+struct GentleToggleView: View {
+    @Binding var choice: ThemeChoice
+    var body: some View {
+        let kids = choice.theme == "kids"
+        VStack(alignment: .leading, spacing: 2) {
+            Toggle("Gentle alerts", isOn: Binding(get: { kids || choice.gentle }, set: { choice.gentle = $0 })).disabled(kids)
+            Text("\(kids ? "Always on in the kids theme: " : "")soft colours and words, a soft chime, nothing flashing, so a child is not frightened.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// The whole look in one place: colours, style and gentle alerts. Choosing the kids theme switches to the smooth style.
+struct ThemeChoiceEditorView: View {
+    @Binding var choice: ThemeChoice
+    var autoName: String?
+    var autoAbout: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ThemePickerView(theme: Binding(get: { choice.theme }, set: { new in
+                if new == "kids" && choice.theme != "kids" { choice.style = "modern" }
+                choice.theme = new
+            }), primary: $choice.primary, accent: $choice.accent, background: $choice.background, autoName: autoName, autoAbout: autoAbout)
+            StylePickerView(style: $choice.style)
+            GentleToggleView(choice: $choice)
+        }
+    }
+}
+
 /// A picture of one of the station's graphics in a theme, redrawn shortly after each change.
 struct ThemePreviewView: View {
     @Environment(AppModel.self) private var model
@@ -95,7 +126,7 @@ struct ThemePreviewView: View {
                 RoundedRectangle(cornerRadius: 10).fill(.black.opacity(0.4)).aspectRatio(16.0 / 9.0, contentMode: .fit).overlay(ProgressView())
             }
         }
-        .task(id: "\(choice.theme)|\(choice.primary)|\(choice.accent)|\(choice.background)|\(choice.style)|\(what)|\(scene ?? "")|\(id ?? "")|\(name ?? "")|\(text ?? "")|\(label ?? "")|\(top)") {
+        .task(id: "\(choice.theme)|\(choice.primary)|\(choice.accent)|\(choice.background)|\(choice.style)|\(choice.gentle)|\(what)|\(scene ?? "")|\(id ?? "")|\(name ?? "")|\(text ?? "")|\(label ?? "")|\(top)") {
             try? await Task.sleep(nanoseconds: 300_000_000)
             guard !Task.isCancelled, let client = model.client else { return }
             if let data = try? await client.themePreview(what: what, choice: choice, id: id, name: name, number: number, scene: scene, text: text, label: label, top: top), let img = NSImage(data: data) { image = img }
@@ -128,9 +159,12 @@ struct AppearanceView: View {
                 Text("A channel can choose its own under its settings. Everything else follows this.").foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Theme").font(.headline)
-                    ThemePickerView(theme: $draft.theme, primary: $draft.primary, accent: $draft.accent, background: $draft.background,
-                                    autoName: "Per channel", autoAbout: "Colours made from each channel, so every channel has its own look.")
-                    StylePickerView(style: $draft.style)
+                    ThemeChoiceEditorView(choice: $draft, autoName: "Per channel", autoAbout: "Colours made from each channel, so every channel has its own look.")
+                    HStack {
+                        Button("Use the kids look") { draft = .kids }.glassButton()
+                        Text("Bright colours, smooth type and gentle alerts. To use it for some hours of the day, or some channels, set it under Day parts or on a channel.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 }
                 .padding(16).frame(maxWidth: .infinity, alignment: .leading).glassCard(cornerRadius: 20)
                 VStack(alignment: .leading, spacing: 12) {

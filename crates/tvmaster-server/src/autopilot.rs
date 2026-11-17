@@ -46,7 +46,7 @@ pub fn catalog_for(conn: &Connection, channel: &Channel) -> rusqlite::Result<Cat
             duration_ms: m.duration_ms.max(0) as u64,
         })
         .collect();
-    Ok(Catalog::build(&refs))
+    Ok(Catalog::build(&refs).with_ratings(crate::dayparts::ratings(conn)))
 }
 
 /// Commercials, user bumper clips, break points and recent ads for a channel
@@ -198,7 +198,9 @@ pub fn extend(conn: &Connection, channel: &Channel, now_ms: i64) -> rusqlite::Re
     }
 
     let ad_inputs = ad_inputs_for(conn, channel, from)?;
+    let parts = crate::dayparts::for_channel(conn, channel);
     let cfg = SchedConfig {
+        dayparts: Some(&parts),
         ads: ad_inputs.as_ref(),
         catalog: &catalog,
         lineup: &channel.lineup,
@@ -691,6 +693,7 @@ mod tests {
             kind: Default::default(),
             group: None,
             guide: Default::default(),
+            info: Default::default(),
             options: Default::default(),
         };
         upsert_channel(&conn, &ch).unwrap();

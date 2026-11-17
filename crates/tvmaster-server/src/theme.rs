@@ -34,9 +34,28 @@ pub(crate) fn effective(db: &rusqlite::Connection, options: &ChannelOptions) -> 
     options.theme.clone().unwrap_or_else(|| station(db))
 }
 
+/// The look in force on a channel at `at_ms`: the day part's, if one covering the moment sets a
+/// look, else the channel's own or the station's.
+pub(crate) fn effective_at(db: &rusqlite::Connection, channel: &str, at_ms: i64) -> ThemeChoice {
+    let c = tvmaster_db::get_channel(db, channel).ok().flatten();
+    if let Some(look) = c
+        .as_ref()
+        .and_then(|c| crate::dayparts::for_channel(db, c).look_at(at_ms).cloned())
+    {
+        return look;
+    }
+    match c {
+        Some(c) => effective(db, &c.options),
+        None => station(db),
+    }
+}
+
 /// How an alert looks when it follows the theme: the classic pixel alert in the retro style, and
 /// the smooth one in the theme's colours in the modern style.
 pub(crate) fn alert_theme(choice: &ThemeChoice, channel_id: &str) -> AlertTheme {
+    if choice.is_gentle() {
+        return AlertTheme::Gentle(palette_for(choice.theme, &choice.colors, channel_id));
+    }
     match choice.style {
         GraphicsStyle::Retro => AlertTheme::Retro,
         GraphicsStyle::Modern => {
@@ -70,6 +89,18 @@ const THEMES: &[(&str, &str, &str)] = &[
     ("forest", "Forest", "Deep green with an amber highlight"),
     ("berry", "Berry", "Plum with a pink highlight"),
     ("mono", "Mono", "Black and white"),
+    (
+        "kids",
+        "Kids",
+        "Bright and friendly for children, with gentle alerts",
+    ),
+    ("bubblegum", "Bubblegum", "Light pink and purple"),
+    ("lavender", "Lavender", "Soft purple with a pink highlight"),
+    ("mint", "Mint", "Fresh green with an orange highlight"),
+    ("arctic", "Arctic", "Pale ice blue with a warm highlight"),
+    ("cherry", "Cherry", "Deep red with a gold highlight"),
+    ("gold", "Gold", "Black with gold"),
+    ("coffee", "Coffee", "Dark brown with a cream highlight"),
     ("custom", "Custom", "Two colours of your choosing"),
 ];
 

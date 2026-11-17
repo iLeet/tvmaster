@@ -8,8 +8,17 @@ public struct ThemeChoice: Equatable, Sendable {
     public var background = ""
     /// `retro` or `modern`.
     public var style = "retro"
+    /// Soft alerts: gentle colours and words, a chime, nothing flashing. The kids theme is always gentle.
+    public var gentle = false
 
     public init() {}
+
+    /// The look made for children: bright colours, smooth type and gentle alerts.
+    public static var kids: ThemeChoice {
+        var c = ThemeChoice()
+        c.theme = "kids"; c.style = "modern"; c.gentle = true
+        return c
+    }
 
     /// Read a theme from the server's JSON (`nil` for a missing or null one).
     public init?(json: JSONValue?) {
@@ -19,6 +28,7 @@ public struct ThemeChoice: Equatable, Sendable {
         accent = json.get(["colors", "accent"])?.stringValue ?? ""
         background = json.get(["colors", "background"])?.stringValue ?? ""
         style = json.get(["style"])?.stringValue ?? "retro"
+        gentle = json.get(["gentle"])?.boolValue ?? false
     }
 
     public var json: JSONValue {
@@ -27,6 +37,7 @@ public struct ThemeChoice: Equatable, Sendable {
             "theme": .string(theme),
             "colors": .object(["primary": opt(primary), "accent": opt(accent), "background": opt(background)]),
             "style": .string(style),
+            "gentle": .bool(gentle),
         ])
     }
 }

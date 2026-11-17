@@ -67,6 +67,7 @@ export function GuideEditor({
   const ticker = (p: Partial<GuideConfig['ticker_options']>) => set({ ticker_options: { ...g.ticker_options, ...p } });
   const pip = (p: Partial<GuideConfig['pip']>) => set({ pip: { ...g.pip, ...p } });
   const programming = channels.filter((c) => c.kind === 'programming').sort((a, b) => a.number - b.number);
+  const info = channels.filter((c) => c.kind === 'info').sort((a, b) => a.number - b.number);
   const showable = channels.filter((c) => c.kind !== 'guide').sort((a, b) => a.number - b.number);
   const musicLibs = libs.filter((l) => l.kind === 'music');
 
@@ -169,13 +170,22 @@ export function GuideEditor({
           <Toggle checked={g.layout.channel_names} onChange={(v) => layout({ channel_names: v })} label="Channel names" />
           <Toggle checked={g.layout.progress} onChange={(v) => layout({ progress: v })} label="Progress bar on what is airing" />
         </div>
-        <Field label="Which channels" hint={g.channels.length ? 'Only these, in the order you picked them. Click one to remove it.' : 'Every programming channel, by number. Pick some to list only those, in your order.'}>
+        <Field label="TV channels" hint={g.channels.length ? 'Only the channels you pick are listed, in the order you picked them. Click one to remove it.' : 'Every TV and info channel, by number. Pick some to list only those, in your order.'}>
           <Chips
             options={programming.map((c) => ({ value: c.id, label: channelLabel(c) }))}
             value={g.channels}
             onToggle={(cid) => set({ channels: toggleId(g.channels, cid) })}
           />
         </Field>
+        {info.length > 0 && (
+          <Field label="Info channels" hint="Listed on the guide with what they are. Pick none of anything to list them all.">
+            <Chips
+              options={info.map((c) => ({ value: c.id, label: channelLabel(c) }))}
+              value={g.channels}
+              onToggle={(cid) => set({ channels: toggleId(g.channels, cid) })}
+            />
+          </Field>
+        )}
         {g.channels.length > 0 && <div><button type="button" className="btn small" onClick={() => set({ channels: [] })}>Show every channel again</button></div>}
       </Card>
 

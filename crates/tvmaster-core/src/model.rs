@@ -91,6 +91,9 @@ pub enum ChannelKind {
     /// A test-pattern channel: always airs its off-air screen (bars and a tone,
     /// snow, a card or a picture of your own). Nothing to schedule.
     Test,
+    /// An information channel: pages of announcements, headlines, what is on tonight, the time
+    /// and pictures, with a clock and a ticker. Nothing to schedule.
+    Info,
 }
 
 impl ChannelKind {
@@ -99,6 +102,7 @@ impl ChannelKind {
             ChannelKind::Programming => "programming",
             ChannelKind::Guide => "guide",
             ChannelKind::Test => "test",
+            ChannelKind::Info => "info",
         }
     }
 
@@ -107,6 +111,7 @@ impl ChannelKind {
             "programming" => Some(ChannelKind::Programming),
             "guide" => Some(ChannelKind::Guide),
             "test" => Some(ChannelKind::Test),
+            "info" => Some(ChannelKind::Info),
             _ => None,
         }
     }
@@ -145,6 +150,23 @@ pub enum GuideTheme {
     Berry,
     /// Black and white.
     Mono,
+    /// Bright, friendly colours for children: sky blue, sunshine yellow and tangerine. Alerts on
+    /// this theme are gentle.
+    Kids,
+    /// Pink and purple, light.
+    Bubblegum,
+    /// Soft purple with a pink highlight, light.
+    Lavender,
+    /// Fresh green with an orange highlight, light.
+    Mint,
+    /// Pale ice blue with a warm highlight, light.
+    Arctic,
+    /// Deep red with a gold highlight.
+    Cherry,
+    /// Black with gold.
+    Gold,
+    /// Dark brown with a cream highlight.
+    Coffee,
     /// From `colors.primary` and `colors.accent`.
     Custom,
 }
@@ -530,9 +552,18 @@ pub struct ThemeChoice {
     pub colors: GuideColors,
     #[serde(default)]
     pub style: GraphicsStyle,
+    /// Alerts are gentle: soft colours and words, a soft chime and nothing flashing, so a child is
+    /// not frightened. The kids theme is always gentle.
+    #[serde(default)]
+    pub gentle: bool,
 }
 
 impl ThemeChoice {
+    /// Alerts in this look are gentle.
+    pub fn is_gentle(&self) -> bool {
+        self.gentle || self.theme == GuideTheme::Kids
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         for (what, c) in [
             ("primary", &self.colors.primary),
@@ -618,6 +649,227 @@ impl Default for GuideConfig {
             channels: Vec::new(),
             pip: GuidePip::default(),
         }
+    }
+}
+
+// ------------------------------------------------------------------ info channels
+
+/// What a page on an info channel shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SlideKind {
+    /// A title and some lines of your own, with a picture if you like.
+    #[default]
+    Text,
+    /// The latest headlines from the channel's news feeds.
+    Headlines,
+    /// What is on now, and what comes next, on every channel.
+    Tonight,
+    /// The time and the date, large.
+    Clock,
+    /// A picture, full screen, with a caption.
+    Photo,
+}
+
+impl SlideKind {
+    pub const ALL: [(&'static str, &'static str, &'static str); 5] = [
+        (
+            "text",
+            "Notice",
+            "A title and a few lines, and a picture if you like",
+        ),
+        (
+            "headlines",
+            "Headlines",
+            "The latest from the channel's news feeds",
+        ),
+        (
+            "tonight",
+            "On tonight",
+            "What is on now and next, on every channel",
+        ),
+        ("clock", "Clock", "The time and the date, large"),
+        (
+            "photo",
+            "Picture",
+            "A picture across the whole screen, with a caption",
+        ),
+    ];
+}
+
+/// One page of an info channel.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct InfoSlide {
+    #[serde(default)]
+    pub kind: SlideKind,
+    /// The page's title (or the caption of a picture).
+    #[serde(default)]
+    pub title: String,
+    /// Lines of text, for a notice.
+    #[serde(default)]
+    pub lines: Vec<String>,
+    /// A picture on the server (png, jpg, gif, webp): beside a notice's text, or across the screen
+    /// for a picture page.
+    #[serde(default)]
+    pub picture: Option<String>,
+    /// How long this page stays up, in seconds (3-300). Blank = the channel's own.
+    #[serde(default)]
+    pub seconds: Option<u16>,
+}
+
+/// An information channel.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InfoConfig {
+    /// What the channel is, in a few words, for the guide ("Local news and headlines"). Blank = made
+    /// from the pages.
+    #[serde(default)]
+    pub about: Option<String>,
+    /// The heading; blank = the channel's name.
+    #[serde(default)]
+    pub title: Option<String>,
+    /// The pages, in order, round and round. None = the clock.
+    #[serde(default)]
+    pub slides: Vec<InfoSlide>,
+    /// How long each page stays up, in seconds (3-120).
+    #[serde(default = "default_slide_seconds")]
+    pub seconds: u16,
+    /// News feeds (RSS or Atom addresses) for the headlines and the ticker.
+    #[serde(default)]
+    pub feeds: Vec<String>,
+    /// Lines for the ticker along the bottom.
+    #[serde(default)]
+    pub ticker: Vec<String>,
+    /// The scrolling line along the bottom: your lines and the headlines.
+    #[serde(default = "yes")]
+    pub ticker_enabled: bool,
+    /// The time and date at the top right.
+    #[serde(default = "yes")]
+    pub clock: bool,
+    /// 12-hour clock (`9:30 PM`); off = 24-hour.
+    #[serde(default = "yes")]
+    pub hour12: bool,
+    /// Libraries (kind `music`) for background music. Silence if empty.
+    #[serde(default)]
+    pub music_library_ids: Vec<i64>,
+}
+
+fn default_slide_seconds() -> u16 {
+    12
+}
+
+impl Default for InfoConfig {
+    fn default() -> Self {
+        Self {
+            about: None,
+            title: None,
+            slides: Vec::new(),
+            seconds: default_slide_seconds(),
+            feeds: Vec::new(),
+            ticker: Vec::new(),
+            ticker_enabled: true,
+            clock: true,
+            hour12: true,
+            music_library_ids: Vec::new(),
+        }
+    }
+}
+
+impl InfoConfig {
+    pub fn validate(&self) -> Result<(), String> {
+        if !(3..=120).contains(&self.seconds) {
+            return Err("info.seconds must be 3-120".into());
+        }
+        if self.slides.len() > 40 {
+            return Err("info.slides: at most 40 pages".into());
+        }
+        for (i, s) in self.slides.iter().enumerate() {
+            let n = i + 1;
+            if s.title.chars().count() > 80 || s.title.chars().any(char::is_control) {
+                return Err(format!("page {n}: the title is at most 80 characters"));
+            }
+            if s.lines.len() > 12 || s.lines.iter().any(|l| l.chars().count() > 200) {
+                return Err(format!("page {n}: at most 12 lines of 200 characters"));
+            }
+            if s.seconds.is_some_and(|v| !(3..=300).contains(&v)) {
+                return Err(format!("page {n}: seconds must be 3-300"));
+            }
+            if let Some(p) = &s.picture {
+                if p.len() > 500 || p.chars().any(char::is_control) {
+                    return Err(format!("page {n}: the picture's path is not valid"));
+                }
+            }
+            if s.kind == SlideKind::Photo
+                && s.picture.as_deref().is_none_or(|p| p.trim().is_empty())
+            {
+                return Err(format!("page {n}: a picture page needs a picture"));
+            }
+            if s.kind == SlideKind::Text
+                && s.title.trim().is_empty()
+                && s.lines.iter().all(|l| l.trim().is_empty())
+            {
+                return Err(format!("page {n}: a notice needs a title or some text"));
+            }
+        }
+        if self.slides.iter().any(|s| s.kind == SlideKind::Headlines) && self.feeds.is_empty() {
+            return Err("a headlines page needs at least one news feed".into());
+        }
+        if self.feeds.len() > 8
+            || self.feeds.iter().any(|f| {
+                f.len() > 500
+                    || !(f.starts_with("http://") || f.starts_with("https://"))
+                    || f.chars().any(|c| c.is_control() || c.is_whitespace())
+            })
+        {
+            return Err("info.feeds: up to 8 addresses starting with http:// or https://".into());
+        }
+        if self.ticker.len() > 20 || self.ticker.iter().any(|t| t.chars().count() > 200) {
+            return Err("info.ticker: at most 20 lines of 200 characters".into());
+        }
+        if self
+            .title
+            .as_deref()
+            .is_some_and(|t| t.chars().count() > 60 || t.chars().any(char::is_control))
+        {
+            return Err("info.title is at most 60 characters".into());
+        }
+        if self
+            .about
+            .as_deref()
+            .is_some_and(|t| t.chars().count() > 80 || t.chars().any(char::is_control))
+        {
+            return Err("info.about is at most 80 characters".into());
+        }
+        Ok(())
+    }
+
+    /// What the guide says this channel is.
+    pub fn describe(&self) -> String {
+        if let Some(a) = self
+            .about
+            .as_deref()
+            .map(str::trim)
+            .filter(|a| !a.is_empty())
+        {
+            return a.to_string();
+        }
+        let has = |k: SlideKind| self.slides.iter().any(|s| s.kind == k);
+        let mut parts = Vec::new();
+        if has(SlideKind::Headlines) {
+            parts.push("Headlines");
+        }
+        if has(SlideKind::Tonight) {
+            parts.push("What's on tonight");
+        }
+        if has(SlideKind::Text) {
+            parts.push("Notices");
+        }
+        if has(SlideKind::Photo) {
+            parts.push("Pictures");
+        }
+        if parts.is_empty() || (parts.is_empty() && has(SlideKind::Clock)) {
+            return "Time and date".to_string();
+        }
+        parts.join(", ")
     }
 }
 
@@ -736,6 +988,9 @@ pub struct Channel {
     /// Audio tracks, subtitles, picture and on-screen graphics.
     #[serde(default)]
     pub options: crate::options::ChannelOptions,
+    /// Used when `kind` is `info`.
+    #[serde(default)]
+    pub info: InfoConfig,
 }
 
 /// A registered player (a TV) that a remote can control.

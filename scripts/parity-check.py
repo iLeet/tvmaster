@@ -13,7 +13,8 @@ STRUCTS = {
     "crates/tvmaster-core/src/options.rs": ["AudioPrefs", "SubPrefs", "VideoOptions", "BugOptions", "ClockOptions", "ShowTitleOptions", "TickerOptions", "OffAir", "ChannelOptions", "ShowOptions"],
     "crates/tvmaster-core/src/ads.rs": ["BumperToggles", "AdConfig"],
     "crates/tvmaster-core/src/lineup.rs": ["Block", "Season", "Event", "Lineup", "SignOff"],
-    "crates/tvmaster-core/src/model.rs": ["ThemeChoice", "GuideColors", "GuideBackground", "GuideAppearance", "GuideLayout", "GuideHeader", "GuideTicker", "GuidePip", "GuideConfig", "Channel"],
+    "crates/tvmaster-core/src/model.rs": ["ThemeChoice", "GuideColors", "GuideBackground", "GuideAppearance", "GuideLayout", "GuideHeader", "GuideTicker", "GuidePip", "GuideConfig", "Channel", "InfoSlide", "InfoConfig"],
+    "crates/tvmaster-core/src/daypart.rs": ["Daypart"],
 }
 IGNORE = {
     # stored by the server or set by the app itself, not a setting

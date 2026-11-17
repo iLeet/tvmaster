@@ -144,6 +144,8 @@ async fn run_once(
     let taken_over = spec.source.live_override(&spec.id).is_some();
     let mut producer = if spec.guide.is_some() && !taken_over {
         tokio::spawn(crate::guide::produce_guide(cfg.clone(), spec.clone(), tx))
+    } else if spec.info.is_some() && !taken_over {
+        tokio::spawn(crate::info::produce_info(cfg.clone(), spec.clone(), tx))
     } else {
         tokio::spawn(produce(cfg.clone(), spec.clone(), tx))
     };
@@ -216,6 +218,7 @@ async fn produce(
                     ..
                 }
             ) && spec.guide.is_none()
+                && spec.info.is_none()
         });
         if let Some(ov) = live.as_ref().filter(|_| bar_alert.is_none()) {
             let chunk = LIVE_CHUNK_MS;
@@ -315,7 +318,7 @@ async fn produce(
             }
             PlayKind::Bumper(kind) => {
                 let scene = bumper_scene(&spec, kind, &item).await;
-                let theme = crate::spec_theme(&spec);
+                let theme = crate::spec_theme_at(&spec, item.start_ms);
                 let outcome = run_rendered(
                     &cfg,
                     scene,
@@ -725,7 +728,7 @@ async fn slate(
 /// The station card as a picture, made once per channel and message.
 async fn card_png(cfg: &EngineConfig, spec: &ChannelSpec) -> Option<std::path::PathBuf> {
     let message = spec.options.off_air.message.clone();
-    let theme = crate::spec_theme(spec);
+    let theme = crate::spec_theme_at(spec, now_ms());
     let key = format!(
         "{}|{}|{}|{}|{:?}",
         spec.id, spec.number, spec.name, message, theme

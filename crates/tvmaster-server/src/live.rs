@@ -93,16 +93,25 @@ pub(crate) fn current(
         "off_air" => LiveMode::OffAir,
         "black" => LiveMode::Black,
         "static" => LiveMode::Static,
-        "alert" => LiveMode::Alert {
-            event: e.title.clone(),
-            text: e.message.clone(),
-            look: AlertLook {
+        "alert" => {
+            let look = AlertLook {
                 theme: alert_theme(&e.theme, station_look).unwrap_or(station_look),
                 severity: Severity::parse(&e.severity).unwrap_or_default(),
-            },
-            style: AlertStyle::parse(&e.style).unwrap_or_default(),
-            sound: AlertSound::parse(&e.sound).unwrap_or_default(),
-        },
+            };
+            let sound = AlertSound::parse(&e.sound).unwrap_or_default();
+            LiveMode::Alert {
+                event: e.title.clone(),
+                text: e.message.clone(),
+                // A gentle alert never blares: whatever the sound, it is a soft chime (or nothing).
+                sound: if look.gentle() && sound != AlertSound::None {
+                    AlertSound::Information
+                } else {
+                    sound
+                },
+                look,
+                style: AlertStyle::parse(&e.style).unwrap_or_default(),
+            }
+        }
         _ => return None,
     };
     Some(LiveOverride {

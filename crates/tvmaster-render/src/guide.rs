@@ -180,6 +180,96 @@ impl Palette {
         p
     }
 
+    /// A light palette from a background (top to bottom), a main colour, a highlight and the ink
+    /// the text is set in.
+    fn bright(bg_top: Rgb, bg_bottom: Rgb, primary: Rgb, accent: Rgb, ink: Rgb) -> Self {
+        Self {
+            bg_top,
+            bg_bottom,
+            header: primary,
+            header_text: WHITE,
+            header_sub: mix(primary, WHITE, 0.78),
+            rule: accent,
+            label_bg: primary,
+            label_num: WHITE,
+            label_name: mix(primary, WHITE, 0.82),
+            bar: mix(bg_bottom, [0, 0, 0], 0.08),
+            bar_text: ink,
+            tick: mix(primary, bg_top, 0.35),
+            empty: mix(bg_bottom, WHITE, 0.45),
+            cell: WHITE,
+            cell_alt: mix(WHITE, bg_top, 0.3),
+            cell_now: mix(accent, WHITE, 0.5),
+            text: ink,
+            text_now: mix(ink, [0, 0, 0], 0.5),
+            accent,
+            ticker_bg: primary,
+            ticker_text: WHITE,
+            panel: WHITE,
+        }
+    }
+
+    /// Bright and friendly: sky blue, sunshine yellow and tangerine, with big colourful cells.
+    pub fn kids() -> Self {
+        let mut p = Self::bright(
+            [176, 224, 255],
+            [138, 200, 250],
+            [255, 118, 52],
+            [255, 206, 0],
+            [38, 48, 96],
+        );
+        p.label_bg = [48, 132, 232];
+        p.label_name = [255, 244, 160];
+        p.ticker_bg = [56, 168, 92];
+        p.header_sub = [255, 240, 150];
+        p
+    }
+    pub fn bubblegum() -> Self {
+        Self::bright(
+            [255, 214, 236],
+            [250, 188, 222],
+            [226, 62, 148],
+            [120, 78, 220],
+            [74, 24, 66],
+        )
+    }
+    pub fn lavender() -> Self {
+        Self::bright(
+            [232, 222, 255],
+            [212, 198, 250],
+            [116, 84, 210],
+            [255, 150, 196],
+            [44, 30, 90],
+        )
+    }
+    pub fn mint() -> Self {
+        Self::bright(
+            [210, 247, 230],
+            [180, 236, 210],
+            [18, 150, 108],
+            [255, 168, 56],
+            [10, 60, 44],
+        )
+    }
+    pub fn arctic() -> Self {
+        Self::bright(
+            [228, 243, 252],
+            [204, 228, 244],
+            [14, 112, 166],
+            [255, 132, 68],
+            [14, 40, 64],
+        )
+    }
+    pub fn cherry() -> Self {
+        Self::dark([38, 6, 12], [196, 30, 60], [255, 192, 120])
+    }
+    pub fn gold() -> Self {
+        Self::dark([20, 16, 6], [186, 148, 40], [255, 226, 140])
+    }
+    pub fn coffee() -> Self {
+        Self::dark([30, 20, 14], [140, 92, 60], [244, 210, 150])
+    }
+
     /// Light, like a printed listing.
     pub fn paper() -> Self {
         let ink = [40, 40, 52];
@@ -1737,6 +1827,14 @@ mod tests {
             Palette::forest(),
             Palette::berry(),
             Palette::mono(),
+            Palette::kids(),
+            Palette::bubblegum(),
+            Palette::lavender(),
+            Palette::mint(),
+            Palette::arctic(),
+            Palette::cherry(),
+            Palette::gold(),
+            Palette::coffee(),
             Palette::custom([30, 160, 90], [250, 240, 120]),
             Palette::custom_on([30, 160, 90], [250, 240, 120], Some([20, 20, 60])),
             Palette::from_theme(&Theme::for_channel("x")),

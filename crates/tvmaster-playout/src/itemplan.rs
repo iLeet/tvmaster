@@ -307,7 +307,7 @@ pub(crate) async fn plan_item(
         } else {
             ov.bug.text.clone()
         };
-        let th = crate::spec_theme(spec);
+        let th = crate::spec_theme_at(spec, item.start_ms);
         let g = tvmaster_render::overlay::bug_themed(&text, ov.bug.opacity, &th);
         let name = format!(
             "{:016x}.png",
@@ -334,7 +334,7 @@ pub(crate) async fn plan_item(
         if let Some(title) = item.show.as_deref().filter(|t| !t.is_empty()) {
             let sub = item.subtitle.clone().unwrap_or_default();
             let width = cfg.profile.width * 45 / 100;
-            let th = crate::spec_theme(spec);
+            let th = crate::spec_theme_at(spec, item.start_ms);
             let g = tvmaster_render::overlay::lower_third_themed(title, &sub, width, &th);
             let name = format!(
                 "{:016x}.png",
@@ -371,7 +371,7 @@ pub(crate) async fn plan_item(
         started_ms,
     }) = live
     {
-        if spec.guide.is_none() {
+        if spec.guide.is_none() && spec.info.is_none() {
             let width = cfg.profile.width;
             let k = width as f32 / 1280.0;
             let bar = tvmaster_render::alert::alert_bar(&look, &event, &text, width);
@@ -478,7 +478,7 @@ async fn prepare_ticker(
         return None;
     }
     let text = parts.join("   •   ");
-    let th = crate::spec_theme(spec);
+    let th = crate::spec_theme_at(spec, item.start_ms);
     let width = cfg.profile.width;
     let g = tvmaster_render::ticker::ticker(&th, &tk.label, &text, width);
     let key = format!("{text}|{}|{th:?}|{width}", tk.label);

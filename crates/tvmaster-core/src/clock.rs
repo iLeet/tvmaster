@@ -25,6 +25,31 @@ impl Zone {
             .naive_local()
     }
 
+    /// The time of day at `ms` as people write it: "9:04 PM", or "21:04" on a 24-hour clock.
+    pub fn clock_text(&self, ms: i64, hour12: bool) -> String {
+        use chrono::Timelike;
+        let t = self.local(ms);
+        let (h, m) = (t.hour(), t.minute());
+        if !hour12 {
+            return format!("{h:02}:{m:02}");
+        }
+        let (h12, ampm) = match h {
+            0 => (12, "AM"),
+            1..=11 => (h, "AM"),
+            12 => (12, "PM"),
+            _ => (h - 12, "PM"),
+        };
+        format!("{h12}:{m:02} {ampm}")
+    }
+
+    /// The date at `ms` as the guide writes it: "SUN NOV 15".
+    pub fn date_text(&self, ms: i64) -> String {
+        self.local(ms)
+            .format("%a %b %-d")
+            .to_string()
+            .to_uppercase()
+    }
+
     /// Offset (local minus UTC) in effect at `ms`.
     pub fn offset_ms(&self, ms: i64) -> i64 {
         self.local(ms).and_utc().timestamp_millis() - ms

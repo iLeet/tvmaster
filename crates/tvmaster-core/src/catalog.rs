@@ -1,5 +1,6 @@
 //! The channel's view of its library: shows with ordered episodes.
 
+use crate::daypart::Rating;
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone)]
@@ -30,6 +31,8 @@ pub struct ShowEps {
 pub struct Catalog {
     /// Keyed by lower-cased show name. Files without a show share the key "".
     shows: BTreeMap<String, ShowEps>,
+    /// The rating of each rated show, by lower-cased name. A show missing from here is unrated.
+    ratings: BTreeMap<String, Rating>,
 }
 
 impl Catalog {
@@ -64,7 +67,38 @@ impl Catalog {
                 (key, ShowEps { name, eps })
             })
             .collect();
-        Self { shows }
+        Self {
+            shows,
+            ratings: BTreeMap::new(),
+        }
+    }
+
+    /// Say how each show is rated (keys are lower-cased show names).
+    pub fn with_ratings(mut self, ratings: BTreeMap<String, Rating>) -> Self {
+        self.ratings = ratings;
+        self
+    }
+
+    /// Whether a show may air under a limit: `cap` is the highest rating allowed and whether
+    /// shows without one may air. No limit allows everything.
+    pub fn allowed(&self, key: &str, cap: Option<(Rating, bool)>) -> bool {
+        match cap {
+            None => true,
+            Some((max, unrated_ok)) => match self.ratings.get(key) {
+                Some(r) => *r <= max,
+                None => unrated_ok,
+            },
+        }
+    }
+
+    /// How many shows are rated, and how many are not.
+    pub fn rated_counts(&self) -> (usize, usize) {
+        let rated = self
+            .shows
+            .keys()
+            .filter(|k| self.ratings.contains_key(*k))
+            .count();
+        (rated, self.shows.len() - rated)
     }
 
     pub fn is_empty(&self) -> bool {

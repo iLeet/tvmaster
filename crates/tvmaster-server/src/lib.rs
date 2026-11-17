@@ -7,9 +7,11 @@ mod auth;
 mod autopilot;
 mod backup;
 mod channels;
+mod dayparts;
 mod guide_preview;
 mod hdhr;
 mod headlines;
+mod info_preview;
 mod iptv;
 mod libraries;
 mod live;
@@ -23,6 +25,7 @@ mod shownames;
 mod soak;
 mod station;
 mod stream;
+mod templates;
 mod theme;
 pub mod tls;
 mod tvs;
@@ -335,7 +338,23 @@ impl AppState {
                 Arc::new(pip::LocalChannels(self.clone())) as Arc<dyn tvmaster_playout::PipHost>
             }),
         });
+        let info = (channel.kind == ChannelKind::Info).then(|| tvmaster_playout::InfoSpec {
+            config: channel.info.clone(),
+            music: tvmaster_db::list_media_of_kind(
+                &self.db(),
+                &channel.info.music_library_ids,
+                "music",
+            )
+            .unwrap_or_default()
+            .into_iter()
+            .map(|m| m.path.into())
+            .collect(),
+            zone: tvmaster_core::Zone::parse(&channel.lineup.timezone)
+                .or_else(|| tvmaster_core::Zone::parse(&station::effective_timezone(&self.db()))),
+        });
         ChannelSpec {
+            dayparts: dayparts::for_channel(&self.db(), channel),
+            info,
             guide,
             id: channel.id.clone(),
             name: channel.name.clone(),
@@ -596,6 +615,9 @@ fn build_router(state: AppState, https: bool) -> Router {
         .route("/api/v1/setup", get(setup::get))
         .route("/api/v1/setup/starter", post(setup::starter))
         .route("/api/v1/setup/skip", post(setup::skip))
+        .route("/api/v1/dayparts", get(dayparts::get).put(dayparts::put))
+        .route("/api/v1/channel-templates", get(templates::get))
+        .route("/api/v1/info/preview", post(info_preview::preview))
         .route("/api/v1/theme", get(theme::get).put(theme::put))
         .route("/api/v1/theme/preview", post(theme::preview))
         .route("/api/v1/live", get(live::get_live).post(live::set_live))
