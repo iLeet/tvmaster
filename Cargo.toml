@@ -38,6 +38,8 @@ clap = { version = "4", features = ["derive", "env"] }
 http-body-util = "0.1"
 regex = "1"
 walkdir = "2"
+tar = { version = "0.4", default-features = false }
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -58,3 +60,7 @@ tvmaster-media = { path = "crates/tvmaster-media" }
 tvmaster-playout = { path = "crates/tvmaster-playout" }
 tvmaster-render = { path = "crates/tvmaster-render" }
 tvmaster-server = { path = "crates/tvmaster-server" }
+
+# Debug builds and test binaries were growing past 20 GB; line tables are enough for backtraces.
+[profile.dev]
+debug = "line-tables-only"

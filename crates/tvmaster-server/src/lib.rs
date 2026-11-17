@@ -5,6 +5,7 @@ mod admin;
 mod assets;
 mod auth;
 mod autopilot;
+mod backup;
 mod channels;
 mod guide_preview;
 mod hdhr;
@@ -386,6 +387,18 @@ impl AppState {
         autopilot::fill_blank_timezones(&state.db(), &zone);
         // Lineups and settings use the shows' current names (clean-ups from a newer version, say).
         let _ = tvmaster_db::normalize_names(&state.db());
+        // The nightly backup (when one is due) and tidying the old ones.
+        {
+            let st = state.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_secs(90)).await;
+                loop {
+                    let s2 = st.clone();
+                    let _ = tokio::task::spawn_blocking(move || backup::nightly(&s2)).await;
+                    tokio::time::sleep(Duration::from_secs(3600)).await;
+                }
+            });
+        }
         // A timed override ends by itself.
         let ticker = state.clone();
         tokio::spawn(async move {
@@ -546,6 +559,11 @@ fn build_router(state: AppState, https: bool) -> Router {
             get(station::get_timezone).put(station::put_timezone),
         )
         .route("/api/v1/server/restart", post(station::server_restart))
+        .route("/api/v1/backups", get(backup::list).post(backup::create))
+        .route("/api/v1/backups/settings", axum::routing::put(backup::put_settings))
+        .route("/api/v1/backups/upload", post(backup::upload))
+        .route("/api/v1/backups/:name", get(backup::download).delete(backup::remove))
+        .route("/api/v1/backups/:name/restore", post(backup::restore))
         .route("/api/v1/setup", get(setup::get))
         .route("/api/v1/setup/starter", post(setup::starter))
         .route("/api/v1/setup/skip", post(setup::skip))

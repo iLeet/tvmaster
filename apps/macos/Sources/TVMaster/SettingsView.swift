@@ -56,6 +56,7 @@ struct SettingsView: View {
                         Task { if let c = model.client { _ = await model.run { try await c.restartServer() }; try? await Task.sleep(nanoseconds: 6_000_000_000); await model.connect() } }
                     }
                 }
+                BackupsSection()
                 Section("Access token") {
                     if let sec = model.security {
                         if sec.locked {

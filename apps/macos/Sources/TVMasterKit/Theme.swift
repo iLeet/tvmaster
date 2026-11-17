@@ -53,3 +53,31 @@ public struct SetupState: Decodable, Sendable {
     public let stationFolder: Bool
     public let canUpload: Bool
 }
+
+public struct BackupInfo: Decodable, Identifiable, Sendable, Hashable {
+    public struct Counts: Decodable, Sendable, Hashable { public let channels: Int; public let libraries: Int; public let files: Int }
+    public let name: String
+    public let size: Int64
+    public let createdMs: Int64
+    public let label: String
+    public let auto: Bool
+    public let version: String
+    public let counts: Counts
+    public var id: String { name }
+    public var created: Date { Date(timeIntervalSince1970: Double(createdMs) / 1000) }
+}
+
+public struct BackupList: Decodable, Sendable {
+    public let auto: Bool
+    public let keep: Int
+    public let backups: [BackupInfo]
+}
+
+public struct BackupRestored: Decodable, Sendable {
+    public let channels: Int
+    public let libraries: Int
+    public let files: Int
+    public let pictures: Int
+    public let missingFolders: [String]
+    public let safetyCopy: String
+}

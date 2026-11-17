@@ -412,3 +412,7 @@ export interface SetupState {
   can_upload: boolean;
   theme: ThemeChoice;
 }
+
+export interface BackupInfo { name: string; size: number; created_ms: number; label: string; auto: boolean; version: string; counts: { channels: number; libraries: number; files: number } }
+export interface BackupList { auto: boolean; keep: number; backups: BackupInfo[] }
+export interface BackupRestored { channels: number; libraries: number; files: number; pictures: number; missing_folders: string[]; safety_copy: string }

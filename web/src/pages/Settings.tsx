@@ -4,6 +4,7 @@ import { isLoopback, shareHosts, shareLinks, shareSchemes, type Scheme } from '.
 import { useQuery } from '../live';
 import type { AuthStatus, MonitorSettings, MonitorState, SecurityStatus, System, TimezoneState } from '../types';
 import { Badge, Btn, Card, ConfirmBtn, CopyField, Field, Segmented, Spinner, Toggle, useToast } from '../ui';
+import { Backups } from './Backups';
 
 export function Settings() {
   const sys = useQuery(() => api.get<System>('/system'));
@@ -212,6 +213,8 @@ export function Settings() {
           <p className="small dim">HTTPS is off, so the access token crosses your network unencrypted. Turn it on with <span className="mono">tvmaster serve --tls</span> (or <span className="mono">TVMASTER_TLS=1</span>). It uses a self-signed certificate unless you give it <span className="mono">--tls-cert</span> and <span className="mono">--tls-key</span>.</p>
         </Card>
       )}
+
+      <Backups />
 
       <Card className="stack">
         <h2>Server</h2>

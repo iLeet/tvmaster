@@ -467,6 +467,51 @@ public struct TVMasterClient: Sendable {
 
     public func shows() async throws -> [ShowSummary] { try await get("/shows") }
 
+    // MARK: backups
+
+    public func backups() async throws -> BackupList { try await get("/backups") }
+
+    @discardableResult
+    public func backUpNow(label: String = "") async throws -> BackupInfo {
+        let data = try await send("POST", "/backups", body: .object(["label": .string(label)]))
+        do { return try Self.decoder.decode(BackupInfo.self, from: data) } catch { throw TVMasterError.invalidResponse }
+    }
+
+    public func setBackupSettings(auto: Bool? = nil, keep: Int? = nil) async throws {
+        var o: [String: JSONValue] = [:]
+        if let auto { o["auto"] = .bool(auto) }
+        if let keep { o["keep"] = .number(Double(keep)) }
+        _ = try await send("PUT", "/backups/settings", body: .object(o))
+    }
+
+    public func deleteBackup(_ name: String) async throws {
+        _ = try await send("DELETE", "/backups/\(name)")
+    }
+
+    public func restoreBackup(_ name: String) async throws -> BackupRestored {
+        let data = try await send("POST", "/backups/\(name)/restore")
+        do { return try Self.decoder.decode(BackupRestored.self, from: data) } catch { throw TVMasterError.invalidResponse }
+    }
+
+    /// The backup file's bytes, to save somewhere.
+    public func downloadBackup(_ name: String) async throws -> Data { try await send("GET", "/backups/\(name)") }
+
+    /// Put a backup file from this Mac on the server (then restore it).
+    @discardableResult
+    public func uploadBackup(from file: URL) async throws -> BackupInfo {
+        var req = try makeRequest("POST", "/backups/upload", query: [URLQueryItem(name: "name", value: file.lastPathComponent)])
+        req.timeoutInterval = 3600
+        let (body, response): (Data, URLResponse)
+        do { (body, response) = try await session.upload(for: req, fromFile: file) } catch { throw mapped(error) }
+        guard let http = response as? HTTPURLResponse else { throw TVMasterError.invalidResponse }
+        if http.statusCode == 401 { throw TVMasterError.unauthorized }
+        guard (200..<300).contains(http.statusCode) else {
+            let message = (try? JSONDecoder().decode([String: String].self, from: body))?["error"] ?? "Server error \(http.statusCode)"
+            throw TVMasterError.http(http.statusCode, message)
+        }
+        do { return try Self.decoder.decode(BackupInfo.self, from: body) } catch { throw TVMasterError.invalidResponse }
+    }
+
     /// The ready-made amounts of advertising and the station cards, the same everywhere.
     public func adOptions() async throws -> AdOptions { try await get("/ads/options") }
 
