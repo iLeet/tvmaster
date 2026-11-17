@@ -125,7 +125,7 @@ struct ChannelEditorSheet: View {
                     ProgrammingForm(ls: $ls, shows: showNames, libraries: model.libraries)
                 }
             } else if tab == .picture && !isGuide && !isNew {
-                PictureSoundForm(ps: $ps, sys: model.system, testOnly: isTest, oldServer: rawOptions == nil && !loadingRaw)
+                PictureSoundForm(ps: $ps, sys: model.system, testOnly: isTest, oldServer: rawOptions == nil && !loadingRaw, channelID: id, channelName: name, channelNumber: number)
             } else if tab == .guide && isGuide {
                 GuideForm(gs: $gs, id: id, name: name, raw: rawGuide)
             } else {
@@ -303,6 +303,9 @@ struct PictureSoundForm: View {
     var testOnly = false
     /// The server did not send picture and sound settings: it is older than this app.
     var oldServer = false
+    var channelID: String?
+    var channelName: String?
+    var channelNumber: Int?
 
     var body: some View {
         Form {
@@ -347,6 +350,18 @@ struct PictureSoundForm: View {
                 Picker("Quality", selection: $ps.quality) { ForEach(PictureSoundSettings.qualities, id: \.value) { Text($0.label).tag($0.value) } }
                 Picker("Screen shape", selection: $ps.aspect) { ForEach(PictureSoundSettings.aspects, id: \.value) { Text($0.label).tag($0.value) } }
                 Picker("Look", selection: $ps.look) { ForEach(PictureSoundSettings.looks, id: \.value) { Text($0.label).tag($0.value) } }
+            }
+            Section("Look") {
+                Toggle("Follow the station theme", isOn: Binding(get: { ps.theme == nil }, set: { ps.theme = $0 ? nil : ThemeChoice() }))
+                if ps.theme != nil {
+                    let t = Binding(get: { ps.theme ?? ThemeChoice() }, set: { ps.theme = $0 })
+                    ThemePickerView(theme: t.theme, primary: t.primary, accent: t.accent, background: t.background,
+                                    autoName: "Per channel", autoAbout: "Colours made from this channel.")
+                    StylePickerView(style: t.style)
+                    ThemePreviewView(choice: ps.theme ?? ThemeChoice(), what: "card", id: channelID, name: channelName, number: channelNumber)
+                } else {
+                    Text("Cards, break screens, the stand-by screen, alerts and on-screen graphics use the look chosen under Appearance.").font(.caption).foregroundStyle(.secondary)
+                }
             }
             Section("On-screen graphics") {
                 Toggle("Channel logo in a corner", isOn: $ps.bugEnabled)

@@ -41,6 +41,7 @@ export function emptyOptions(): ChannelOptions {
       show_title: { enabled: false, seconds: 8 },
     },
     shows: {},
+    theme: null,
   };
 }
 
@@ -58,6 +59,7 @@ export function withDefaults(o: Partial<ChannelOptions> | null | undefined): Cha
       show_title: { ...d.overlay.show_title, ...o?.overlay?.show_title },
     },
     shows: { ...o?.shows },
+    theme: o?.theme ?? null,
   };
 }
 

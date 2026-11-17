@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { GUIDE_PRESETS, GUIDE_THEMES, cleanColor, emptyGuide, guideProblem, toggleId, withGuideDefaults } from './guide';
+import { GUIDE_PRESETS, cleanColor, emptyGuide, guideProblem, toggleId, withGuideDefaults } from './guide';
 
 describe('guide settings', () => {
   it('start with the look guides have always had', () => {
@@ -77,14 +77,6 @@ describe('guide looks', () => {
     expect(modern.look.typeface).toBe('smooth');
     expect(modern.layout.scanlines).toBe(false);
     expect(GUIDE_PRESETS.find((p) => p.id === 'retro')!.apply(modern).look.typeface).toBe('pixel');
-  });
-
-  it('every theme has a name, help and two swatch colours', () => {
-    for (const t of GUIDE_THEMES) {
-      expect(t.label && t.help).toBeTruthy();
-      expect(t.colors.every((c) => /^#[0-9a-f]{6}$/.test(c))).toBe(true);
-    }
-    expect(new Set(GUIDE_THEMES.map((t) => t.value)).size).toBe(GUIDE_THEMES.length);
   });
 
   it('wants a picture before a picture background can be saved', () => {

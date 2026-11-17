@@ -38,7 +38,7 @@ export function LiveControl() {
   const [busy, setBusy] = useState(false);
   const [airOn, setAirOn] = useState<ChannelView | null>(null);
   const [style, setStyle] = useState('full');
-  const [theme, setTheme] = useState('retro');
+  const [theme, setTheme] = useState('station');
   const [severity, setSeverity] = useState('emergency');
   const [sound, setSound] = useState('attention');
   const opts = live.data?.options;
@@ -132,7 +132,7 @@ export function LiveControl() {
             </Field>
             <Field label="Look">
               <select className="select" value={theme} onChange={(e) => setTheme(e.target.value)}>
-                {(opts?.themes ?? [{ value: 'retro', label: 'Retro' }]).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                {(opts?.themes ?? [{ value: 'station', label: 'Match the station theme' }]).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </Field>
             <Field label="How serious">

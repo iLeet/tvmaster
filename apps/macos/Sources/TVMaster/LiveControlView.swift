@@ -11,7 +11,7 @@ struct LiveControlView: View {
     @State private var message = ""
     @State private var minutes = 0
     @State private var style = "full"
-    @State private var theme = "retro"
+    @State private var theme = "station"
     @State private var severity = "emergency"
     @State private var sound = "attention"
     @State private var shot: NSImage?
@@ -113,7 +113,7 @@ struct LiveControlView: View {
             let o = state.options
             HStack(alignment: .top) {
                 Picker("Shown as", selection: $style) { ForEach(o?.styles ?? [LiveChoice(value: "full", label: "Full screen")]) { Text($0.label).tag($0.value) } }
-                Picker("Look", selection: $theme) { ForEach(o?.themes ?? [LiveChoice(value: "retro", label: "Retro")]) { Text($0.label).tag($0.value) } }
+                Picker("Look", selection: $theme) { ForEach(o?.themes ?? [LiveChoice(value: "station", label: "Match the station theme")]) { Text($0.label).tag($0.value) } }
             }
             HStack(alignment: .top) {
                 Picker("How serious", selection: $severity) { ForEach(o?.severities ?? [LiveChoice(value: "emergency", label: "Emergency (red)")]) { Text($0.label).tag($0.value) } }

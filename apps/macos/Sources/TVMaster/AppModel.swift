@@ -4,7 +4,7 @@ import Observation
 import TVMasterKit
 
 enum SidebarItem: String, CaseIterable, Identifiable, Hashable {
-    case home, watch, live, channels, schedule, libraries, shows, tvs, share
+    case home, watch, live, channels, schedule, libraries, shows, tvs, appearance, share
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -16,6 +16,7 @@ enum SidebarItem: String, CaseIterable, Identifiable, Hashable {
         case .libraries: "Libraries"
         case .shows: "Shows"
         case .tvs: "TVs"
+        case .appearance: "Appearance"
         case .share: "Share"
         }
     }
@@ -29,6 +30,7 @@ enum SidebarItem: String, CaseIterable, Identifiable, Hashable {
         case .libraries: "folder"
         case .shows: "film.stack"
         case .tvs: "tv"
+        case .appearance: "paintpalette"
         case .share: "square.and.arrow.up"
         }
     }

@@ -272,8 +272,12 @@ pub(crate) async fn plan_item(
         } else {
             ov.bug.text.clone()
         };
-        let g = tvmaster_render::overlay::bug(&text, ov.bug.opacity);
-        let name = format!("{:016x}.png", fnv1a(&format!("{text}|{}", ov.bug.opacity)));
+        let th = crate::spec_theme(spec);
+        let g = tvmaster_render::overlay::bug_themed(&text, ov.bug.opacity, &th);
+        let name = format!(
+            "{:016x}.png",
+            fnv1a(&format!("{text}|{}|{th:?}", ov.bug.opacity))
+        );
         if let Some(png) = graphic(cfg, "bugs", &name, &g.png).await {
             let (x, y) = corner_xy(ov.bug.position, 24);
             plan.overlays.push(OverlayInput {
@@ -288,8 +292,9 @@ pub(crate) async fn plan_item(
         if let Some(title) = item.show.as_deref().filter(|t| !t.is_empty()) {
             let sub = item.subtitle.clone().unwrap_or_default();
             let width = cfg.profile.width * 45 / 100;
-            let g = tvmaster_render::overlay::lower_third(title, &sub, width);
-            let name = format!("{:016x}.png", fnv1a(&format!("{title}|{sub}|{width}")));
+            let th = crate::spec_theme(spec);
+            let g = tvmaster_render::overlay::lower_third_themed(title, &sub, width, &th);
+            let name = format!("{:016x}.png", fnv1a(&format!("{title}|{sub}|{width}|{th:?}")));
             if let Some(png) = graphic(cfg, "titles", &name, &g.png).await {
                 let secs = ov.show_title.seconds;
                 plan.overlays.push(OverlayInput {

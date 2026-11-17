@@ -11,6 +11,7 @@ import { AdsEditor } from './AdsEditor';
 import { GuideEditor } from './GuideEditor';
 import { LineupEditor } from './LineupEditor';
 import { PictureSound } from './PictureSound';
+import { StylePicker, ThemePicker, ThemePreview, emptyChoice, useThemeCatalogue } from '../ThemePicker';
 
 interface Draft {
   id: string;
@@ -60,6 +61,7 @@ const fromChannel = (c: Channel): Draft => ({
 export function ChannelEditor({ id, tab }: { id: string; tab: string }) {
   const isNew = id === 'new';
   const { say, attempt } = useToast();
+  const station = useThemeCatalogue()?.station;
   const channel = useQuery(() => (isNew ? Promise.resolve(null) : api.get<ChannelView>(`/channels/${id}`)), [id]);
   const all = useQuery(() => api.get<ChannelView[]>('/channels'));
   const libs = useQuery(() => api.get<Library[]>('/libraries'));
@@ -242,6 +244,18 @@ export function ChannelEditor({ id, tab }: { id: string; tab: string }) {
 
           {draft.kind === 'test' && <p className="small dim">A test pattern channel airs only its screen: colour bars and a tone by default, or snow, black, a station card or a picture of your own. Choose it on the Screen tab.</p>}
 
+          <Card className="stack">
+            <h2>Look</h2>
+            <p className="small dim">Cards, break screens, the stand-by screen, alerts and on-screen graphics{draft.kind === 'guide' ? ', and the guide' : ''}. Follows the station theme unless you give this channel its own.</p>
+            <Toggle checked={!draft.options.theme} onChange={(on) => set({ options: { ...draft.options, theme: on ? null : { ...emptyChoice(), ...(station ?? {}) } } })} label={<span><strong>Follow the station theme</strong> <span className="dim small">{station ? `${station.theme === 'auto' ? 'per channel' : station.theme}, ${station.style}` : ''}</span></span>} />
+            {draft.options.theme && (
+              <div className="stack nest">
+                <ThemePicker value={draft.options.theme} onChange={(v) => set({ options: { ...draft.options, theme: { ...draft.options.theme!, ...v } } })} autoName="Per channel" autoAbout="Colours made from this channel." />
+                <StylePicker value={draft.options.theme.style} onChange={(style) => set({ options: { ...draft.options, theme: { ...draft.options.theme!, style } } })} />
+                <ThemePreview choice={draft.options.theme} what="card" id={draft.id} name={draft.name} number={draft.number} />
+              </div>
+            )}
+          </Card>
           <Card className="stack">
             <h2>Running it</h2>
             <Toggle checked={draft.autopilot} onChange={(v) => set({ autopilot: v })} label={<span><strong>Autopilot</strong> <span className="dim">— edits re-roll the future automatically (off = manual lock until you re-roll)</span></span>} />

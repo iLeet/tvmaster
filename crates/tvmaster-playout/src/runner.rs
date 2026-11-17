@@ -22,7 +22,7 @@ use tokio::process::Command;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tvmaster_core::BumperKind;
-use tvmaster_render::{render, Scene, Theme, FPS, HEIGHT, WIDTH};
+use tvmaster_render::{render, Scene, Theme, FPS};
 
 /// Buffered MPEG-TS chunks between the encoder and the segmenter.
 const CHUNK_BUFFER: usize = 256;
@@ -315,7 +315,7 @@ async fn produce(
             }
             PlayKind::Bumper(kind) => {
                 let scene = bumper_scene(&spec, kind, &item).await;
-                let theme = Theme::for_channel(&spec.id);
+                let theme = crate::spec_theme(&spec);
                 let outcome = run_rendered(
                     &cfg,
                     scene,
@@ -450,9 +450,10 @@ async fn run_rendered(
 ) -> Result<Outcome> {
     let total_secs = (offset_ms + duration_ms) as f32 / 1000.0;
     let frames = (duration_ms as f64 / 1000.0 * FPS as f64).ceil() as u64;
+    let (fw, fh) = theme.frame_size();
     let args = rendered_args(
-        WIDTH,
-        HEIGHT,
+        fw,
+        fh,
         duration_ms,
         ts_offset_ms,
         &cfg.profile,
@@ -478,7 +479,7 @@ async fn run_rendered(
             let (scene, theme) = (scene.clone(), theme);
             let start = i;
             let chunk = tokio::task::spawn_blocking(move || {
-                let mut buf = Vec::with_capacity(n as usize * WIDTH * HEIGHT * 3);
+                let mut buf = Vec::with_capacity(n as usize * fw * fh * 3);
                 for k in 0..n {
                     let t = offset_ms as f32 / 1000.0 + (start + k) as f32 / FPS as f32;
                     buf.extend_from_slice(&render(&scene, &theme, t, total_secs).px);
@@ -731,12 +732,12 @@ async fn slate(
 /// The station card as a picture, made once per channel and message.
 async fn card_png(cfg: &EngineConfig, spec: &ChannelSpec) -> Option<std::path::PathBuf> {
     let message = spec.options.off_air.message.clone();
-    let key = format!("{}|{}|{}|{}", spec.id, spec.number, spec.name, message);
+    let theme = crate::spec_theme(spec);
+    let key = format!("{}|{}|{}|{}|{:?}", spec.id, spec.number, spec.name, message, theme);
     let dir = cfg.root.join("cache").join("cards");
     tokio::fs::create_dir_all(&dir).await.ok()?;
     let path = dir.join(format!("{:016x}.png", tvmaster_core::fnv1a(&key)));
     if !path.exists() {
-        let theme = Theme::for_channel(&spec.id);
         let g = tvmaster_render::overlay::station_card(&theme, spec.number, &spec.name, &message);
         let tmp = path.with_extension("part");
         tokio::fs::write(&tmp, &g.png).await.ok()?;

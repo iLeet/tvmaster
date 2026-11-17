@@ -94,6 +94,8 @@ public struct PictureSoundSettings: Equatable, Sendable {
     public var offAirMessage = ""
     public var offAirImage = ""
     public var offAirTone = false
+    /// This channel's own theme (`nil` = it follows the station's).
+    public var theme: ThemeChoice?
 
     public var signOffEnabled = false
     public var signOffFrom = "02:00"
@@ -121,6 +123,7 @@ public struct PictureSoundSettings: Equatable, Sendable {
     public init(options: JSONValue?, lineup: JSONValue?) {
         func str(_ p: [String], _ d: String) -> String { options?.get(p)?.stringValue ?? d }
         func bool(_ p: [String], _ d: Bool) -> Bool { options?.get(p)?.boolValue ?? d }
+        theme = ThemeChoice(json: options?.get(["theme"]))
         audioLanguages = options?.get(["audio", "languages"])?.stringArray ?? []
         avoidCommentary = bool(["audio", "avoid_commentary"], true)
         loudness = str(["audio", "loudness"], "off")
@@ -158,6 +161,7 @@ public struct PictureSoundSettings: Equatable, Sendable {
     public func apply(to options: JSONValue?) -> JSONValue {
         var o = options ?? .object([:])
         let strings: ([String]) -> JSONValue = { .array($0.map { .string($0) }) }
+        o.set(["theme"], theme?.json ?? .null)
         o.set(["audio", "languages"], strings(audioLanguages))
         o.set(["audio", "avoid_commentary"], .bool(avoidCommentary))
         o.set(["audio", "loudness"], .string(loudness))

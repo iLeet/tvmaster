@@ -8,6 +8,7 @@
 
 pub mod alert;
 pub mod guide;
+pub mod modern;
 pub mod overlay;
 pub mod png;
 pub mod text;
@@ -188,12 +189,20 @@ fn hsv(h: f32, s: f32, v: f32) -> Rgb {
     [(r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8]
 }
 
-/// A channel's colours.
+/// The colours and style of the station's graphics (cards, bumpers, screens).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Theme {
     pub dark: Rgb,
     pub primary: Rgb,
     pub accent: Rgb,
+    /// The bottom of the background gradient.
+    pub bottom: Rgb,
+    /// Main text colour.
+    pub ink: Rgb,
+    /// Text on an accent-coloured band.
+    pub on_accent: Rgb,
+    /// Smooth type at full resolution instead of the pixel font.
+    pub modern: bool,
 }
 
 impl Theme {
@@ -202,6 +211,10 @@ impl Theme {
             dark: hsv(h, 0.65, 0.22),
             primary: hsv(h, 0.75, 0.95),
             accent: hsv(h + 0.13, 0.85, 1.0),
+            bottom: [4, 4, 8],
+            ink: WHITE,
+            on_accent: [10, 10, 20],
+            modern: false,
         }
     }
 
@@ -212,6 +225,28 @@ impl Theme {
             h = (h ^ b as u32).wrapping_mul(16777619);
         }
         Self::from_hue((h % 360) as f32 / 360.0)
+    }
+
+    /// The graphics' look taken from a guide palette, so one theme dresses everything.
+    pub fn from_palette(p: &Palette, modern: bool) -> Self {
+        Self {
+            dark: p.bg_top,
+            primary: p.tick,
+            accent: p.accent,
+            bottom: p.bg_bottom,
+            ink: p.text_now,
+            on_accent: alert::ink_on(p.accent),
+            modern,
+        }
+    }
+
+    /// The size frames are drawn at.
+    pub fn frame_size(&self) -> (usize, usize) {
+        if self.modern {
+            (WIDTH * 2, HEIGHT * 2)
+        } else {
+            (WIDTH, HEIGHT)
+        }
     }
 }
 
@@ -333,7 +368,7 @@ fn slide(t: f32, delay: f32) -> i32 {
 }
 
 fn background(c: &mut Canvas, th: &Theme, t: f32) {
-    c.vgradient(th.dark, [4, 4, 8]);
+    c.vgradient(th.dark, th.bottom);
     // Scrolling stripe band at the bottom.
     let off = (t * 48.0) as i32;
     for y in 318..344 {
@@ -345,8 +380,8 @@ fn background(c: &mut Canvas, th: &Theme, t: f32) {
             }
         }
     }
-    c.rect(0, 316, WIDTH as i32, 2, WHITE);
-    c.rect(0, 344, WIDTH as i32, 2, WHITE);
+    c.rect(0, 316, WIDTH as i32, 2, th.ink);
+    c.rect(0, 344, WIDTH as i32, 2, th.ink);
 }
 
 /// The emergency-alert screen. Steady (no fades), because it stays up for as long as the alert does.
@@ -405,7 +440,7 @@ fn alert_into(c: &mut Canvas, event: &str, text: &str, t: f32, severity: alert::
 fn header(c: &mut Canvas, th: &Theme, name: &str, t: f32) {
     let x = 24 - slide(t, 0.0);
     c.rect(x - 8, 18, 6, 22, th.accent);
-    c.text_shadow(x + 4, 20, &truncate(name, 34), 2, WHITE);
+    c.text_shadow(x + 4, 20, &truncate(name, 34), 2, th.ink);
 }
 
 fn lines(
@@ -429,6 +464,9 @@ fn lines(
 
 /// Render one frame of a bumper `dur` seconds long, `t` seconds in.
 pub fn render(scene: &Scene, th: &Theme, t: f32, dur: f32) -> Canvas {
+    if th.modern && !matches!(scene, Scene::Alert { .. }) {
+        return modern::render(scene, th, t, dur);
+    }
     let mut c = Canvas::new(WIDTH, HEIGHT);
     if let Scene::Alert { event, text } = scene {
         alert_into(&mut c, event, text, t, alert::Severity::Emergency);
@@ -440,7 +478,7 @@ pub fn render(scene: &Scene, th: &Theme, t: f32, dur: f32) -> Canvas {
             c.text_centered(96, "YOU'RE WATCHING", 2, th.accent);
             let (scale, ls) = layout_title(name, 580, 2);
             let y = 130 - (ls.len() as i32 - 1) * scale * 5;
-            lines(&mut c, y, &ls, scale, WHITE, t, 0.1);
+            lines(&mut c, y, &ls, scale, th.ink, t, 0.1);
             // Sweeping highlight under the name.
             let x = ((t * 260.0) as i32 % 900) - 150;
             c.rect(x, 262, 120, 4, th.accent);
@@ -453,7 +491,7 @@ pub fn render(scene: &Scene, th: &Theme, t: f32, dur: f32) -> Canvas {
                 92,
                 &["WE'LL BE".into(), "RIGHT BACK".into()],
                 5,
-                WHITE,
+                th.ink,
                 t,
                 0.05,
             );
@@ -473,15 +511,15 @@ pub fn render(scene: &Scene, th: &Theme, t: f32, dur: f32) -> Canvas {
             );
             let (scale, ls) = layout_title(show, 580, 3);
             let y = 150;
-            lines(&mut c, y, &ls, scale.min(5), WHITE, t, 0.2);
+            lines(&mut c, y, &ls, scale.min(5), th.ink, t, 0.2);
         }
         Scene::UpNext { name, title, time } => {
             header(&mut c, th, name, t);
             let bar = 70 - slide(t, 0.0) / 2;
             c.rect(0, bar, 640, 40, th.accent);
-            c.text(24 - slide(t, 0.05), bar + 8, "UP NEXT", 3, [10, 10, 20]);
+            c.text(24 - slide(t, 0.05), bar + 8, "UP NEXT", 3, th.on_accent);
             let (scale, ls) = layout_title(title, 580, 2);
-            let end = lines(&mut c, 134, &ls, scale.min(5), WHITE, t, 0.25);
+            let end = lines(&mut c, 134, &ls, scale.min(5), th.ink, t, 0.25);
             if !time.is_empty() {
                 let txt = format!("AT {time}");
                 lines(&mut c, end + 14, &[txt], 3, th.primary, t, 0.5);
@@ -500,12 +538,12 @@ pub fn render(scene: &Scene, th: &Theme, t: f32, dur: f32) -> Canvas {
             };
             let bar = 62 - slide(t, 0.0) / 2;
             c.rect(0, bar, 640, 40, th.accent);
-            c.text(24 - slide(t, 0.05), bar + 8, title, 3, [10, 10, 20]);
+            c.text(24 - slide(t, 0.05), bar + 8, title, 3, th.on_accent);
             let mut y = 124;
             for (i, (time, prog)) in items.iter().take(4).enumerate() {
                 let off = slide(t, 0.2 + i as f32 * 0.12);
                 c.text_shadow(32 - off, y, time, 2, th.primary);
-                c.text_shadow(32 + 10 * 16 - off, y, &truncate(prog, 26), 2, WHITE);
+                c.text_shadow(32 + 10 * 16 - off, y, &truncate(prog, 26), 2, th.ink);
                 y += 44;
             }
         }

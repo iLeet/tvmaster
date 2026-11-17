@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { emptyGuide, GUIDE_PRESETS, GUIDE_THEMES, PIP_PLACEMENTS, cleanColor, toggleId } from '../guide';
+import { emptyGuide, GUIDE_PRESETS, PIP_PLACEMENTS, toggleId } from '../guide';
+import { ThemePicker } from '../ThemePicker';
 import { PictureField } from '../PictureField';
 import type { ChannelView, GuideConfig, Library } from '../types';
 import { Card, Chips, ConfirmBtn, Field, Segmented, Toggle } from '../ui';
@@ -67,7 +68,6 @@ export function GuideEditor({
   const pip = (p: Partial<GuideConfig['pip']>) => set({ pip: { ...g.pip, ...p } });
   const programming = channels.filter((c) => c.kind === 'programming').sort((a, b) => a.number - b.number);
   const showable = channels.filter((c) => c.kind !== 'guide').sort((a, b) => a.number - b.number);
-  const theme = GUIDE_THEMES.find((t) => t.value === g.theme);
   const musicLibs = libs.filter((l) => l.kind === 'music');
 
   return (
@@ -100,35 +100,7 @@ export function GuideEditor({
 
       <Card className="stack">
         <h2>Colours</h2>
-        <div className="row wrap" style={{ gap: 10 }}>
-          {GUIDE_THEMES.map((t) => (
-            <button
-              key={t.value}
-              type="button"
-              className="btn"
-              aria-pressed={g.theme === t.value}
-              title={t.help}
-              onClick={() => set({ theme: t.value })}
-              style={{ display: 'grid', gap: 6, justifyItems: 'center', padding: 8, minWidth: 92, outline: g.theme === t.value ? '2px solid var(--accent)' : undefined }}
-            >
-              <span style={{ width: 64, height: 28, borderRadius: 6, background: `linear-gradient(110deg, ${t.value === 'custom' ? (cleanColor(g.colors.primary ?? '') ?? t.colors[0]) : t.colors[0]} 0 60%, ${t.value === 'custom' ? (cleanColor(g.colors.accent ?? '') ?? t.colors[1]) : t.colors[1]} 60% 100%)`, border: '1px solid var(--edge)' }} />
-              <span className="small">{t.label}</span>
-            </button>
-          ))}
-        </div>
-        {theme && <p className="small dim">{theme.help}</p>}
-        {g.theme === 'custom' && (
-          <div className="row wrap nest" style={{ alignItems: 'flex-end' }}>
-            {(['primary', 'accent', 'background'] as const).map((k) => (
-              <Field key={k} label={k === 'primary' ? 'Main colour' : k === 'accent' ? 'Highlight' : 'Background'} hint={k === 'background' ? 'Blank = a dark shade of the main colour.' : undefined}>
-                <span className="row" style={{ gap: 8 }}>
-                  <input type="color" aria-label={k} value={cleanColor(g.colors[k] ?? '') ?? (k === 'primary' ? '#3366ff' : k === 'accent' ? '#ffcc00' : '#101830')} onChange={(e) => set({ colors: { ...g.colors, [k]: e.target.value } })} />
-                  <input className="input mono" style={{ width: 110 }} placeholder="#3366ff" value={g.colors[k] ?? ''} onChange={(e) => set({ colors: { ...g.colors, [k]: e.target.value || null } })} />
-                </span>
-              </Field>
-            ))}
-          </div>
-        )}
+        <ThemePicker value={g} onChange={(v) => set({ theme: v.theme, colors: v.colors })} autoName="Follow the station" autoAbout="Uses the station theme (Appearance), so the guide matches your cards, bumpers and alerts. Pick a theme here to give this guide its own colours." />
         <Toggle checked={g.layout.scanlines} onChange={(v) => layout({ scanlines: v })} label={<span>Scanlines <span className="dim small">a faint CRT texture over everything</span></span>} />
       </Card>
 

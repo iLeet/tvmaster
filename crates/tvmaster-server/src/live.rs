@@ -44,7 +44,16 @@ fn d_style() -> String {
     "full".into()
 }
 fn d_theme() -> String {
-    "retro".into()
+    "station".into()
+}
+
+/// An alert theme by name; `station` follows the station theme (`station_look`).
+fn alert_theme(name: &str, station_look: AlertTheme) -> Option<AlertTheme> {
+    if name == "station" {
+        Some(station_look)
+    } else {
+        AlertTheme::parse(name)
+    }
 }
 fn d_severity() -> String {
     "emergency".into()
@@ -69,7 +78,12 @@ fn save(s: &AppState, book: &Book) {
 }
 
 /// What playout should air on `channel` right now.
-pub(crate) fn current(book: &Book, channel: &str, now_ms: i64) -> Option<LiveOverride> {
+pub(crate) fn current(
+    book: &Book,
+    channel: &str,
+    now_ms: i64,
+    station_look: AlertTheme,
+) -> Option<LiveOverride> {
     let e = book.get(channel)?;
     if e.until_ms.is_some_and(|u| u <= now_ms) {
         return None;
@@ -83,7 +97,7 @@ pub(crate) fn current(book: &Book, channel: &str, now_ms: i64) -> Option<LiveOve
             event: e.title.clone(),
             text: e.message.clone(),
             look: AlertLook {
-                theme: AlertTheme::parse(&e.theme).unwrap_or_default(),
+                theme: alert_theme(&e.theme, station_look).unwrap_or(station_look),
                 severity: Severity::parse(&e.severity).unwrap_or_default(),
             },
             style: AlertStyle::parse(&e.style).unwrap_or_default(),
@@ -146,12 +160,14 @@ pub fn options() -> Value {
             .collect::<Vec<_>>()
             .into()
     };
+    let mut themes = vec![json!({ "value": "station", "label": "Match the station theme" })];
+    themes.extend(pairs(&AlertTheme::ALL).as_array().cloned().unwrap_or_default());
     json!({
         "styles": [
             { "value": "full", "label": "Full screen" },
             { "value": "bar", "label": "Bar across the bottom" },
         ],
-        "themes": pairs(&AlertTheme::ALL),
+        "themes": themes,
         "severities": pairs(&Severity::ALL),
         "sounds": pairs(&AlertSound::ALL),
     })
@@ -228,13 +244,19 @@ pub struct PreviewBody {
 }
 
 /// `POST /api/v1/live/preview`: one frame of an alert as it would look, as a PNG (nothing goes on air).
-pub async fn preview(Json(b): Json<PreviewBody>) -> ApiResult<axum::response::Response> {
+pub async fn preview(
+    State(s): State<AppState>,
+    Json(b): Json<PreviewBody>,
+) -> ApiResult<axum::response::Response> {
     use axum::http::{header, HeaderValue};
     use axum::response::IntoResponse;
     let bad = |what: &str| ApiError::new(StatusCode::BAD_REQUEST, format!("unknown {what}"));
     let look = AlertLook {
-        theme: AlertTheme::parse(b.theme.as_deref().unwrap_or("retro"))
-            .ok_or_else(|| bad("theme"))?,
+        theme: alert_theme(b.theme.as_deref().unwrap_or("station"), {
+            let choice = crate::theme::station(&s.db());
+            crate::theme::alert_theme(&choice, "preview")
+        })
+        .ok_or_else(|| bad("theme"))?,
         severity: Severity::parse(b.severity.as_deref().unwrap_or("emergency"))
             .ok_or_else(|| bad("severity"))?,
     };
@@ -300,7 +322,7 @@ fn resolve_channels(s: &AppState, wanted: &[String]) -> ApiResult<Vec<String>> {
 }
 
 /// Channels that are on air restart so the change shows within seconds.
-fn restart_running(s: &AppState, channels: &[String]) {
+pub(crate) fn restart_running(s: &AppState, channels: &[String]) {
     let Some(playout) = &s.playout else { return };
     for id in channels {
         if playout.is_running(id) {
@@ -361,13 +383,13 @@ pub async fn set_live(
     };
     let (style, theme, severity, sound) = (
         pick(&body.style, "style", "full"),
-        pick(&body.theme, "theme", "retro"),
+        pick(&body.theme, "theme", "station"),
         pick(&body.severity, "severity", "emergency"),
         pick(&body.sound, "sound", "attention"),
     );
     if body.mode == "alert" {
         if AlertStyle::parse(&style).is_none()
-            || AlertTheme::parse(&theme).is_none()
+            || alert_theme(&theme, AlertTheme::Retro).is_none()
             || Severity::parse(&severity).is_none()
             || AlertSound::parse(&sound).is_none()
         {
@@ -520,7 +542,7 @@ mod tests {
         assert_eq!(st, StatusCode::OK, "{v}");
         assert_eq!(v["overrides"].as_array().unwrap().len(), 2);
         assert!(
-            crate::live::current(&state.live.lock().unwrap(), "a", crate::plan::now_ms()).is_some()
+            crate::live::current(&state.live.lock().unwrap(), "a", crate::plan::now_ms(), tvmaster_render::alert::AlertTheme::Retro).is_some()
         );
 
         // one channel goes to an emergency alert from a sample
@@ -573,9 +595,9 @@ mod tests {
         .await;
         assert_eq!(st, StatusCode::OK);
         let now = crate::plan::now_ms();
-        assert!(crate::live::current(&state.live.lock().unwrap(), "a", now).is_some());
+        assert!(crate::live::current(&state.live.lock().unwrap(), "a", now, tvmaster_render::alert::AlertTheme::Retro).is_some());
         assert!(
-            crate::live::current(&state.live.lock().unwrap(), "a", now + 61_000).is_none(),
+            crate::live::current(&state.live.lock().unwrap(), "a", now + 61_000, tvmaster_render::alert::AlertTheme::Retro).is_none(),
             "a timed override stops counting once its time is up"
         );
         state.live.lock().unwrap().get_mut("a").unwrap().until_ms = Some(now - 1);
@@ -622,7 +644,7 @@ mod tests {
         assert_eq!(st, StatusCode::OK, "{v}");
         let cur = {
             let book = state.live.lock().unwrap();
-            crate::live::current(&book, "b", crate::plan::now_ms()).unwrap()
+            crate::live::current(&book, "b", crate::plan::now_ms(), tvmaster_render::alert::AlertTheme::Retro).unwrap()
         };
         assert!(matches!(
             cur.mode,

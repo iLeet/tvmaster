@@ -37,9 +37,9 @@ const REFRESH_SECS: u64 = 5;
 /// How often a channel shown in the window is told it still has a viewer.
 const KEEPALIVE: Duration = Duration::from_secs(10);
 
-/// The look a guide's settings describe.
-pub fn guide_look(c: &GuideConfig, channel_id: &str) -> GuideLook {
-    let palette = match c.theme {
+/// The palette a theme choice describes.
+pub fn palette_for(theme: GuideTheme, colors: &tvmaster_core::GuideColors, channel_id: &str) -> Palette {
+    match theme {
         GuideTheme::Auto => Palette::from_theme(&Theme::for_channel(channel_id)),
         GuideTheme::Prevue => Palette::prevue(),
         GuideTheme::Amber => Palette::amber(),
@@ -63,15 +63,30 @@ pub fn guide_look(c: &GuideConfig, channel_id: &str) -> GuideLook {
                     .unwrap_or(fallback)
             };
             Palette::custom_on(
-                pick(&c.colors.primary, auto.primary),
-                pick(&c.colors.accent, auto.accent),
-                c.colors
+                pick(&colors.primary, auto.primary),
+                pick(&colors.accent, auto.accent),
+                colors
                     .background
                     .as_deref()
                     .and_then(tvmaster_core::parse_hex_color),
             )
         }
-    };
+    }
+}
+
+/// The colours and style for a channel's cards, bumpers and screens. With the
+/// automatic retro theme this is the original per-channel look, unchanged.
+pub fn card_theme(choice: &tvmaster_core::ThemeChoice, channel_id: &str) -> Theme {
+    let modern = choice.style == tvmaster_core::GraphicsStyle::Modern;
+    if choice.theme == GuideTheme::Auto && !modern {
+        return Theme::for_channel(channel_id);
+    }
+    Theme::from_palette(&palette_for(choice.theme, &choice.colors, channel_id), modern)
+}
+
+/// The look a guide's settings describe.
+pub fn guide_look(c: &GuideConfig, channel_id: &str) -> GuideLook {
+    let palette = palette_for(c.theme, &c.colors, channel_id);
     let mut look = GuideLook::new(palette);
     look.now_next = c.layout.style == GuideStyle::NowNext;
     look.rows = usize::from(c.layout.rows);

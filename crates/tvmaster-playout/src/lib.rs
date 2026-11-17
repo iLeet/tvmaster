@@ -15,7 +15,9 @@ mod runner;
 mod sound;
 mod ts;
 
-pub use guide::{background_image, guide_look, guide_look_with_pictures};
+pub use guide::{
+    background_image, card_theme, guide_look, guide_look_with_pictures, palette_for,
+};
 pub use looks::{audio_chain, AudioFx, Burn, ClockFx, ItemPlan, OverlayInput};
 pub use manager::{ChannelHealth, Manager};
 pub use probe::{probe_encoder, EncoderProbe};
@@ -180,6 +182,12 @@ pub struct ChannelSpec {
     pub can_burn_text: bool,
     /// What airs during the sign-off hours.
     pub signoff: tvmaster_core::SignOffStyle,
+}
+
+/// The look of a channel's cards, bumpers and on-screen graphics.
+pub(crate) fn spec_theme(spec: &ChannelSpec) -> tvmaster_render::Theme {
+    let choice = spec.options.theme.clone().unwrap_or_default();
+    card_theme(&choice, &spec.id)
 }
 
 #[derive(Debug, Clone)]

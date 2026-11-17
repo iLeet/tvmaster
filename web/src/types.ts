@@ -118,9 +118,20 @@ export interface ChannelOptions {
     show_title: { enabled: boolean; seconds: number };
   };
   shows: Record<string, ShowOptions>;
+  /** This channel's own theme; absent = the station theme. */
+  theme?: ThemeChoice | null;
 }
 
 export type GuideTheme = 'auto' | 'prevue' | 'amber' | 'phosphor' | 'neon' | 'sunset' | 'ocean' | 'slate' | 'paper' | 'midnight' | 'graphite' | 'snow' | 'forest' | 'berry' | 'mono' | 'custom';
+export type GraphicsStyle = 'retro' | 'modern';
+export interface ThemeColors { primary: string | null; accent: string | null; background: string | null }
+/** One look for everything the station draws: guide, cards, bumpers, stand-by, alerts, graphics. */
+export interface ThemeChoice { theme: GuideTheme; colors: ThemeColors; style: GraphicsStyle }
+export interface ThemeCatalogue {
+  themes: { id: GuideTheme; name: string; about: string; swatch: [string, string, string] }[];
+  styles: { id: GraphicsStyle; name: string; about: string }[];
+  station: ThemeChoice;
+}
 export type PipMode = 'off' | 'channel' | 'rotate';
 export type PipPlacement = 'top_left' | 'top_right' | 'side_left' | 'side_right';
 

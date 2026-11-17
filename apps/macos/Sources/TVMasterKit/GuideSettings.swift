@@ -57,33 +57,6 @@ public struct GuideSettings: Equatable, Sendable {
     public var pipAudio = "music"
     public var pipInfo = true
 
-    public struct Theme: Identifiable, Sendable {
-        public let value: String
-        public let label: String
-        public let help: String
-        /// Two colours (`#rrggbb`) that sum the theme up for a swatch.
-        public let colors: [String]
-        public var id: String { value }
-    }
-
-    public static let themes: [Theme] = [
-        Theme(value: "auto", label: "Station", help: "Colours made from the channel itself, so each guide looks like its own station.", colors: ["#6b3cc4", "#f2d03c"]),
-        Theme(value: "prevue", label: "Cable blue", help: "Deep blue and yellow, like the classic cable listings.", colors: ["#2c54e0", "#ffe040"]),
-        Theme(value: "amber", label: "Amber", help: "Amber on black, like an old monochrome monitor.", colors: ["#ffb000", "#ffd666"]),
-        Theme(value: "phosphor", label: "Green screen", help: "Green phosphor.", colors: ["#28dc50", "#aaffaa"]),
-        Theme(value: "neon", label: "Neon", help: "Hot pink and cyan on purple-black.", colors: ["#ff28c8", "#00f0ff"]),
-        Theme(value: "sunset", label: "Sunset", help: "Orange and gold on deep plum.", colors: ["#ff6e3c", "#ffc850"]),
-        Theme(value: "ocean", label: "Ocean", help: "Teal and aqua on deep blue.", colors: ["#00a0c8", "#78f0dc"]),
-        Theme(value: "slate", label: "Slate", help: "Cool grey with a warm yellow highlight.", colors: ["#707c94", "#f0c83c"]),
-        Theme(value: "paper", label: "Paper", help: "Light, like a printed listing.", colors: ["#fffcf0", "#c83c28"]),
-        Theme(value: "midnight", label: "Midnight", help: "Deep navy with a cyan highlight.", colors: ["#3460c8", "#40dcff"]),
-        Theme(value: "graphite", label: "Graphite", help: "Charcoal with an orange highlight.", colors: ["#60626c", "#ff9628"]),
-        Theme(value: "snow", label: "Snow", help: "Clean white with a blue highlight.", colors: ["#ffffff", "#1c62dc"]),
-        Theme(value: "forest", label: "Forest", help: "Deep green with an amber highlight.", colors: ["#2e8c54", "#ffc446"]),
-        Theme(value: "berry", label: "Berry", help: "Plum with a pink highlight.", colors: ["#a03496", "#ff8cbe"]),
-        Theme(value: "mono", label: "Black & white", help: "Black and white.", colors: ["#787878", "#ffffff"]),
-        Theme(value: "custom", label: "Your colours", help: "Pick the main colour and the highlight.", colors: ["#3366ff", "#ffcc00"]),
-    ]
 
     /// One-click looks: colours and style together.
     public struct Preset: Identifiable, Sendable {

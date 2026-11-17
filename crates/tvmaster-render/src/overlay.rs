@@ -2,6 +2,7 @@
 //! and the "now playing" lower third. Drawn in the same chunky pixel font as
 //! the bumpers, as transparent PNGs that FFmpeg overlays.
 
+use crate::text::Face;
 use crate::{png, text_width, Canvas, Theme};
 
 /// Transparent background key: never used for drawing.
@@ -29,23 +30,80 @@ fn to_png(c: &Canvas, alpha: u8) -> Graphic {
     }
 }
 
+/// The look the on-screen extras have when no theme is chosen.
+fn plain() -> Theme {
+    let mut t = Theme::from_hue(0.62);
+    t.dark = [16, 20, 36];
+    t.accent = [255, 200, 60];
+    t
+}
+
 /// The channel logo: text on a small box. `opacity` is 10-100 percent.
 pub fn bug(text: &str, opacity: u8) -> Graphic {
+    bug_themed(text, opacity, &plain())
+}
+
+/// [`bug`] in the station's theme.
+pub fn bug_themed(text: &str, opacity: u8, th: &Theme) -> Graphic {
     let text: String = text.chars().take(24).collect();
+    let alpha = (opacity.clamp(10, 100) as u32 * 255 / 100) as u8;
+    if th.modern {
+        let px = 26.0;
+        let (pad, tw) = (14, crate::text::width(Face::Bold, &text, px) as i32);
+        let (w, h) = ((tw + pad * 2).max(32), 48);
+        let mut c = Canvas::new(w as usize, h as usize);
+        c.fill(KEY);
+        c.rect(0, 0, w, h, th.dark);
+        c.rect(0, 0, 5, h, th.accent);
+        crate::alert::draw(&mut c, pad + 2, 8, &text, px, Face::Bold, th.ink);
+        return to_png(&c, alpha);
+    }
     let (scale, pad) = (2, 6);
     let w = (text_width(&text, scale) + pad * 2).max(16);
     let h = 8 * scale + pad * 2;
     let mut c = Canvas::new(w as usize, h as usize);
     c.fill(KEY);
-    c.rect(0, 0, w, h, [16, 20, 36]);
-    c.rect(0, 0, w, 2, [255, 255, 255]);
-    c.text(pad, pad, &text, scale, [255, 255, 255]);
-    to_png(&c, (opacity.clamp(10, 100) as u32 * 255 / 100) as u8)
+    c.rect(0, 0, w, h, th.dark);
+    c.rect(0, 0, w, 2, th.ink);
+    c.text(pad, pad, &text, scale, th.ink);
+    to_png(&c, alpha)
 }
 
 /// A lower third: the programme's name, and below it the episode.
 pub fn lower_third(title: &str, subtitle: &str, width: u32) -> Graphic {
+    lower_third_themed(title, subtitle, width, &plain())
+}
+
+/// [`lower_third`] in the station's theme.
+pub fn lower_third_themed(title: &str, subtitle: &str, width: u32, th: &Theme) -> Graphic {
     let w = width.clamp(240, 900) as i32;
+    if th.modern {
+        let (big, small, pad) = (34.0, 24.0, 18);
+        let max = (w - pad * 2 - 8) as f32;
+        let fit = |s: &str, px: f32, face: Face| -> String {
+            let mut s: String = s.to_string();
+            while crate::text::width(face, &s, px) > max && s.chars().count() > 2 {
+                s.pop();
+                if crate::text::width(face, &format!("{s}…"), px) <= max {
+                    s.push('…');
+                    break;
+                }
+            }
+            s
+        };
+        let (t, sub) = (fit(title, big, Face::Bold), fit(subtitle, small, Face::Regular));
+        let has_sub = !sub.trim().is_empty();
+        let h = pad * 2 + 40 + if has_sub { 32 } else { 0 };
+        let mut c = Canvas::new(w as usize, h as usize);
+        c.fill(KEY);
+        c.rect(0, 0, w, h, th.dark);
+        c.rect(0, 0, 8, h, th.accent);
+        crate::alert::draw(&mut c, pad + 8, pad - 2, &t, big, Face::Bold, th.ink);
+        if has_sub {
+            crate::alert::draw(&mut c, pad + 8, pad + 38, &sub, small, Face::Regular, th.accent);
+        }
+        return to_png(&c, 235);
+    }
     let (big, small, pad) = (3, 2, 10);
     let fit = |s: &str, scale: i32| -> String {
         let max = ((w - pad * 2) / (8 * scale)).max(4) as usize;
@@ -61,11 +119,11 @@ pub fn lower_third(title: &str, subtitle: &str, width: u32) -> Graphic {
     let h = pad * 2 + 8 * big + if has_sub { 6 + 8 * small } else { 0 };
     let mut c = Canvas::new(w as usize, h as usize);
     c.fill(KEY);
-    c.rect(0, 0, w, h, [12, 16, 30]);
-    c.rect(0, 0, 6, h, [255, 200, 60]);
-    c.text(pad + 6, pad, &t, big, [255, 255, 255]);
+    c.rect(0, 0, w, h, th.dark);
+    c.rect(0, 0, 6, h, th.accent);
+    c.text(pad + 6, pad, &t, big, th.ink);
     if has_sub {
-        c.text(pad + 6, pad + 8 * big + 6, &s, small, [190, 200, 225]);
+        c.text(pad + 6, pad + 8 * big + 6, &s, small, th.accent);
     }
     to_png(&c, 235)
 }
@@ -73,15 +131,18 @@ pub fn lower_third(title: &str, subtitle: &str, width: u32) -> Graphic {
 /// A full-screen station card: the channel's number and name, and a message,
 /// in the channel's colours. 640x360, to be scaled up without smoothing.
 pub fn station_card(theme: &Theme, number: u32, name: &str, message: &str) -> Graphic {
+    if theme.modern {
+        return crate::modern::station_card(theme, number, name, message);
+    }
     let (w, h) = (crate::WIDTH, crate::HEIGHT);
     let mut c = Canvas::new(w, h);
-    c.vgradient(theme.dark, [4, 6, 12]);
+    c.vgradient(theme.dark, theme.bottom);
     c.rect(0, 0, w as i32, 6, theme.primary);
     c.rect(0, h as i32 - 6, w as i32, 6, theme.accent);
     let num = number.to_string();
     c.text_centered(70, &num, 10, theme.primary);
     let name: String = name.chars().take(24).collect();
-    c.text_centered(190, &name, 3, [255, 255, 255]);
+    c.text_centered(190, &name, 3, theme.ink);
     let msg: String = if message.trim().is_empty() {
         "PLEASE STAND BY".into()
     } else {

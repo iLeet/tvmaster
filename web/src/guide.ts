@@ -1,6 +1,6 @@
 // Pure helpers for the guide channel's settings.
 
-import type { GuideConfig, GuideTheme } from './types';
+import type { GuideConfig } from './types';
 
 /** A new guide channel's settings: today's look, nothing extra switched on. */
 export function emptyGuide(): GuideConfig {
@@ -35,26 +35,6 @@ export function withGuideDefaults(g: Partial<GuideConfig> | undefined): GuideCon
     pip: { ...d.pip, ...x.pip },
   } as GuideConfig;
 }
-
-/** The themes, with the two colours that sum each one up for its swatch. */
-export const GUIDE_THEMES: { value: GuideTheme; label: string; help: string; colors: [string, string] }[] = [
-  { value: 'auto', label: 'Station', help: "Colours made from the channel itself, so each guide looks like its own station.", colors: ['#6b3cc4', '#f2d03c'] },
-  { value: 'prevue', label: 'Cable blue', help: 'Deep blue and yellow, like the classic cable listings.', colors: ['#2c54e0', '#ffe040'] },
-  { value: 'amber', label: 'Amber', help: 'Amber on black, like an old monochrome monitor.', colors: ['#ffb000', '#ffd666'] },
-  { value: 'phosphor', label: 'Green screen', help: 'Green phosphor.', colors: ['#28dc50', '#aaffaa'] },
-  { value: 'neon', label: 'Neon', help: 'Hot pink and cyan on purple-black.', colors: ['#ff28c8', '#00f0ff'] },
-  { value: 'sunset', label: 'Sunset', help: 'Orange and gold on deep plum.', colors: ['#ff6e3c', '#ffc850'] },
-  { value: 'ocean', label: 'Ocean', help: 'Teal and aqua on deep blue.', colors: ['#00a0c8', '#78f0dc'] },
-  { value: 'slate', label: 'Slate', help: 'Cool grey with a warm yellow highlight.', colors: ['#707c94', '#f0c83c'] },
-  { value: 'paper', label: 'Paper', help: 'Light, like a printed listing.', colors: ['#fffcf0', '#c83c28'] },
-  { value: 'midnight', label: 'Midnight', help: 'Deep navy with a cyan highlight.', colors: ['#3460c8', '#40dcff'] },
-  { value: 'graphite', label: 'Graphite', help: 'Charcoal with an orange highlight.', colors: ['#60626c', '#ff9628'] },
-  { value: 'snow', label: 'Snow', help: 'Clean white with a blue highlight.', colors: ['#ffffff', '#1c62dc'] },
-  { value: 'forest', label: 'Forest', help: 'Deep green with an amber highlight.', colors: ['#2e8c54', '#ffc446'] },
-  { value: 'berry', label: 'Berry', help: 'Plum with a pink highlight.', colors: ['#a03496', '#ff8cbe'] },
-  { value: 'mono', label: 'Black & white', help: 'Black and white.', colors: ['#787878', '#ffffff'] },
-  { value: 'custom', label: 'Your colours', help: 'Pick the main colour and the highlight.', colors: ['#3366ff', '#ffcc00'] },
-];
 
 export const PIP_PLACEMENTS: { value: GuideConfig['pip']['placement']; label: string }[] = [
   { value: 'side_right', label: 'Side, right' },

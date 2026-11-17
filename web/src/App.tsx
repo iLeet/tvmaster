@@ -4,6 +4,7 @@ import { useQuery } from './live';
 import { href, useRoute } from './router';
 import type { AuthStatus } from './types';
 import { Btn, Card, Field, Icon, Spinner, ToastProvider, useToast } from './ui';
+import { Appearance } from './pages/Appearance';
 import { Channels } from './pages/Channels';
 import { ChannelEditor } from './pages/ChannelEditor';
 import { Dashboard } from './pages/Dashboard';
@@ -24,6 +25,7 @@ const NAV: { path: string; label: string; icon: string }[] = [
   { path: 'shows', label: 'Shows', icon: 'tv' },
   { path: 'tvs', label: 'TVs', icon: 'tv' },
   { path: 'remote', label: 'Remote', icon: 'remote' },
+  { path: 'appearance', label: 'Appearance', icon: 'palette' },
   { path: 'settings', label: 'Settings', icon: 'settings' },
 ];
 
@@ -89,6 +91,9 @@ function Shell() {
       break;
     case 'remote':
       page = <Remote tvId={route.parts[1]} />;
+      break;
+    case 'appearance':
+      page = <Appearance />;
       break;
     case 'settings':
       page = <Settings />;

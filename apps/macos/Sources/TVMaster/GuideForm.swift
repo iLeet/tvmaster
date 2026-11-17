@@ -1,18 +1,6 @@
 import SwiftUI
 import TVMasterKit
 
-/// Colour from `#rrggbb`.
-private func color(_ hex: String) -> Color {
-    let h = hex.trimmingCharacters(in: CharacterSet(charactersIn: "# "))
-    guard h.count == 6, let v = UInt32(h, radix: 16) else { return .gray }
-    return Color(red: Double((v >> 16) & 255) / 255, green: Double((v >> 8) & 255) / 255, blue: Double(v & 255) / 255)
-}
-
-private func hex(_ c: Color) -> String {
-    let n = NSColor(c).usingColorSpace(.sRGB) ?? .gray
-    return String(format: "#%02x%02x%02x", Int(n.redComponent * 255), Int(n.greenComponent * 255), Int(n.blueComponent * 255))
-}
-
 /// Everything about how a guide channel looks, with a live picture of the result.
 struct GuideForm: View {
     @Environment(AppModel.self) private var model
@@ -97,34 +85,9 @@ struct GuideForm: View {
 
     private var colours: some View {
         Section("Colours") {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 84), spacing: 8)], spacing: 8) {
-                ForEach(GuideSettings.themes) { t in
-                    let chosen = gs.theme == t.value
-                    Button { gs.theme = t.value } label: {
-                        VStack(spacing: 4) {
-                            HStack(spacing: 0) {
-                                Rectangle().fill(color(t.value == "custom" && !gs.colorPrimary.isEmpty ? gs.colorPrimary : t.colors[0]))
-                                Rectangle().fill(color(t.value == "custom" && !gs.colorAccent.isEmpty ? gs.colorAccent : t.colors[1])).frame(width: 22)
-                            }
-                            .frame(height: 24).clipShape(RoundedRectangle(cornerRadius: 5))
-                            Text(t.label).font(.caption)
-                        }
-                        .padding(6).frame(maxWidth: .infinity)
-                        .background(chosen ? Color.accentColor.opacity(0.18) : .clear, in: RoundedRectangle(cornerRadius: 8))
-                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(chosen ? Color.accentColor : .secondary.opacity(0.25), lineWidth: chosen ? 2 : 1))
-                    }
-                    .buttonStyle(.plain).help(t.help)
-                }
-            }
-            if let t = GuideSettings.themes.first(where: { $0.value == gs.theme }) {
-                Text(t.help).font(.caption).foregroundStyle(.secondary)
-            }
-            if gs.theme == "custom" {
-                ColorPicker("Main colour", selection: Binding(get: { color(gs.colorPrimary.isEmpty ? "#3366ff" : gs.colorPrimary) }, set: { gs.colorPrimary = hex($0) }), supportsOpacity: false)
-                ColorPicker("Highlight", selection: Binding(get: { color(gs.colorAccent.isEmpty ? "#ffcc00" : gs.colorAccent) }, set: { gs.colorAccent = hex($0) }), supportsOpacity: false)
-                ColorPicker("Background", selection: Binding(get: { color(gs.colorBackground.isEmpty ? "#101830" : gs.colorBackground) }, set: { gs.colorBackground = hex($0) }), supportsOpacity: false)
-                if !gs.colorBackground.isEmpty { Button("Use a dark shade of the main colour") { gs.colorBackground = "" }.glassButton() }
-            }
+            ThemePickerView(theme: $gs.theme, primary: $gs.colorPrimary, accent: $gs.colorAccent, background: $gs.colorBackground,
+                            autoName: "Follow the station",
+                            autoAbout: "Uses the station theme (Appearance), so the guide matches your cards, bumpers and alerts. Pick a theme here to give this guide its own colours.")
             Toggle("Scanlines (a faint CRT texture)", isOn: $gs.scanlines)
         }
     }

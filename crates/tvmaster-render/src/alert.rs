@@ -25,6 +25,8 @@ pub enum AlertTheme {
     Forest,
     Berry,
     Mono,
+    /// Smooth, in the station theme's own colours.
+    Station(Palette),
 }
 
 impl AlertTheme {
@@ -62,6 +64,7 @@ impl AlertTheme {
             Self::Forest => Palette::forest(),
             Self::Berry => Palette::berry(),
             Self::Mono => Palette::mono(),
+            Self::Station(p) => p,
         }
     }
 }
@@ -140,7 +143,7 @@ pub struct AlertLook {
 }
 
 /// Ink that reads on `bg`.
-fn ink_on(bg: Rgb) -> Rgb {
+pub(crate) fn ink_on(bg: Rgb) -> Rgb {
     let l = 0.2126 * bg[0] as f32 + 0.7152 * bg[1] as f32 + 0.0722 * bg[2] as f32;
     if l > 150.0 {
         [18, 18, 24]
@@ -151,7 +154,7 @@ fn ink_on(bg: Rgb) -> Rgb {
 
 // ------------------------------------------------------------------ smooth text
 
-fn put(c: &mut Canvas, x: i32, y: i32, col: Rgb, a: u8) {
+pub(crate) fn put(c: &mut Canvas, x: i32, y: i32, col: Rgb, a: u8) {
     if x < 0 || y < 0 || x >= c.w as i32 || y >= c.h as i32 || a == 0 {
         return;
     }
@@ -163,7 +166,7 @@ fn put(c: &mut Canvas, x: i32, y: i32, col: Rgb, a: u8) {
 }
 
 /// Smooth text with its line box's top at `y`.
-fn draw(c: &mut Canvas, x: i32, y: i32, s: &str, px: f32, face: Face, col: Rgb) {
+pub(crate) fn draw(c: &mut Canvas, x: i32, y: i32, s: &str, px: f32, face: Face, col: Rgb) {
     let baseline = y + (px * 0.82) as i32;
     for (ch, off) in text::layout(face, s, px) {
         let g = text::glyph(face, ch, px);
@@ -178,13 +181,13 @@ fn draw(c: &mut Canvas, x: i32, y: i32, s: &str, px: f32, face: Face, col: Rgb) 
     }
 }
 
-fn centred(c: &mut Canvas, cx: i32, y: i32, s: &str, px: f32, face: Face, col: Rgb) {
+pub(crate) fn centred(c: &mut Canvas, cx: i32, y: i32, s: &str, px: f32, face: Face, col: Rgb) {
     let w = text::width(face, s, px) as i32;
     draw(c, cx - w / 2, y, s, px, face, col);
 }
 
 /// Words wrapped to `max_w` pixels; `None` when more than `max_lines` are needed.
-fn wrap(s: &str, px: f32, face: Face, max_w: f32, max_lines: usize) -> Option<Vec<String>> {
+pub(crate) fn wrap(s: &str, px: f32, face: Face, max_w: f32, max_lines: usize) -> Option<Vec<String>> {
     let mut lines: Vec<String> = Vec::new();
     let mut cur = String::new();
     for word in s.split_whitespace() {
@@ -205,7 +208,7 @@ fn wrap(s: &str, px: f32, face: Face, max_w: f32, max_lines: usize) -> Option<Ve
     (lines.len() <= max_lines).then_some(lines)
 }
 
-fn disc(c: &mut Canvas, cx: i32, cy: i32, r: i32, col: Rgb) {
+pub(crate) fn disc(c: &mut Canvas, cx: i32, cy: i32, r: i32, col: Rgb) {
     for y in -r..=r {
         for x in -r..=r {
             let d = ((x * x + y * y) as f32).sqrt();
@@ -218,11 +221,11 @@ fn disc(c: &mut Canvas, cx: i32, cy: i32, r: i32, col: Rgb) {
     }
 }
 
-fn rect(c: &mut Canvas, x: i32, y: i32, w: i32, h: i32, col: Rgb) {
+pub(crate) fn rect(c: &mut Canvas, x: i32, y: i32, w: i32, h: i32, col: Rgb) {
     c.rect(x, y, w, h, col);
 }
 
-fn vgrad(c: &mut Canvas, top: Rgb, bottom: Rgb) {
+pub(crate) fn vgrad(c: &mut Canvas, top: Rgb, bottom: Rgb) {
     for y in 0..c.h as i32 {
         let col = mix(top, bottom, y as f32 / (c.h as f32 - 1.0).max(1.0));
         c.rect(0, y, c.w as i32, 1, col);

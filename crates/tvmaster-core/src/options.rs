@@ -352,6 +352,9 @@ pub struct ChannelOptions {
     /// Overrides by show name (compared ignoring case).
     #[serde(default)]
     pub shows: BTreeMap<String, ShowOptions>,
+    /// This channel's own theme. Blank = the station theme.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme: Option<crate::ThemeChoice>,
 }
 
 /// The settings that apply while one particular show airs.
@@ -477,6 +480,9 @@ impl ChannelOptions {
                 .is_none_or(|i| i.trim().is_empty())
         {
             return Err("the off-air picture needs a file".into());
+        }
+        if let Some(t) = &self.theme {
+            t.validate()?;
         }
         if self.shows.len() > 300 {
             return Err("too many per-show settings".into());

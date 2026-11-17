@@ -27,37 +27,33 @@ pub struct Body {
     t: f32,
 }
 
-/// `POST /api/v1/guide/preview`: one frame, as a PNG.
-pub async fn preview(State(s): State<AppState>, Json(body): Json<Body>) -> ApiResult<Response> {
-    body.guide
-        .validate()
-        .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, e))?;
-    let png = tokio::task::spawn_blocking(move || {
-        let id = if body.id.is_empty() {
-            "guide"
-        } else {
-            &body.id
-        };
-        let name = if body.name.trim().is_empty() {
-            "Guide"
-        } else {
-            &body.name
-        };
+/// Draw one guide frame as a PNG (the config is used as it is: any station theme must already be applied).
+pub(crate) async fn render_png(
+    s: &AppState,
+    id: &str,
+    name: &str,
+    guide: &GuideConfig,
+    t: f32,
+) -> Option<Vec<u8>> {
+    let (s, id, name, guide) = (s.clone(), id.to_string(), name.to_string(), guide.clone());
+    tokio::task::spawn_blocking(move || {
+        let id = if id.is_empty() { "guide" } else { &id };
+        let name = if name.trim().is_empty() { "Guide" } else { &name };
         let data = {
             let db = s.db();
             let tz = crate::station::effective_timezone(&db);
-            plan::build_guide_with(&db, name, &tz, &body.guide, plan::now_ms())?
+            plan::build_guide_with(&db, name, &tz, &guide, plan::now_ms())?
         };
         let look = match &s.ffmpeg {
-            Some(f) => tvmaster_playout::guide_look_with_pictures(&body.guide, id, &f.ffmpeg),
-            None => tvmaster_playout::guide_look(&body.guide, id),
+            Some(f) => tvmaster_playout::guide_look_with_pictures(&guide, id, &f.ffmpeg),
+            None => tvmaster_playout::guide_look(&guide, id),
         };
         // A window shows its card for the first channel, with no video behind it.
         let view = GuideView {
-            window_row: (body.guide.pip.mode != PipMode::Off && !data.rows.is_empty()).then_some(0),
+            window_row: (guide.pip.mode != PipMode::Off && !data.rows.is_empty()).then_some(0),
             window_live: false,
         };
-        let c = tvmaster_render::render_guide(&data, &look, &view, body.t.clamp(0.0, 3600.0));
+        let c = tvmaster_render::render_guide(&data, &look, &view, t.clamp(0.0, 3600.0));
         let mut rgba = Vec::with_capacity(c.w * c.h * 4);
         for px in c.px.as_chunks::<3>().0 {
             rgba.extend_from_slice(px);
@@ -70,12 +66,24 @@ pub async fn preview(State(s): State<AppState>, Json(body): Json<Body>) -> ApiRe
     .await
     .ok()
     .flatten()
-    .ok_or_else(|| {
-        ApiError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "could not draw the guide",
-        )
-    })?;
+}
+
+/// `POST /api/v1/guide/preview`: one frame, as a PNG.
+pub async fn preview(State(s): State<AppState>, Json(body): Json<Body>) -> ApiResult<Response> {
+    body.guide
+        .validate()
+        .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, e))?;
+    // A guide that follows the station theme is shown in it.
+    let mut guide = body.guide.clone();
+    crate::theme::station(&s.db()).apply_to_guide(&mut guide);
+    let png = render_png(&s, &body.id, &body.name, &guide, body.t)
+        .await
+        .ok_or_else(|| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "could not draw the guide",
+            )
+        })?;
     let mut res = png.into_response();
     let h = res.headers_mut();
     h.insert(header::CONTENT_TYPE, HeaderValue::from_static("image/png"));

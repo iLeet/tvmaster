@@ -377,7 +377,16 @@ impl ScheduleSource for DbSchedule {
 
     fn live_override(&self, channel: &str) -> Option<tvmaster_playout::LiveOverride> {
         let book = self.live.lock().unwrap_or_else(|p| p.into_inner());
-        crate::live::current(&book, channel, now_ms())
+        let station_look = {
+            let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
+            let options = tvmaster_db::get_channel(&db, channel)
+                .ok()
+                .flatten()
+                .map(|c| c.options)
+                .unwrap_or_default();
+            crate::theme::alert_theme(&crate::theme::effective(&db, &options), channel)
+        };
+        crate::live::current(&book, channel, now_ms(), station_look)
     }
 
     fn show_defaults(&self, _channel: &str, show: &str) -> Option<tvmaster_core::ShowOptions> {

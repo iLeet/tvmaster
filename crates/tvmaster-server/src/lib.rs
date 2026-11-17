@@ -18,6 +18,7 @@ mod plan;
 mod soak;
 mod station;
 mod stream;
+mod theme;
 pub mod tls;
 mod tvs;
 mod ws;
@@ -306,6 +307,7 @@ impl AppState {
 
     /// What playout needs to put a channel on air.
     pub(crate) fn channel_spec(&self, channel: &Channel) -> ChannelSpec {
+        let choice = theme::effective(&self.db(), &channel.options);
         let guide = (channel.kind == ChannelKind::Guide).then(|| GuideSpec {
             music: tvmaster_db::list_media_of_kind(
                 &self.db(),
@@ -316,7 +318,11 @@ impl AppState {
             .into_iter()
             .map(|m| m.path.into())
             .collect(),
-            config: channel.guide.clone(),
+            config: {
+                let mut g = channel.guide.clone();
+                choice.apply_to_guide(&mut g);
+                g
+            },
             pip_host: (channel.guide.pip.mode != tvmaster_core::PipMode::Off).then(|| {
                 Arc::new(pip::LocalChannels(self.clone())) as Arc<dyn tvmaster_playout::PipHost>
             }),
@@ -326,7 +332,11 @@ impl AppState {
             id: channel.id.clone(),
             name: channel.name.clone(),
             number: channel.number,
-            options: channel.options.clone(),
+            options: {
+                let mut o = channel.options.clone();
+                o.theme = Some(choice.clone());
+                o
+            },
             can_burn_text: self.ffmpeg.as_ref().is_some_and(|f| f.has_subtitles),
             signoff: channel
                 .lineup
@@ -528,6 +538,8 @@ fn build_router(state: AppState, https: bool) -> Router {
             get(station::get_timezone).put(station::put_timezone),
         )
         .route("/api/v1/server/restart", post(station::server_restart))
+        .route("/api/v1/theme", get(theme::get).put(theme::put))
+        .route("/api/v1/theme/preview", post(theme::preview))
         .route("/api/v1/live", get(live::get_live).post(live::set_live))
         .route("/api/v1/live/clear", post(live::clear_live))
         .route("/api/v1/live/preview", post(live::preview))

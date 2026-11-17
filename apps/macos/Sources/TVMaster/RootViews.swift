@@ -175,6 +175,7 @@ struct MainView: View {
                     case .libraries: LibrariesView()
                     case .shows: ShowsView()
                     case .tvs: TVsView()
+                    case .appearance: AppearanceView()
                     case .share: ShareView()
                     }
                 }

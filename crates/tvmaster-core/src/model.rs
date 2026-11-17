@@ -505,6 +505,64 @@ impl Default for GuidePip {
     }
 }
 
+/// How the station's graphics are drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GraphicsStyle {
+    /// Chunky pixel type, scanlines and a classic broadcast feel.
+    #[default]
+    Retro,
+    /// Smooth type, soft panels and clean animation at full resolution.
+    Modern,
+}
+
+/// One look for everything the station draws itself: the guide, station and
+/// break cards, the stand-by and sign-off screens, alerts, the now-playing
+/// card, the channel logo and the clock. Set once for the station, and a
+/// channel may choose its own.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct ThemeChoice {
+    /// `auto` = colours derived from each channel, so every channel has its own.
+    #[serde(default)]
+    pub theme: GuideTheme,
+    /// For the `custom` theme.
+    #[serde(default)]
+    pub colors: GuideColors,
+    #[serde(default)]
+    pub style: GraphicsStyle,
+}
+
+impl ThemeChoice {
+    pub fn validate(&self) -> Result<(), String> {
+        for (what, c) in [
+            ("primary", &self.colors.primary),
+            ("accent", &self.colors.accent),
+            ("background", &self.colors.background),
+        ] {
+            if let Some(c) = c.as_deref().filter(|c| !c.trim().is_empty()) {
+                if parse_hex_color(c).is_none() {
+                    return Err(format!("theme.colors.{what} must look like #3366ff"));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// A guide that follows the station theme (its own theme is `auto`) takes
+    /// the station's colours and style; one with its own theme is left alone.
+    pub fn apply_to_guide(&self, g: &mut GuideConfig) {
+        if g.theme != GuideTheme::Auto {
+            return;
+        }
+        g.theme = self.theme;
+        g.colors = self.colors.clone();
+        if self.style == GraphicsStyle::Modern {
+            g.look.typeface = GuideTypeface::Smooth;
+            g.look.corners = GuideCorners::Rounded;
+        }
+    }
+}
+
 /// Settings for a guide channel.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GuideConfig {

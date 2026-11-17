@@ -232,6 +232,30 @@ public struct TVMasterClient: Sendable {
         do { return try Self.decoder.decode(LiveState.self, from: data) } catch { throw TVMasterError.invalidResponse }
     }
 
+    /// The station's themes (the one list every screen and app uses) and the one chosen.
+    public func themeCatalogue() async throws -> ThemeCatalogue { try await get("/theme") }
+
+    /// The station's chosen theme, as the server wrote it.
+    public func stationThemeJSON() async throws -> JSONValue? {
+        let data = try await send("GET", "/theme")
+        guard let any = try? JSONSerialization.jsonObject(with: data) else { return nil }
+        return JSONValue(any: any).get(["station"])
+    }
+
+    /// Choose the station theme.
+    public func setStationTheme(_ choice: ThemeChoice) async throws {
+        _ = try await send("PUT", "/theme", body: choice.json)
+    }
+
+    /// A PNG of one of the station's graphics (`card`, `bumper`, `guide`, `alert`, `bar`) in a theme.
+    public func themePreview(what: String, choice: ThemeChoice, id: String? = nil, name: String? = nil, number: Int? = nil) async throws -> Data {
+        var body: [String: JSONValue] = ["what": .string(what), "theme": choice.json, "t": .number(2)]
+        if let id { body["id"] = .string(id) }
+        if let name { body["name"] = .string(name) }
+        if let number { body["number"] = .number(Double(number)) }
+        return try await send("POST", "/theme/preview", body: .object(body))
+    }
+
     /// A PNG of an alert as it would look (nothing goes on air).
     public func alertPreview(style: String, theme: String, severity: String, title: String, message: String) async throws -> Data {
         try await send("POST", "/live/preview", body: .object([
