@@ -179,6 +179,7 @@ struct MainView: View {
                     case .schedule: ScheduleView()
                     case .libraries: LibrariesView()
                     case .shows: ShowsView()
+                    case .promos: PromosView()
                     case .tvs: TVsView()
                     case .appearance: AppearanceView()
                     case .share: ShareView()

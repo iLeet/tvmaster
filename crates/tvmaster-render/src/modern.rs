@@ -5,7 +5,7 @@
 use crate::alert::{centred, disc, draw, ink_on, rect, vgrad, wrap};
 use crate::overlay::Graphic;
 use crate::text::{self, Face};
-use crate::{mix, png, Canvas, Rgb, Scene, Theme};
+use crate::{mix, png, Canvas, Photo, PromoKind, PromoSpec, Rgb, Scene, Theme};
 
 const W: i32 = 1280;
 const H: i32 = 720;
@@ -287,12 +287,75 @@ pub fn render(scene: &Scene, th: &Theme, t: f32, dur: f32) -> Canvas {
                 y += 84;
             }
         }
+        Scene::Promo { spec, photo } => promo(&mut c, th, spec, photo.as_ref(), t, dur),
         Scene::Alert { .. } => {}
     }
     // Fade in from black and out to black.
     let f = (t / 0.3).min(1.0).min(((dur - t) / 0.4).max(0.0));
     c.brightness(f);
     c
+}
+
+/// A spot made in the app, in the smooth style.
+fn promo(c: &mut Canvas, th: &Theme, spec: &PromoSpec, photo: Option<&Photo>, t: f32, dur: f32) {
+    if let Some(p) = photo {
+        crate::draw_photo(c, p, t, dur, 0.5);
+    }
+    match spec.kind {
+        PromoKind::Sponsor => {
+            let (px, ls) = fit(&spec.title, Face::Bold, &[150.0, 120.0, 96.0, 76.0], 1100.0, 2);
+            let y = 210 - (ls.len() as i32 - 1) * (px as i32 / 2);
+            let end = block(c, th, 0, y, &ls, px, Face::Bold, th.ink, true, t, 0.1);
+            let grow = arrive(t, 0.5);
+            let w = (360.0 * grow) as i32;
+            rect(c, W / 2 - w / 2, end + 8, w, 8, th.accent);
+            if !spec.tagline.trim().is_empty() {
+                let (tp, tl) = fit(&spec.tagline, Face::Regular, &[56.0, 46.0, 38.0], 1080.0, 2);
+                block(c, th, 0, end + 40, &tl, tp, Face::Regular, th.accent, true, t, 0.7);
+            }
+            if !spec.contact.trim().is_empty() {
+                let f = arrive(t, 1.4);
+                let rise = ((1.0 - f) * 90.0) as i32;
+                rect(c, 0, H - 118 + rise, W, 118, th.accent);
+                let (cp, cl) = fit(&spec.contact, Face::Bold, &[44.0, 36.0, 30.0], 1160.0, 1);
+                centred(c, W / 2, H - 82 + rise, &cl.join(" "), cp, Face::Bold, th.on_accent);
+            }
+        }
+        PromoKind::ComingUp => {
+            chip(c, th, 96, 170, "COMING UP", t, 0.05);
+            let (px, ls) = fit(&spec.title, Face::Bold, &[130.0, 108.0, 88.0, 70.0], 1090.0, 3);
+            let end = block(c, th, 96, 270, &ls, px, Face::Bold, th.ink, false, t, 0.25);
+            if !spec.tagline.trim().is_empty() {
+                let (tp, tl) = fit(&spec.tagline, Face::Regular, &[58.0, 48.0, 40.0], 1080.0, 2);
+                block(c, th, 96, end + 18, &tl, tp, Face::Regular, th.accent, false, t, 0.6);
+            }
+            if !spec.contact.trim().is_empty() {
+                let (cp, cl) = fit(&spec.contact, Face::Regular, &[36.0, 30.0], 1090.0, 1);
+                block(c, th, 96, H - 110, &cl, cp, Face::Regular, th.ink, false, t, 1.1);
+            }
+        }
+        PromoKind::Slides => {
+            if !spec.title.trim().is_empty() {
+                header(c, th, &spec.title, t);
+            }
+            let n = spec.slides.len().max(1);
+            let each = dur / n as f32;
+            let i = ((t / each) as usize).min(n - 1);
+            let local = t - i as f32 * each;
+            if let Some(text) = spec.slides.get(i) {
+                let (px, ls) = fit(text, Face::Bold, &[110.0, 92.0, 76.0, 60.0], 1100.0, 4);
+                let y = 300 - (ls.len() as i32) * (px as i32 / 2);
+                // Fade each slide out at its end so the next arrives cleanly.
+                let out = ((each - local) / 0.35).clamp(0.0, 1.0);
+                let fo = ease(out);
+                block(c, th, 0, y, &ls, px, Face::Bold, faded(th.ink, mix(th.dark, th.bottom, 0.5), fo), true, local, 0.05);
+            }
+            for k in 0..n {
+                let col = if k == i { th.accent } else { mix(th.dark, th.ink, 0.35) };
+                disc(c, W / 2 + (k as i32 * 28) - (n as i32 - 1) * 14, H - 56, 7, col);
+            }
+        }
+    }
 }
 
 fn chip(c: &mut Canvas, th: &Theme, x: i32, y: i32, label: &str, t: f32, delay: f32) {

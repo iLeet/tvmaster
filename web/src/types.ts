@@ -416,3 +416,16 @@ export interface SetupState {
 export interface BackupInfo { name: string; size: number; created_ms: number; label: string; auto: boolean; version: string; counts: { channels: number; libraries: number; files: number } }
 export interface BackupList { auto: boolean; keep: number; backups: BackupInfo[] }
 export interface BackupRestored { channels: number; libraries: number; files: number; pictures: number; missing_folders: string[]; safety_copy: string }
+
+export interface PromoOptions {
+  kinds: { id: 'sponsor' | 'coming_up' | 'slides'; name: string; about: string }[];
+  looks: { id: string; name: string }[];
+  sounds: { id: 'jingle' | 'music' | 'none'; name: string }[];
+  seconds: number[];
+}
+export interface PromoSpot { id: number; name: string; seconds: number; path: string; library: number }
+export interface PromoDraft {
+  kind: 'sponsor' | 'coming_up' | 'slides';
+  title: string; tagline: string; contact: string; slides: string[];
+  seconds: number; picture: string | null; theme: ThemeChoice | null; look: string; sound: 'jingle' | 'music' | 'none'; music: string | null; year: number | null; name: string;
+}

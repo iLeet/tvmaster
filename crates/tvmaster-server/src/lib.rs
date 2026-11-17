@@ -15,6 +15,7 @@ mod live;
 mod monitor;
 mod pip;
 mod plan;
+mod promos;
 mod setup;
 mod shownames;
 #[cfg(test)]
@@ -503,6 +504,7 @@ fn build_router(state: AppState, https: bool) -> Router {
             "/api/v1/media/station-folder",
             post(libraries::station_folder),
         )
+        .route("/api/v1/libraries/:id/fetch", post(libraries::fetch))
         .route("/api/v1/libraries/:id/scan", post(libraries::scan))
         .route("/api/v1/libraries/:id/analyze", post(libraries::analyze))
         .route(
@@ -559,6 +561,11 @@ fn build_router(state: AppState, https: bool) -> Router {
             get(station::get_timezone).put(station::put_timezone),
         )
         .route("/api/v1/server/restart", post(station::server_restart))
+        .route("/api/v1/promos", get(promos::list).post(promos::create))
+        .route("/api/v1/promos/options", get(promos::options))
+        .route("/api/v1/promos/music", get(promos::music))
+        .route("/api/v1/promos/preview", post(promos::preview))
+        .route("/api/v1/promos/:id", axum::routing::delete(promos::remove))
         .route("/api/v1/backups", get(backup::list).post(backup::create))
         .route("/api/v1/backups/settings", axum::routing::put(backup::put_settings))
         .route("/api/v1/backups/upload", post(backup::upload))

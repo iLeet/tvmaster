@@ -467,6 +467,23 @@ public struct TVMasterClient: Sendable {
 
     public func shows() async throws -> [ShowSummary] { try await get("/shows") }
 
+    // MARK: promos
+
+    public func promoOptions() async throws -> PromoOptions { try await get("/promos/options") }
+    public func promos() async throws -> [PromoSpot] { try await get("/promos") }
+    public func promoMusic() async throws -> [PromoMusic] { try await get("/promos/music") }
+    public func promoPreview(_ draft: PromoDraft) async throws -> Data { try await send("POST", "/promos/preview", body: draft.json) }
+
+    @discardableResult
+    public func makePromo(_ draft: PromoDraft) async throws -> Data { try await send("POST", "/promos", body: draft.json) }
+
+    public func deletePromo(_ id: Int) async throws { _ = try await send("DELETE", "/promos/\(id)") }
+
+    /// Have the server download a file from a web address into a library.
+    public func fetchIntoLibrary(_ id: Int, url: String) async throws {
+        _ = try await send("POST", "/libraries/\(id)/fetch", body: .object(["url": .string(url)]))
+    }
+
     // MARK: backups
 
     public func backups() async throws -> BackupList { try await get("/backups") }

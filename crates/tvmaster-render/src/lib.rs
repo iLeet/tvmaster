@@ -250,6 +250,35 @@ impl Theme {
     }
 }
 
+/// What kind of spot a promo is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PromoKind {
+    /// A sponsor or advertiser: a big name, a tagline and a contact line.
+    Sponsor,
+    /// A promo for a programme: "Coming up", the name, and when.
+    ComingUp,
+    /// A few lines of text, one after another.
+    Slides,
+}
+
+/// What a made-by-you spot says.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PromoSpec {
+    pub kind: PromoKind,
+    pub title: String,
+    pub tagline: String,
+    pub contact: String,
+    pub slides: Vec<String>,
+}
+
+/// A picture behind a promo, already fitted to a little more than the frame so it can drift slowly.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Photo {
+    pub w: usize,
+    pub h: usize,
+    pub rgb: std::sync::Arc<Vec<u8>>,
+}
+
 /// What a bumper says. Text is filled in by the caller when the bumper airs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Scene {
@@ -276,6 +305,11 @@ pub enum Scene {
         name: String,
         evening: bool,
         items: Vec<(String, String)>,
+    },
+    /// A spot made in the app: a sponsor, a programme promo or a few slides of text.
+    Promo {
+        spec: PromoSpec,
+        photo: Option<Photo>,
     },
     /// An emergency-alert screen that takes over the channel: a flashing red
     /// header, the event, the message, and the message again as a crawl.
@@ -462,6 +496,78 @@ fn lines(
     y
 }
 
+/// Copy the part of `photo` that is showing at `t` (it drifts across over `dur` seconds), darkened by `keep`.
+pub(crate) fn draw_photo(c: &mut Canvas, photo: &Photo, t: f32, dur: f32, keep: f32) {
+    let (w, h) = (c.w, c.h);
+    if photo.w < w || photo.h < h || photo.rgb.len() < photo.w * photo.h * 3 {
+        return;
+    }
+    let f = (t / dur.max(0.1)).clamp(0.0, 1.0);
+    let (x0, y0) = (((photo.w - w) as f32 * f) as usize, ((photo.h - h) as f32 * (1.0 - f)) as usize);
+    for y in 0..h {
+        let src = ((y0 + y) * photo.w + x0) * 3;
+        let dst = y * w * 3;
+        for (d, s) in c.px[dst..dst + w * 3].iter_mut().zip(&photo.rgb[src..src + w * 3]) {
+            *d = (*s as f32 * keep) as u8;
+        }
+    }
+}
+
+fn promo_retro(c: &mut Canvas, th: &Theme, spec: &PromoSpec, photo: Option<&Photo>, t: f32, dur: f32) {
+    if let Some(p) = photo {
+        draw_photo(c, p, t, dur, 0.55);
+    }
+    match spec.kind {
+        PromoKind::Sponsor => {
+            let (scale, ls) = layout_title(&spec.title, 580, 2);
+            let end = lines(c, 70, &ls, scale.min(6), th.ink, t, 0.1);
+            if !spec.tagline.trim().is_empty() {
+                let (sc, tl) = layout_title(&spec.tagline, 560, 2);
+                lines(c, end + 12, &tl, sc.min(3), th.accent, t, 0.6);
+            }
+            if !spec.contact.trim().is_empty() {
+                let rise = ((1.0 - ease_out((t - 1.3) / 0.5)) * 50.0) as i32;
+                c.rect(0, 306 + rise, 640, 40, th.accent);
+                let (sc, cl) = layout_title(&spec.contact, 600, 1);
+                if let Some(l) = cl.first() {
+                    c.text_centered(318 + rise, l, sc.min(2), th.on_accent);
+                }
+            }
+        }
+        PromoKind::ComingUp => {
+            let bar = 60 - slide(t, 0.0) / 2;
+            c.rect(0, bar, 640, 40, th.accent);
+            c.text(24 - slide(t, 0.05), bar + 8, "COMING UP", 3, th.on_accent);
+            let (scale, ls) = layout_title(&spec.title, 580, 3);
+            let end = lines(c, 130, &ls, scale.min(5), th.ink, t, 0.25);
+            if !spec.tagline.trim().is_empty() {
+                let (sc, tl) = layout_title(&spec.tagline, 560, 2);
+                lines(c, end + 14, &tl, sc.min(3), th.primary, t, 0.6);
+            }
+            if !spec.contact.trim().is_empty() {
+                c.text_shadow(24, 332, &truncate(&spec.contact, 60), 2, th.ink);
+            }
+        }
+        PromoKind::Slides => {
+            if !spec.title.trim().is_empty() {
+                header(c, th, &spec.title, t);
+            }
+            let n = spec.slides.len().max(1);
+            let each = dur / n as f32;
+            let i = ((t / each) as usize).min(n - 1);
+            let local = t - i as f32 * each;
+            if let Some(text) = spec.slides.get(i) {
+                let (scale, ls) = layout_title(text, 580, 4);
+                let y = 180 - (ls.len() as i32 - 1) * scale * 5;
+                lines(c, y, &ls, scale.min(5), th.ink, local, 0.05);
+            }
+            for k in 0..n {
+                c.rect(300 + k as i32 * 16 - n as i32 * 8, 340, 8, 8, if k == i { th.accent } else { th.primary });
+            }
+        }
+    }
+}
+
 /// Render one frame of a bumper `dur` seconds long, `t` seconds in.
 pub fn render(scene: &Scene, th: &Theme, t: f32, dur: f32) -> Canvas {
     if th.modern && !matches!(scene, Scene::Alert { .. }) {
@@ -547,6 +653,7 @@ pub fn render(scene: &Scene, th: &Theme, t: f32, dur: f32) -> Canvas {
                 y += 44;
             }
         }
+        Scene::Promo { spec, photo } => promo_retro(&mut c, th, spec, photo.as_ref(), t, dur),
         Scene::Alert { .. } => {}
     }
     c.scanlines(0.16);
@@ -667,6 +774,45 @@ mod tests {
                 assert_eq!(c.px.len(), WIDTH * HEIGHT * 3);
             }
         }
+    }
+
+    #[test]
+    fn every_kind_of_promo_draws_in_both_styles_with_and_without_a_picture() {
+        let long = "AN ABSURDLY LONG HEADLINE THAT KEEPS GOING AND GOING UNTIL IT MUST BE FITTED";
+        let specs = [
+            PromoSpec { kind: PromoKind::Sponsor, title: "Mel's Diner".into(), tagline: "Best pie in town".into(), contact: "Call 555-0134 - open daily".into(), slides: vec![] },
+            PromoSpec { kind: PromoKind::Sponsor, title: long.into(), tagline: long.into(), contact: long.into(), slides: vec![] },
+            PromoSpec { kind: PromoKind::ComingUp, title: "Cheers".into(), tagline: "Thursdays at 8".into(), contact: String::new(), slides: vec![] },
+            PromoSpec { kind: PromoKind::Slides, title: "Today".into(), tagline: String::new(), contact: String::new(), slides: vec!["Pie".into(), "Coffee".into(), long.into()] },
+            PromoSpec { kind: PromoKind::Slides, title: String::new(), tagline: String::new(), contact: String::new(), slides: vec![] },
+        ];
+        for modern in [false, true] {
+            let mut th = Theme::for_channel("promo");
+            th.modern = modern;
+            let (w, h) = th.frame_size();
+            let photo = Photo { w: w * 115 / 100, h: h * 115 / 100, rgb: std::sync::Arc::new(vec![180u8; (w * 115 / 100) * (h * 115 / 100) * 3]) };
+            for spec in &specs {
+                for p in [None, Some(photo.clone())] {
+                    let sc = Scene::Promo { spec: spec.clone(), photo: p };
+                    for t in [0.0, 1.0, 4.9] {
+                        let c = render(&sc, &th, t, 5.0);
+                        assert_eq!((c.w, c.h), (w, h));
+                    }
+                    if matches!(&sc, Scene::Promo { photo: None, .. }) && !(spec.title.is_empty() && spec.slides.is_empty()) {
+                        let mid = render(&sc, &th, 2.5, 5.0);
+                        let distinct: std::collections::HashSet<&[u8]> = mid.px.chunks(3).step_by(37).collect();
+                        assert!(distinct.len() > 4, "{spec:?} looks blank");
+                    }
+                }
+            }
+        }
+        // The picture drifts, the text moves in, and the same frame is always the same.
+        let th = Theme::for_channel("p");
+        let spec = specs[0].clone();
+        let photo = Photo { w: 736, h: 414, rgb: std::sync::Arc::new((0..736 * 414 * 3).map(|i| (i % 251) as u8).collect()) };
+        let sc = Scene::Promo { spec, photo: Some(photo) };
+        assert_ne!(render(&sc, &th, 1.0, 5.0).px, render(&sc, &th, 3.0, 5.0).px);
+        assert_eq!(render(&sc, &th, 2.0, 5.0).px, render(&sc, &th, 2.0, 5.0).px);
     }
 
     #[test]
