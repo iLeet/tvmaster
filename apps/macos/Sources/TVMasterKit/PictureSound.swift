@@ -100,6 +100,15 @@ public struct PictureSoundSettings: Equatable, Sendable {
     public var offAirTone = false
     /// This channel's own theme (`nil` = it follows the station's).
     public var theme: ThemeChoice?
+    // The ticker: a strip of scrolling text across the picture.
+    public var tickerEnabled = false
+    public var tickerLines: [String] = []
+    public var tickerUpNext = false
+    public var tickerFeeds: [String] = []
+    public var tickerLabel = ""
+    public var tickerPosition = "bottom"
+    public var tickerSpeed = "normal"
+    public var tickerEvery = 0
 
     public var signOffEnabled = false
     public var signOffFrom = "02:00"
@@ -128,6 +137,14 @@ public struct PictureSoundSettings: Equatable, Sendable {
         func str(_ p: [String], _ d: String) -> String { options?.get(p)?.stringValue ?? d }
         func bool(_ p: [String], _ d: Bool) -> Bool { options?.get(p)?.boolValue ?? d }
         theme = ThemeChoice(json: options?.get(["theme"]))
+        tickerEnabled = bool(["overlay", "ticker", "enabled"], false)
+        tickerLines = options?.get(["overlay", "ticker", "lines"])?.stringArray ?? []
+        tickerUpNext = bool(["overlay", "ticker", "up_next"], false)
+        tickerFeeds = options?.get(["overlay", "ticker", "feeds"])?.stringArray ?? []
+        tickerLabel = str(["overlay", "ticker", "label"], "")
+        tickerPosition = str(["overlay", "ticker", "position"], "bottom")
+        tickerSpeed = str(["overlay", "ticker", "speed"], "normal")
+        tickerEvery = options?.get(["overlay", "ticker", "every_minutes"])?.intValue ?? 0
         audioLanguages = options?.get(["audio", "languages"])?.stringArray ?? []
         avoidCommentary = bool(["audio", "avoid_commentary"], true)
         avoidDescription = bool(["audio", "avoid_description"], true)
@@ -169,6 +186,14 @@ public struct PictureSoundSettings: Equatable, Sendable {
         var o = options ?? .object([:])
         let strings: ([String]) -> JSONValue = { .array($0.map { .string($0) }) }
         o.set(["theme"], theme?.json ?? .null)
+        o.set(["overlay", "ticker", "enabled"], .bool(tickerEnabled))
+        o.set(["overlay", "ticker", "lines"], strings(tickerLines.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }))
+        o.set(["overlay", "ticker", "up_next"], .bool(tickerUpNext))
+        o.set(["overlay", "ticker", "feeds"], strings(tickerFeeds.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }))
+        o.set(["overlay", "ticker", "label"], .string(tickerLabel))
+        o.set(["overlay", "ticker", "position"], .string(tickerPosition))
+        o.set(["overlay", "ticker", "speed"], .string(tickerSpeed))
+        o.set(["overlay", "ticker", "every_minutes"], .number(Double(tickerEvery)))
         o.set(["audio", "languages"], strings(audioLanguages))
         o.set(["audio", "avoid_commentary"], .bool(avoidCommentary))
         o.set(["audio", "avoid_description"], .bool(avoidDescription))

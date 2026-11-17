@@ -9,6 +9,7 @@ mod backup;
 mod channels;
 mod guide_preview;
 mod hdhr;
+mod headlines;
 mod iptv;
 mod libraries;
 mod live;
@@ -76,6 +77,8 @@ pub struct AppState {
     pub(crate) monitor: Arc<Mutex<monitor::Book>>,
     /// What the operator has put on each channel in place of its programming.
     pub(crate) live: Arc<Mutex<live::Book>>,
+    /// Headlines fetched for the tickers that follow news feeds.
+    pub(crate) headlines: headlines::Book,
 }
 
 /// What the daemon is listening on, so clients can build links to it.
@@ -123,6 +126,7 @@ impl AppState {
         let live = live::load(&conn);
         Self {
             live: Arc::new(Mutex::new(live)),
+            headlines: Arc::new(Mutex::new(HashMap::new())),
             db: Arc::new(Mutex::new(conn)),
             playout,
             ffmpeg: ffmpeg.map(Arc::new),
@@ -354,6 +358,7 @@ impl AppState {
                 dirty: self.dirty.clone(),
                 wake: self.wake.clone(),
                 live: self.live.clone(),
+                headlines: self.headlines.clone(),
             }),
         }
     }
@@ -397,6 +402,17 @@ impl AppState {
                     let s2 = st.clone();
                     let _ = tokio::task::spawn_blocking(move || backup::nightly(&s2)).await;
                     tokio::time::sleep(Duration::from_secs(3600)).await;
+                }
+            });
+        }
+        // Headlines for tickers that follow news feeds.
+        {
+            let st = state.clone();
+            tokio::spawn(async move {
+                loop {
+                    let s2 = st.clone();
+                    let _ = tokio::task::spawn_blocking(move || headlines::refresh(&s2)).await;
+                    tokio::time::sleep(Duration::from_secs(60)).await;
                 }
             });
         }
@@ -567,9 +583,15 @@ fn build_router(state: AppState, https: bool) -> Router {
         .route("/api/v1/promos/preview", post(promos::preview))
         .route("/api/v1/promos/:id", axum::routing::delete(promos::remove))
         .route("/api/v1/backups", get(backup::list).post(backup::create))
-        .route("/api/v1/backups/settings", axum::routing::put(backup::put_settings))
+        .route(
+            "/api/v1/backups/settings",
+            axum::routing::put(backup::put_settings),
+        )
         .route("/api/v1/backups/upload", post(backup::upload))
-        .route("/api/v1/backups/:name", get(backup::download).delete(backup::remove))
+        .route(
+            "/api/v1/backups/:name",
+            get(backup::download).delete(backup::remove),
+        )
         .route("/api/v1/backups/:name/restore", post(backup::restore))
         .route("/api/v1/setup", get(setup::get))
         .route("/api/v1/setup/starter", post(setup::starter))

@@ -380,6 +380,24 @@ struct PictureSoundForm: View {
                 Toggle("Now-playing card when a programme starts", isOn: $ps.titleEnabled)
                 Toggle("Clock (needs FFmpeg with drawtext)", isOn: $ps.clockEnabled)
             }
+            Section("Ticker") {
+                Text("A strip of scrolling text across the picture, like a news channel's crawl: station notices, headlines from a news feed, and what is on next.").font(.caption).foregroundStyle(.secondary)
+                Toggle("Show a ticker", isOn: $ps.tickerEnabled)
+                if ps.tickerEnabled {
+                    Text("Messages, one per line").font(.caption).foregroundStyle(.secondary)
+                    TextEditor(text: Binding(get: { ps.tickerLines.joined(separator: "\n") }, set: { ps.tickerLines = Array($0.split(separator: "\n", omittingEmptySubsequences: false).map(String.init).prefix(20)) }))
+                        .frame(height: 80).overlay(RoundedRectangle(cornerRadius: 6).stroke(.secondary.opacity(0.3)))
+                    Toggle("Add what is on next (“Up next: Cheers at 8:30 PM”)", isOn: $ps.tickerUpNext)
+                    Text("News feeds: RSS or Atom addresses, one per line. Their latest headlines are added and refreshed every 15 minutes.").font(.caption).foregroundStyle(.secondary)
+                    TextEditor(text: Binding(get: { ps.tickerFeeds.joined(separator: "\n") }, set: { ps.tickerFeeds = Array($0.split(separator: "\n", omittingEmptySubsequences: false).map(String.init).prefix(5)) }))
+                        .font(.body.monospaced()).frame(height: 50).overlay(RoundedRectangle(cornerRadius: 6).stroke(.secondary.opacity(0.3)))
+                    TextField("Tab (a word at the left, blank = none)", text: $ps.tickerLabel).frame(maxWidth: 320)
+                    Picker("Where", selection: $ps.tickerPosition) { Text("Bottom").tag("bottom"); Text("Top").tag("top") }.pickerStyle(.segmented)
+                    Picker("Speed", selection: $ps.tickerSpeed) { Text("Slow").tag("slow"); Text("Normal").tag("normal"); Text("Fast").tag("fast") }.pickerStyle(.segmented)
+                    Stepper(ps.tickerEvery == 0 ? "On all the time" : "Appears every \(ps.tickerEvery) minutes", value: $ps.tickerEvery, in: 0...60, step: 5)
+                    ThemePreviewView(choice: ps.theme ?? ThemeChoice(), what: "ticker", text: ([ps.tickerLines.joined(separator: "   •   ")] + (ps.tickerUpNext ? ["Up next: Cheers at 8:30 PM"] : [])).filter { !$0.isEmpty }.joined(separator: "   •   "), label: ps.tickerLabel, top: ps.tickerPosition == "top")
+                }
+            }
             Section("Sign-off") {
                 Toggle("Go off the air overnight", isOn: $ps.signOffEnabled)
                 if ps.signOffEnabled {

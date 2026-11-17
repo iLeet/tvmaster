@@ -10,7 +10,7 @@ import re, sys, pathlib
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 STRUCTS = {
-    "crates/tvmaster-core/src/options.rs": ["AudioPrefs", "SubPrefs", "VideoOptions", "BugOptions", "ClockOptions", "ShowTitleOptions", "OffAir", "ChannelOptions", "ShowOptions"],
+    "crates/tvmaster-core/src/options.rs": ["AudioPrefs", "SubPrefs", "VideoOptions", "BugOptions", "ClockOptions", "ShowTitleOptions", "TickerOptions", "OffAir", "ChannelOptions", "ShowOptions"],
     "crates/tvmaster-core/src/ads.rs": ["BumperToggles", "AdConfig"],
     "crates/tvmaster-core/src/lineup.rs": ["Block", "Season", "Event", "Lineup", "SignOff"],
     "crates/tvmaster-core/src/model.rs": ["ThemeChoice", "GuideColors", "GuideBackground", "GuideAppearance", "GuideLayout", "GuideHeader", "GuideTicker", "GuidePip", "GuideConfig", "Channel"],

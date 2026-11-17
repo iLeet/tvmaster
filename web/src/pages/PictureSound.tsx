@@ -3,12 +3,21 @@ import { SCREENS, emptyOptions, setShowOption, showOverride } from '../options';
 import type { ChannelOptions, Corner, Lineup, ShowSummary, SignOff, System } from '../types';
 import { Badge, Card, ConfirmBtn, Field, Segmented, Toggle } from '../ui';
 import { PictureField } from '../PictureField';
+import { ThemePreview, emptyChoice, useThemeCatalogue } from '../ThemePicker';
 import { ASPECTS, LanguageList, LOOKS, ShowSettingsRow, SUB_MODES } from './ShowSettings';
 
 const CORNERS: { value: Corner; label: string }[] = [
   { value: 'top_left', label: 'Top left' }, { value: 'top_right', label: 'Top right' },
   { value: 'bottom_left', label: 'Bottom left' }, { value: 'bottom_right', label: 'Bottom right' },
 ];
+
+/** What the ticker will look like over a sample picture, in the channel's theme. */
+function TickerPreview({ options }: { options: ChannelOptions }) {
+  const station = useThemeCatalogue()?.station;
+  const tk = options.overlay.ticker;
+  const text = [...tk.lines, ...(tk.up_next ? ['Up next: Cheers at 8:30 PM'] : []), ...(tk.feeds.length ? ['Headlines from your feeds appear here'] : [])].filter((l) => l.trim()).join('   •   ');
+  return <ThemePreview choice={options.theme ?? station ?? emptyChoice()} what="ticker" text={text} label={tk.label} top={tk.position === 'top'} />;
+}
 
 export function PictureSound({
   options, onChange, lineup, onLineup, shows, sys, testOnly = false,
@@ -144,6 +153,31 @@ export function PictureSound({
             {noDrawtext && <Badge tone="warn">needs FFmpeg with drawtext (this one has none, so no clock appears)</Badge>}
           </div>
         )}
+      </Card>
+
+      <Card className="stack">
+        <div><h2>Ticker</h2><p className="small dim">A strip of scrolling text across the picture, like a news channel's crawl: station notices, headlines from a news feed, and what is on next.</p></div>
+        <Toggle checked={o.overlay.ticker.enabled} onChange={(v) => patch('overlay', { ticker: { ...o.overlay.ticker, enabled: v } })} label={<strong>Show a ticker</strong>} />
+        {o.overlay.ticker.enabled && (() => {
+          const tk = o.overlay.ticker;
+          const set = (p: Partial<typeof tk>) => patch('overlay', { ticker: { ...tk, ...p } });
+          return (
+            <div className="stack nest">
+              <Field label="Messages" hint="One per line. They scroll one after another."><textarea className="input" rows={4} maxLength={4000} value={tk.lines.join('\n')} onChange={(e) => set({ lines: e.target.value.split('\n').slice(0, 20) })} /></Field>
+              <Toggle checked={tk.up_next} onChange={(v) => set({ up_next: v })} label={<span>Add what is on next <span className="dim small">“Up next: Cheers at 8:30 PM”</span></span>} />
+              <Field label="News feeds" hint="Addresses of RSS or Atom feeds, one per line. Their latest headlines are added and refreshed every 15 minutes."><textarea className="input mono" rows={2} value={tk.feeds.join('\n')} placeholder="https://example.com/news.xml" onChange={(e) => set({ feeds: e.target.value.split('\n').map((f) => f.trim()).filter(Boolean).slice(0, 5) })} /></Field>
+              <div className="row wrap" style={{ alignItems: 'flex-end' }}>
+                <Field label="Tab" hint="A word in a coloured tab at the left. Blank = none."><input className="input" style={{ width: 130 }} maxLength={16} value={tk.label} placeholder="NEWS" onChange={(e) => set({ label: e.target.value })} /></Field>
+                <Field label="Where"><Segmented value={tk.position} options={[{ value: 'bottom', label: 'Bottom' }, { value: 'top', label: 'Top' }]} onChange={(position) => set({ position })} /></Field>
+                <Field label="Speed"><Segmented value={tk.speed} options={[{ value: 'slow', label: 'Slow' }, { value: 'normal', label: 'Normal' }, { value: 'fast', label: 'Fast' }]} onChange={(speed) => set({ speed })} /></Field>
+              </div>
+              <Field label={tk.every_minutes === 0 ? 'On all the time' : `Appears every ${tk.every_minutes} minutes`} hint="Slide to 0 for a ticker that never goes away; otherwise it crosses the screen once each time.">
+                <input type="range" min={0} max={60} step={5} value={tk.every_minutes} onChange={(e) => set({ every_minutes: Number(e.target.value) })} />
+              </Field>
+              <TickerPreview options={o} />
+            </div>
+          );
+        })()}
       </Card>
 
       {offAir}

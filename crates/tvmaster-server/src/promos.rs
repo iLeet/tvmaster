@@ -92,7 +92,9 @@ impl PromoBody {
             return Err("kind must be sponsor, coming_up or slides".into());
         }
         if long(&self.title, 80) || long(&self.tagline, 120) || long(&self.contact, 100) {
-            return Err("the title is at most 80 characters, the tagline 120, the contact line 100".into());
+            return Err(
+                "the title is at most 80 characters, the tagline 120, the contact line 100".into(),
+            );
         }
         if self.slides.len() > 10 || self.slides.iter().any(|s| long(s, 120)) {
             return Err("at most 10 slides of 120 characters".into());
@@ -117,7 +119,11 @@ impl PromoBody {
                 return Err("a file path is not valid".into());
             }
         }
-        if let Some(l) = self.look.as_deref().filter(|l| !l.is_empty() && *l != "none") {
+        if let Some(l) = self
+            .look
+            .as_deref()
+            .filter(|l| !l.is_empty() && *l != "none")
+        {
             if serde_json::from_value::<Look>(json!(l)).is_err() {
                 return Err("look must be none, vhs, crt, film, black_white or sepia".into());
             }
@@ -141,7 +147,12 @@ impl PromoBody {
             title: self.title.trim().to_string(),
             tagline: self.tagline.trim().to_string(),
             contact: self.contact.trim().to_string(),
-            slides: self.slides.iter().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(),
+            slides: self
+                .slides
+                .iter()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect(),
         }
     }
 }
@@ -184,7 +195,10 @@ pub async fn music(State(s): State<AppState>) -> ApiResult<Json<Value>> {
         rows.into_iter()
             .take(500)
             .map(|r| {
-                let name = FsPath::new(&r.path).file_stem().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                let name = FsPath::new(&r.path)
+                    .file_stem()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
                 json!({ "path": r.path, "name": name, "seconds": r.duration_ms / 1000 })
             })
             .collect(),
@@ -193,14 +207,23 @@ pub async fn music(State(s): State<AppState>) -> ApiResult<Json<Value>> {
 
 /// Theme for a spot: its own, or the station's. The title gives "automatic" its colours.
 fn theme_of(s: &AppState, b: &PromoBody) -> tvmaster_render::Theme {
-    let choice = b.theme.clone().unwrap_or_else(|| crate::theme::station(&s.db()));
-    let id = if b.title.trim().is_empty() { "promo" } else { b.title.trim() };
+    let choice = b
+        .theme
+        .clone()
+        .unwrap_or_else(|| crate::theme::station(&s.db()));
+    let id = if b.title.trim().is_empty() {
+        "promo"
+    } else {
+        b.title.trim()
+    };
     tvmaster_playout::card_theme(&choice, id)
 }
 
 /// The picture behind the words, fitted to a little more than the frame so it can drift.
 fn load_photo(s: &AppState, b: &PromoBody, w: usize, h: usize) -> Result<Option<Photo>, String> {
-    let Some(p) = b.picture.as_deref().filter(|p| !p.trim().is_empty()) else { return Ok(None) };
+    let Some(p) = b.picture.as_deref().filter(|p| !p.trim().is_empty()) else {
+        return Ok(None);
+    };
     let ff = s.ffmpeg.as_ref().ok_or("ffmpeg is not available")?;
     if !FsPath::new(p).is_file() {
         return Err("that picture is not on the server".into());
@@ -219,16 +242,25 @@ pub async fn preview(State(s): State<AppState>, Json(b): Json<PromoBody>) -> Api
         let (w, h) = th.frame_size();
         let photo = load_photo(&s, &b, w, h)?;
         let secs = b.seconds as f32;
-        let scene = Scene::Promo { spec: b.spec(), photo };
+        let scene = Scene::Promo {
+            spec: b.spec(),
+            photo,
+        };
         // Show it once everything has arrived, unless asked for a moment.
-        let t = if b.t > 0.0 { b.t.min(secs) } else { (secs * 0.4).min(3.0) };
+        let t = if b.t > 0.0 {
+            b.t.min(secs)
+        } else {
+            (secs * 0.4).min(3.0)
+        };
         let c = tvmaster_render::render(&scene, &th, t, secs);
         let mut rgba = Vec::with_capacity(c.w * c.h * 4);
         for px in c.px.as_chunks::<3>().0 {
             rgba.extend_from_slice(px);
             rgba.push(255);
         }
-        Ok(tvmaster_render::png::rgba_png(c.w as u32, c.h as u32, &rgba))
+        Ok(tvmaster_render::png::rgba_png(
+            c.w as u32, c.h as u32, &rgba,
+        ))
     })
     .await
     .map_err(internal)?
@@ -243,7 +275,8 @@ pub async fn preview(State(s): State<AppState>, Json(b): Json<PromoBody>) -> Api
 /// A bright three-note arpeggio at the start and a chime at the end, made from nothing.
 fn jingle(seconds: u32) -> String {
     let d = seconds as f32;
-    let note = "if(lt(t\\,0.25)\\,523.25\\,if(lt(t\\,0.5)\\,659.25\\,if(lt(t\\,0.75)\\,783.99\\,1046.5)))";
+    let note =
+        "if(lt(t\\,0.25)\\,523.25\\,if(lt(t\\,0.5)\\,659.25\\,if(lt(t\\,0.75)\\,783.99\\,1046.5)))";
     let e = format!(
         "0.3*lt(t\\,1.0)*sin(2*PI*{note}*t)*exp(-5*mod(t\\,0.25))+0.22*gt(t\\,{end:.2})*sin(2*PI*1046.5*t)*exp(-4*(t-{end:.2}))",
         end = d - 1.2
@@ -261,7 +294,11 @@ fn slug(s: &str) -> String {
         }
     }
     let out = out.trim_matches('-').chars().take(40).collect::<String>();
-    if out.is_empty() { "promo".into() } else { out }
+    if out.is_empty() {
+        "promo".into()
+    } else {
+        out
+    }
 }
 
 /// Draw the frames and have FFmpeg make them into a video file.
@@ -270,13 +307,32 @@ fn render_file(s: &AppState, b: &PromoBody, out: &FsPath) -> Result<(), String> 
     let th = theme_of(s, b);
     let (w, h) = th.frame_size();
     let photo = load_photo(s, b, w, h)?;
-    let scene = Scene::Promo { spec: b.spec(), photo };
+    let scene = Scene::Promo {
+        spec: b.spec(),
+        photo,
+    };
     let secs = b.seconds;
-    let mut args: Vec<String> = ["-hide_banner", "-loglevel", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s"]
-        .iter()
-        .map(|a| a.to_string())
-        .collect();
-    args.extend([format!("{w}x{h}"), "-r".into(), FPS.to_string(), "-i".into(), "-".into()]);
+    let mut args: Vec<String> = [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-f",
+        "rawvideo",
+        "-pix_fmt",
+        "rgb24",
+        "-s",
+    ]
+    .iter()
+    .map(|a| a.to_string())
+    .collect();
+    args.extend([
+        format!("{w}x{h}"),
+        "-r".into(),
+        FPS.to_string(),
+        "-i".into(),
+        "-".into(),
+    ]);
     let mut af: Option<String> = None;
     match b.sound.as_str() {
         "jingle" => args.extend(["-f".into(), "lavfi".into(), "-i".into(), jingle(secs)]),
@@ -288,13 +344,23 @@ fn render_file(s: &AppState, b: &PromoBody, out: &FsPath) -> Result<(), String> 
             args.extend(["-stream_loop".into(), "-1".into(), "-i".into(), m]);
             af = Some(format!("afade=t=out:st={}:d=1.5", secs as f32 - 1.5));
         }
-        _ => args.extend(["-f".into(), "lavfi".into(), "-i".into(), "anullsrc=r=48000:cl=stereo".into()]),
+        _ => args.extend([
+            "-f".into(),
+            "lavfi".into(),
+            "-i".into(),
+            "anullsrc=r=48000:cl=stereo".into(),
+        ]),
     }
     let mut vf: Vec<String> = Vec::new();
     if !th.modern {
         vf.push("scale=1280:720:flags=neighbor".into());
     }
-    if let Some(l) = b.look.as_deref().filter(|l| !l.is_empty()).and_then(|l| serde_json::from_value::<Look>(json!(l)).ok()) {
+    if let Some(l) = b
+        .look
+        .as_deref()
+        .filter(|l| !l.is_empty())
+        .and_then(|l| serde_json::from_value::<Look>(json!(l)).ok())
+    {
         if let Some(chain) = tvmaster_playout::look_chain(l) {
             vf.push(chain.to_string());
         }
@@ -310,7 +376,21 @@ fn render_file(s: &AppState, b: &PromoBody, out: &FsPath) -> Result<(), String> 
     } else {
         args.extend(["-c:v", "mpeg4", "-q:v", "3"].map(String::from));
     }
-    args.extend(["-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2", "-movflags", "+faststart"].map(String::from));
+    args.extend(
+        [
+            "-c:a",
+            "aac",
+            "-b:a",
+            "128k",
+            "-ar",
+            "48000",
+            "-ac",
+            "2",
+            "-movflags",
+            "+faststart",
+        ]
+        .map(String::from),
+    );
     args.push(out.to_string_lossy().to_string());
     let mut child = Command::new(&ff.ffmpeg)
         .args(&args)
@@ -341,7 +421,10 @@ fn render_file(s: &AppState, b: &PromoBody, out: &FsPath) -> Result<(), String> 
     let log = reader.join().unwrap_or_default();
     if !status.success() || write_err.is_some() {
         let _ = std::fs::remove_file(out);
-        return Err(format!("ffmpeg could not make the spot: {}", log.lines().last().unwrap_or("it stopped early")));
+        return Err(format!(
+            "ffmpeg could not make the spot: {}",
+            log.lines().last().unwrap_or("it stopped early")
+        ));
     }
     Ok(())
 }
@@ -350,7 +433,10 @@ fn render_file(s: &AppState, b: &PromoBody, out: &FsPath) -> Result<(), String> 
 pub async fn create(State(s): State<AppState>, Json(b): Json<PromoBody>) -> ApiResult<Json<Value>> {
     b.validate().map_err(bad)?;
     if s.ffmpeg.is_none() {
-        return Err(ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "ffmpeg is not available"));
+        return Err(ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "ffmpeg is not available",
+        ));
     }
     let lib = match b.library {
         Some(id) => tvmaster_db::get_library(&s.db(), id)?
@@ -367,7 +453,11 @@ pub async fn create(State(s): State<AppState>, Json(b): Json<PromoBody>) -> ApiR
         dir = dir.join(y.to_string());
     }
     std::fs::create_dir_all(&dir).map_err(|e| internal(format!("cannot make the folder: {e}")))?;
-    let label = if b.name.trim().is_empty() { &b.title } else { &b.name };
+    let label = if b.name.trim().is_empty() {
+        &b.title
+    } else {
+        &b.name
+    };
     let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
     let dest = dir.join(format!("{}-{stamp}.mp4", slug(label)));
     let part = dir.join(format!(".{}.part.mp4", slug(label)));
@@ -421,11 +511,13 @@ pub async fn list(State(s): State<AppState>) -> ApiResult<Json<Value>> {
 pub async fn remove(State(s): State<AppState>, Path(id): Path<i64>) -> ApiResult<StatusCode> {
     let (lib, rel) = {
         let db = s.db();
-        let m = tvmaster_db::get_media(&db, id)?.ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "no such spot"))?;
+        let m = tvmaster_db::get_media(&db, id)?
+            .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "no such spot"))?;
         if !is_promo_path(&m.path) {
             return Err(bad("only spots made here can be removed here"));
         }
-        let lib = tvmaster_db::get_library(&db, m.library_id)?.ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "no such library"))?;
+        let lib = tvmaster_db::get_library(&db, m.library_id)?
+            .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "no such library"))?;
         let rel = FsPath::new(&m.path)
             .strip_prefix(&lib.path)
             .map(|p| p.to_string_lossy().replace('\\', "/"))
@@ -435,7 +527,10 @@ pub async fn remove(State(s): State<AppState>, Path(id): Path<i64>) -> ApiResult
     libraries::delete_file(
         State(s),
         Path(lib.id),
-        axum::extract::Query(libraries::FileQuery { path: rel, overwrite: false }),
+        axum::extract::Query(libraries::FileQuery {
+            path: rel,
+            overwrite: false,
+        }),
     )
     .await
 }
@@ -489,7 +584,8 @@ mod tests {
         };
         let dir = std::env::temp_dir().join(format!("tvm-promo-{}", crate::generate_token()));
         std::fs::create_dir_all(&dir).unwrap();
-        let state = AppState::new(tvmaster_db::open_in_memory().unwrap(), Some(info), None).with_data_dir(&dir);
+        let state = AppState::new(tvmaster_db::open_in_memory().unwrap(), Some(info), None)
+            .with_data_dir(&dir);
         let app = router(state.clone());
         for (kind, look, sound) in [("sponsor", "vhs", "jingle"), ("slides", "", "none")] {
             let body = format!(
@@ -502,12 +598,30 @@ mod tests {
         let (_, list) = call(&app, "GET", "/api/v1/promos", "").await;
         let list = list.as_array().unwrap();
         assert_eq!(list.len(), 2);
-        assert!(list.iter().all(|p| (4..=6).contains(&p["seconds"].as_i64().unwrap())), "{list:?}");
+        assert!(
+            list.iter()
+                .all(|p| (4..=6).contains(&p["seconds"].as_i64().unwrap())),
+            "{list:?}"
+        );
         // It really is a playable video with sound.
         let path = list[0]["path"].as_str().unwrap();
-        let probe = std::process::Command::new("ffprobe").args(["-v", "error", "-show_entries", "stream=codec_type", "-of", "csv=p=0", path]).output().unwrap();
+        let probe = std::process::Command::new("ffprobe")
+            .args([
+                "-v",
+                "error",
+                "-show_entries",
+                "stream=codec_type",
+                "-of",
+                "csv=p=0",
+                path,
+            ])
+            .output()
+            .unwrap();
         let kinds = String::from_utf8_lossy(&probe.stdout).to_string();
-        assert!(kinds.contains("video") && kinds.contains("audio"), "{kinds}");
+        assert!(
+            kinds.contains("video") && kinds.contains("audio"),
+            "{kinds}"
+        );
         let id = list[0]["id"].as_i64().unwrap();
         let (st, _) = call(&app, "DELETE", &format!("/api/v1/promos/{id}"), "").await;
         assert_eq!(st, StatusCode::NO_CONTENT);

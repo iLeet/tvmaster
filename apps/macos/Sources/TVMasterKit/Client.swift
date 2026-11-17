@@ -248,9 +248,12 @@ public struct TVMasterClient: Sendable {
     }
 
     /// A PNG of one of the station's graphics (`card`, `bumper`, `guide`, `alert`, `bar`) in a theme.
-    public func themePreview(what: String, choice: ThemeChoice, id: String? = nil, name: String? = nil, number: Int? = nil, scene: String? = nil) async throws -> Data {
+    public func themePreview(what: String, choice: ThemeChoice, id: String? = nil, name: String? = nil, number: Int? = nil, scene: String? = nil, text: String? = nil, label: String? = nil, top: Bool = false) async throws -> Data {
         var body: [String: JSONValue] = ["what": .string(what), "theme": choice.json, "t": .number(2)]
         if let scene { body["scene"] = .string(scene) }
+        if let text { body["text"] = .string(text) }
+        if let label { body["label"] = .string(label) }
+        if top { body["top"] = .bool(true) }
         if let id { body["id"] = .string(id) }
         if let name { body["name"] = .string(name) }
         if let number { body["number"] = .number(Double(number)) }

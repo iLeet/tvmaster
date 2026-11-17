@@ -26,7 +26,11 @@ const KEEP_KEY: &str = "backup_keep";
 /// Largest backup accepted by upload or restore.
 const MAX_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 /// What belongs to this machine's access rather than to the station: never exported, never overwritten.
-const KEEP_META: [&str; 3] = [crate::auth::META_KEY, crate::auth::OPEN_VIEWING_KEY, "hdhr_device_id"];
+const KEEP_META: [&str; 3] = [
+    crate::auth::META_KEY,
+    crate::auth::OPEN_VIEWING_KEY,
+    "hdhr_device_id",
+];
 /// In the order they can be filled (parents first). The schedule is not kept: it is planned again.
 const TABLES: [&str; 10] = [
     "libraries",
@@ -53,16 +57,23 @@ fn valid_name(n: &str) -> bool {
     n.len() <= 100
         && n.ends_with(".tar.gz")
         && !n.starts_with('.')
-        && n.chars().all(|c| c.is_ascii_alphanumeric() || "._-".contains(c))
+        && n.chars()
+            .all(|c| c.is_ascii_alphanumeric() || "._-".contains(c))
 }
 
 fn dir_of(s: &AppState) -> ApiResult<PathBuf> {
     let d = s
         .data_dir
         .clone()
-        .ok_or_else(|| err(StatusCode::CONFLICT, "this server has no data folder to keep backups in"))?
+        .ok_or_else(|| {
+            err(
+                StatusCode::CONFLICT,
+                "this server has no data folder to keep backups in",
+            )
+        })?
         .join("backups");
-    std::fs::create_dir_all(&d).map_err(|e| internal(format!("cannot make the backups folder: {e}")))?;
+    std::fs::create_dir_all(&d)
+        .map_err(|e| internal(format!("cannot make the backups folder: {e}")))?;
     Ok(d)
 }
 
@@ -83,7 +94,8 @@ fn stamp() -> String {
 }
 
 fn count(conn: &Connection, table: &str) -> i64 {
-    conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0)).unwrap_or(0)
+    conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+        .unwrap_or(0)
 }
 
 /// Make a backup file now. Blocking.
@@ -94,7 +106,16 @@ fn create_archive(s: &AppState, label: &str, auto: bool) -> Result<Info, String>
         .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
         .take(30)
         .collect();
-    let base = format!("tvmaster-{}{}{}", if auto { "auto-" } else { "" }, stamp(), if label.is_empty() { String::new() } else { format!("-{label}") });
+    let base = format!(
+        "tvmaster-{}{}{}",
+        if auto { "auto-" } else { "" },
+        stamp(),
+        if label.is_empty() {
+            String::new()
+        } else {
+            format!("-{label}")
+        }
+    );
     let mut name = format!("{base}.tar.gz");
     let mut n = 2;
     while dir.join(&name).exists() {
@@ -111,9 +132,15 @@ fn create_archive(s: &AppState, label: &str, auto: bool) -> Result<Info, String>
     }
     let counts = {
         let c = Connection::open(&snapshot).map_err(|e| e.to_string())?;
-        c.execute("DELETE FROM schedule_items", []).map_err(|e| e.to_string())?;
-        let keep = KEEP_META.iter().map(|k| format!("'{k}'")).collect::<Vec<_>>().join(",");
-        c.execute(&format!("DELETE FROM meta WHERE key IN ({keep})"), []).map_err(|e| e.to_string())?;
+        c.execute("DELETE FROM schedule_items", [])
+            .map_err(|e| e.to_string())?;
+        let keep = KEEP_META
+            .iter()
+            .map(|k| format!("'{k}'"))
+            .collect::<Vec<_>>()
+            .join(",");
+        c.execute(&format!("DELETE FROM meta WHERE key IN ({keep})"), [])
+            .map_err(|e| e.to_string())?;
         let counts = json!({
             "channels": count(&c, "channels"),
             "libraries": count(&c, "libraries"),
@@ -126,7 +153,12 @@ fn create_archive(s: &AppState, label: &str, auto: bool) -> Result<Info, String>
         .assets_dir
         .as_ref()
         .and_then(|d| std::fs::read_dir(d).ok())
-        .map(|rd| rd.flatten().map(|e| e.path()).filter(|p| p.is_file()).collect())
+        .map(|rd| {
+            rd.flatten()
+                .map(|e| e.path())
+                .filter(|p| p.is_file())
+                .collect()
+        })
         .unwrap_or_default();
     let created = now_ms();
     let manifest = json!({
@@ -142,7 +174,10 @@ fn create_archive(s: &AppState, label: &str, auto: bool) -> Result<Info, String>
     let part = dir.join(format!(".{name}.part"));
     let built = (|| -> std::io::Result<()> {
         let file = std::fs::File::create(&part)?;
-        let mut tar = tar::Builder::new(flate2::write::GzEncoder::new(file, flate2::Compression::default()));
+        let mut tar = tar::Builder::new(flate2::write::GzEncoder::new(
+            file,
+            flate2::Compression::default(),
+        ));
         let bytes = serde_json::to_vec_pretty(&manifest).unwrap_or_default();
         let mut h = tar::Header::new_gnu();
         h.set_size(bytes.len() as u64);
@@ -202,7 +237,11 @@ fn list_all(dir: &FsPath) -> Vec<Info> {
         .map(|rd| {
             rd.flatten()
                 .map(|e| e.path())
-                .filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(valid_name))
+                .filter(|p| {
+                    p.file_name()
+                        .and_then(|n| n.to_str())
+                        .is_some_and(valid_name)
+                })
                 .filter_map(|p| info_of(&p))
                 .collect()
         })
@@ -220,7 +259,10 @@ fn auto_on(db: &Connection) -> bool {
 }
 
 fn keep_n(db: &Connection) -> usize {
-    setting(db, KEEP_KEY).and_then(|v| v.parse().ok()).unwrap_or(7).clamp(1, 60)
+    setting(db, KEEP_KEY)
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(7)
+        .clamp(1, 60)
 }
 
 /// Delete the oldest nightly backups beyond `keep`.
@@ -236,12 +278,19 @@ fn unpack(path: &FsPath, into: &FsPath) -> Result<Value, String> {
     let mut ar = tar::Archive::new(flate2::read::GzDecoder::new(f));
     std::fs::create_dir_all(into.join("assets")).map_err(|e| e.to_string())?;
     let mut got_db = false;
-    for e in ar.entries().map_err(|_| "that is not a TVMaster backup".to_string())? {
+    for e in ar
+        .entries()
+        .map_err(|_| "that is not a TVMaster backup".to_string())?
+    {
         let mut e = e.map_err(|_| "that backup is damaged".to_string())?;
         if !e.header().entry_type().is_file() {
             continue;
         }
-        let p = e.path().map_err(|e| e.to_string())?.to_string_lossy().replace('\\', "/");
+        let p = e
+            .path()
+            .map_err(|e| e.to_string())?
+            .to_string_lossy()
+            .replace('\\', "/");
         let dest = if p == MANIFEST || p == DB_NAME {
             into.join(&p)
         } else if let Some(n) = p.strip_prefix("assets/") {
@@ -280,12 +329,32 @@ fn columns(conn: &Connection, table: &str, schema: &str) -> rusqlite::Result<Vec
 /// Replace what is in the live database with what is in the attached backup (`bk`).
 fn apply(conn: &Connection, old_dir: &str, new_dir: &str) -> Result<(), String> {
     let e = |e: rusqlite::Error| e.to_string();
-    let keep = KEEP_META.iter().map(|k| format!("'{k}'")).collect::<Vec<_>>().join(",");
+    let keep = KEEP_META
+        .iter()
+        .map(|k| format!("'{k}'"))
+        .collect::<Vec<_>>()
+        .join(",");
     let tx = conn.unchecked_transaction().map_err(e)?;
-    for t in ["schedule_items", "cursors", "channel_libraries", "channels", "media_items", "libraries", "show_settings", "show_names", "show_info", "tvs"] {
-        tx.execute(&format!("DELETE FROM main.{t}"), []).map_err(e)?;
+    for t in [
+        "schedule_items",
+        "cursors",
+        "channel_libraries",
+        "channels",
+        "media_items",
+        "libraries",
+        "show_settings",
+        "show_names",
+        "show_info",
+        "tvs",
+    ] {
+        tx.execute(&format!("DELETE FROM main.{t}"), [])
+            .map_err(e)?;
     }
-    tx.execute(&format!("DELETE FROM main.meta WHERE key NOT IN ({keep})"), []).map_err(e)?;
+    tx.execute(
+        &format!("DELETE FROM main.meta WHERE key NOT IN ({keep})"),
+        [],
+    )
+    .map_err(e)?;
     for t in TABLES {
         let mine = columns(&tx, t, "main").map_err(e)?;
         let theirs = columns(&tx, t, "bk").map_err(e)?;
@@ -294,8 +363,16 @@ fn apply(conn: &Connection, old_dir: &str, new_dir: &str) -> Result<(), String> 
             continue;
         }
         let cols = both.join(", ");
-        let filter = if t == "meta" { format!(" WHERE key NOT IN ({keep})") } else { String::new() };
-        tx.execute(&format!("INSERT OR REPLACE INTO main.{t} ({cols}) SELECT {cols} FROM bk.{t}{filter}"), []).map_err(e)?;
+        let filter = if t == "meta" {
+            format!(" WHERE key NOT IN ({keep})")
+        } else {
+            String::new()
+        };
+        tx.execute(
+            &format!("INSERT OR REPLACE INTO main.{t} ({cols}) SELECT {cols} FROM bk.{t}{filter}"),
+            [],
+        )
+        .map_err(e)?;
     }
     // A backup made with another data folder points its pictures and libraries at that folder.
     if !old_dir.is_empty() && old_dir != new_dir {
@@ -334,20 +411,36 @@ fn restore_archive(s: &AppState, path: &FsPath) -> Result<Restored, String> {
         let manifest = unpack(path, &work)?;
         // Make sure the file is a database we can read before anything is touched.
         {
-            let c = Connection::open_with_flags(work.join(DB_NAME), rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            let c = Connection::open_with_flags(
+                work.join(DB_NAME),
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+            )
+            .map_err(|_| "that backup's database is damaged".to_string())?;
+            columns(&c, "channels", "main")
                 .map_err(|_| "that backup's database is damaged".to_string())?;
-            columns(&c, "channels", "main").map_err(|_| "that backup's database is damaged".to_string())?;
         }
         let safety = create_archive(s, "before-restore", false)?;
-        let new_dir = s.data_dir.as_ref().map(|d| d.to_string_lossy().to_string()).unwrap_or_default();
+        let new_dir = s
+            .data_dir
+            .as_ref()
+            .map(|d| d.to_string_lossy().to_string())
+            .unwrap_or_default();
         let old_dir = manifest["data_dir"].as_str().unwrap_or("").to_string();
         let db = s.db();
-        db.execute("ATTACH DATABASE ?1 AS bk", [work.join(DB_NAME).to_string_lossy().as_ref()]).map_err(|e| e.to_string())?;
+        db.execute(
+            "ATTACH DATABASE ?1 AS bk",
+            [work.join(DB_NAME).to_string_lossy().as_ref()],
+        )
+        .map_err(|e| e.to_string())?;
         let applied = apply(&db, &old_dir, &new_dir);
         let _ = db.execute("DETACH DATABASE bk", []);
         applied?;
         let libs = tvmaster_db::list_libraries(&db).map_err(|e| e.to_string())?;
-        let missing_folders = libs.iter().filter(|l| !FsPath::new(&l.path).is_dir()).map(|l| l.path.clone()).collect();
+        let missing_folders = libs
+            .iter()
+            .filter(|l| !FsPath::new(&l.path).is_dir())
+            .map(|l| l.path.clone())
+            .collect();
         let report = Restored {
             channels: count(&db, "channels"),
             libraries: libs.len() as i64,
@@ -383,8 +476,12 @@ pub async fn list(State(s): State<AppState>) -> ApiResult<Json<Value>> {
         let db = s.db();
         (auto_on(&db), keep_n(&db))
     };
-    let backups = tokio::task::spawn_blocking(move || list_all(&dir)).await.map_err(internal)?;
-    Ok(Json(json!({ "auto": auto, "keep": keep, "backups": backups })))
+    let backups = tokio::task::spawn_blocking(move || list_all(&dir))
+        .await
+        .map_err(internal)?;
+    Ok(Json(
+        json!({ "auto": auto, "keep": keep, "backups": backups }),
+    ))
 }
 
 #[derive(Deserialize, Default)]
@@ -394,7 +491,10 @@ pub struct CreateBody {
 }
 
 /// `POST /api/v1/backups`: back up now.
-pub async fn create(State(s): State<AppState>, body: Option<Json<CreateBody>>) -> ApiResult<Json<Info>> {
+pub async fn create(
+    State(s): State<AppState>,
+    body: Option<Json<CreateBody>>,
+) -> ApiResult<Json<Info>> {
     let label = body.map(|b| b.0.label).unwrap_or_default();
     dir_of(&s)?; // 409 when there is nowhere to keep backups
     let info = tokio::task::spawn_blocking(move || create_archive(&s, &label, false))
@@ -411,14 +511,20 @@ pub struct SettingsBody {
 }
 
 /// `PUT /api/v1/backups/settings`: the nightly backup on or off, and how many nightly backups to keep.
-pub async fn put_settings(State(s): State<AppState>, Json(b): Json<SettingsBody>) -> ApiResult<Json<Value>> {
+pub async fn put_settings(
+    State(s): State<AppState>,
+    Json(b): Json<SettingsBody>,
+) -> ApiResult<Json<Value>> {
     let db = s.db();
     if let Some(a) = b.auto {
         tvmaster_db::meta_set(&db, AUTO_KEY, if a { "1" } else { "0" })?;
     }
     if let Some(k) = b.keep {
         if !(1..=60).contains(&k) {
-            return Err(err(StatusCode::BAD_REQUEST, "keep between 1 and 60 nightly backups"));
+            return Err(err(
+                StatusCode::BAD_REQUEST,
+                "keep between 1 and 60 nightly backups",
+            ));
         }
         tvmaster_db::meta_set(&db, KEEP_KEY, &k.to_string())?;
     }
@@ -442,7 +548,10 @@ pub async fn download(State(s): State<AppState>, Path(name): Path<String>) -> Ap
     let bytes = tokio::fs::read(&p).await.map_err(internal)?;
     let mut res = bytes.into_response();
     let h = res.headers_mut();
-    h.insert(header::CONTENT_TYPE, HeaderValue::from_static("application/gzip"));
+    h.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/gzip"),
+    );
     if let Ok(v) = HeaderValue::from_str(&format!("attachment; filename=\"{name}\"")) {
         h.insert(header::CONTENT_DISPOSITION, v);
     }
@@ -464,11 +573,19 @@ pub struct UploadQuery {
 
 /// `POST /api/v1/backups/upload?name=station.tar.gz`: put a backup file from elsewhere on the server
 /// (then restore it). The body is the file.
-pub async fn upload(State(s): State<AppState>, Query(q): Query<UploadQuery>, body: axum::body::Body) -> ApiResult<Json<Info>> {
+pub async fn upload(
+    State(s): State<AppState>,
+    Query(q): Query<UploadQuery>,
+    body: axum::body::Body,
+) -> ApiResult<Json<Info>> {
     use tokio::io::AsyncWriteExt;
     use tokio_stream::StreamExt;
     let dir = dir_of(&s)?;
-    let name = if valid_name(&q.name) { q.name.clone() } else { format!("tvmaster-uploaded-{}.tar.gz", stamp()) };
+    let name = if valid_name(&q.name) {
+        q.name.clone()
+    } else {
+        format!("tvmaster-uploaded-{}.tar.gz", stamp())
+    };
     let mut dest = dir.join(&name);
     let mut n = 2;
     while dest.exists() {
@@ -480,12 +597,16 @@ pub async fn upload(State(s): State<AppState>, Query(q): Query<UploadQuery>, bod
     let mut stream = body.into_data_stream();
     let mut total = 0u64;
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| err(StatusCode::BAD_REQUEST, format!("the upload stopped: {e}")))?;
+        let chunk =
+            chunk.map_err(|e| err(StatusCode::BAD_REQUEST, format!("the upload stopped: {e}")))?;
         total += chunk.len() as u64;
         if total > MAX_BYTES {
             drop(file);
             let _ = tokio::fs::remove_file(&part).await;
-            return Err(err(StatusCode::PAYLOAD_TOO_LARGE, "that file is too large to be a backup"));
+            return Err(err(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "that file is too large to be a backup",
+            ));
         }
         file.write_all(&chunk).await.map_err(internal)?;
     }
@@ -497,7 +618,9 @@ pub async fn upload(State(s): State<AppState>, Query(q): Query<UploadQuery>, bod
             read_manifest(&part)
                 .ok_or_else(|| "that file is not a TVMaster backup".to_string())
                 .and_then(|_| std::fs::rename(&part, &dest).map_err(|e| e.to_string()))
-                .and_then(|_| info_of(&dest).ok_or_else(|| "that file is not a TVMaster backup".to_string()))
+                .and_then(|_| {
+                    info_of(&dest).ok_or_else(|| "that file is not a TVMaster backup".to_string())
+                })
         }
     })
     .await
@@ -513,7 +636,10 @@ pub async fn upload(State(s): State<AppState>, Query(q): Query<UploadQuery>, bod
 
 /// `POST /api/v1/backups/:name/restore`: put the station back as the backup had it. What is there now is
 /// backed up first, streams are stopped, and the schedules are planned again.
-pub async fn restore(State(s): State<AppState>, Path(name): Path<String>) -> ApiResult<Json<Restored>> {
+pub async fn restore(
+    State(s): State<AppState>,
+    Path(name): Path<String>,
+) -> ApiResult<Json<Restored>> {
     let p = named(&s, &name)?;
     if let Some(pl) = &s.playout {
         pl.stop_all();
@@ -528,7 +654,10 @@ pub async fn restore(State(s): State<AppState>, Path(name): Path<String>) -> Api
         let db = s.db();
         *s.live.lock().unwrap_or_else(|p| p.into_inner()) = crate::live::load(&db);
         let now = now_ms();
-        for c in tvmaster_db::list_channels(&db)?.iter().filter(|c| c.kind == tvmaster_core::ChannelKind::Programming) {
+        for c in tvmaster_db::list_channels(&db)?
+            .iter()
+            .filter(|c| c.kind == tvmaster_core::ChannelKind::Programming)
+        {
             let _ = crate::autopilot::maintain(&db, c, now);
         }
         let _ = tvmaster_db::normalize_names(&db);
@@ -543,11 +672,18 @@ pub fn nightly(s: &AppState) {
         let db = s.db();
         (auto_on(&db), keep_n(&db))
     };
-    let Some(dir) = s.data_dir.as_ref().map(|d| d.join("backups")) else { return };
+    let Some(dir) = s.data_dir.as_ref().map(|d| d.join("backups")) else {
+        return;
+    };
     if !on {
         return;
     }
-    let newest = list_all(&dir).into_iter().filter(|i| i.auto).map(|i| i.created_ms).max().unwrap_or(0);
+    let newest = list_all(&dir)
+        .into_iter()
+        .filter(|i| i.auto)
+        .map(|i| i.created_ms)
+        .max()
+        .unwrap_or(0);
     if now_ms() - newest >= 24 * 3_600_000 {
         match create_archive(s, "", true) {
             Ok(i) => tracing::info!(name = %i.name, "nightly backup made"),
@@ -574,9 +710,24 @@ mod tests {
     fn seed(s: &AppState) {
         let db = s.db();
         let lib = tvmaster_db::add_library(&db, "/media/tv", "shows").unwrap();
-        tvmaster_db::upsert_media(&db, &tvmaster_db::NewMedia { library_id: lib.id, path: "/media/tv/Cheers/a.mkv".into(), show: Some("Cheers".into()), duration_ms: 1_320_000, ..Default::default() }).unwrap();
+        tvmaster_db::upsert_media(
+            &db,
+            &tvmaster_db::NewMedia {
+                library_id: lib.id,
+                path: "/media/tv/Cheers/a.mkv".into(),
+                show: Some("Cheers".into()),
+                duration_ms: 1_320_000,
+                ..Default::default()
+            },
+        )
+        .unwrap();
         tvmaster_db::set_name_rule(&db, "Cheers", "Norm's Bar", None).unwrap();
-        tvmaster_db::meta_set(&db, "station_theme", r#"{"theme":"midnight","style":"modern"}"#).unwrap();
+        tvmaster_db::meta_set(
+            &db,
+            "station_theme",
+            r#"{"theme":"midnight","style":"modern"}"#,
+        )
+        .unwrap();
         tvmaster_db::meta_set(&db, crate::auth::META_KEY, "this-machines-secret-token").unwrap();
     }
 
@@ -586,9 +737,21 @@ mod tests {
         seed(&s);
         std::fs::write(dir.join("assets/logo.png"), b"png").unwrap();
         let app = router(s.clone());
-        let (st, c) = call(&app, "POST", "/api/v1/channels", r#"{"id":"c1","number":3,"name":"Cartoons"}"#).await;
+        let (st, c) = call(
+            &app,
+            "POST",
+            "/api/v1/channels",
+            r#"{"id":"c1","number":3,"name":"Cartoons"}"#,
+        )
+        .await;
         assert_eq!(st, StatusCode::CREATED, "{c}");
-        let (st, info) = call(&app, "POST", "/api/v1/backups", r#"{"label":"before change"}"#).await;
+        let (st, info) = call(
+            &app,
+            "POST",
+            "/api/v1/backups",
+            r#"{"label":"before change"}"#,
+        )
+        .await;
         assert_eq!(st, StatusCode::OK, "{info}");
         let name = info["name"].as_str().unwrap().to_string();
         assert_eq!(info["counts"]["channels"], 1);
@@ -596,7 +759,12 @@ mod tests {
         // Change things after the backup.
         call(&app, "DELETE", "/api/v1/channels/c1", "").await;
         tvmaster_db::set_name_rule(&s.db(), "Cheers", "Wrong", None).unwrap();
-        tvmaster_db::meta_set(&s.db(), "station_theme", r#"{"theme":"snow","style":"retro"}"#).unwrap();
+        tvmaster_db::meta_set(
+            &s.db(),
+            "station_theme",
+            r#"{"theme":"snow","style":"retro"}"#,
+        )
+        .unwrap();
         tvmaster_db::meta_set(&s.db(), crate::auth::META_KEY, "a-newer-token-set-after").unwrap();
         std::fs::remove_file(dir.join("assets/logo.png")).unwrap();
 
@@ -605,19 +773,45 @@ mod tests {
         assert_eq!(r["channels"], 1);
         assert_eq!(r["files"], 1);
         assert_eq!(r["pictures"], 1);
-        assert!(r["safety_copy"].as_str().unwrap().contains("before-restore"));
-        assert_eq!(r["missing_folders"].as_array().unwrap().len(), 1, "/media/tv is not on this machine");
+        assert!(r["safety_copy"]
+            .as_str()
+            .unwrap()
+            .contains("before-restore"));
+        assert_eq!(
+            r["missing_folders"].as_array().unwrap().len(),
+            1,
+            "/media/tv is not on this machine"
+        );
         let db = s.db();
-        assert!(tvmaster_db::get_channel(&db, "c1").unwrap().is_some(), "the channel is back");
-        assert_eq!(tvmaster_db::meta_get(&db, "station_theme").unwrap().unwrap(), r#"{"theme":"midnight","style":"modern"}"#);
-        assert_eq!(tvmaster_db::meta_get(&db, crate::auth::META_KEY).unwrap().unwrap(), "a-newer-token-set-after", "this machine keeps its own token");
-        assert_eq!(tvmaster_db::NameMap::load(&db).unwrap().resolve("Cheers").0, "Norm's Bar", "show names are back");
+        assert!(
+            tvmaster_db::get_channel(&db, "c1").unwrap().is_some(),
+            "the channel is back"
+        );
+        assert_eq!(
+            tvmaster_db::meta_get(&db, "station_theme")
+                .unwrap()
+                .unwrap(),
+            r#"{"theme":"midnight","style":"modern"}"#
+        );
+        assert_eq!(
+            tvmaster_db::meta_get(&db, crate::auth::META_KEY)
+                .unwrap()
+                .unwrap(),
+            "a-newer-token-set-after",
+            "this machine keeps its own token"
+        );
+        assert_eq!(
+            tvmaster_db::NameMap::load(&db).unwrap().resolve("Cheers").0,
+            "Norm's Bar",
+            "show names are back"
+        );
         assert!(dir.join("assets/logo.png").is_file(), "pictures are back");
         drop(db);
         // The backup holds no secrets.
         let bytes = std::fs::read(dir.join("backups").join(&name)).unwrap();
         let mut text = Vec::new();
-        std::io::Read::read_to_end(&mut flate2::read::GzDecoder::new(&bytes[..]), &mut text).unwrap();
+        std::io::Read::read_to_end(&mut flate2::read::GzDecoder::new(&bytes[..]), &mut text)
+            .unwrap();
         assert!(!String::from_utf8_lossy(&text).contains("this-machines-secret-token"));
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -635,15 +829,30 @@ mod tests {
         let bytes = std::fs::read(dir.join("backups").join(&name)).unwrap();
         // The same file arrives from another machine.
         use tower::ServiceExt;
-        let req = axum::http::Request::builder().method("POST").uri("/api/v1/backups/upload?name=moved.tar.gz").body(axum::body::Body::from(bytes)).unwrap();
+        let req = axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/v1/backups/upload?name=moved.tar.gz")
+            .body(axum::body::Body::from(bytes))
+            .unwrap();
         let res = app.clone().oneshot(req).await.unwrap();
         assert_eq!(res.status(), StatusCode::OK);
         let (_, l) = call(&app, "GET", "/api/v1/backups", "").await;
         assert_eq!(l["backups"].as_array().unwrap().len(), 2);
         // Something that is not a backup is refused and leaves nothing behind.
-        let req = axum::http::Request::builder().method("POST").uri("/api/v1/backups/upload?name=x.tar.gz").body(axum::body::Body::from("not a backup")).unwrap();
-        assert_eq!(app.clone().oneshot(req).await.unwrap().status(), StatusCode::BAD_REQUEST);
-        let leftovers = std::fs::read_dir(dir.join("backups")).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().starts_with('.')).count();
+        let req = axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/v1/backups/upload?name=x.tar.gz")
+            .body(axum::body::Body::from("not a backup"))
+            .unwrap();
+        assert_eq!(
+            app.clone().oneshot(req).await.unwrap().status(),
+            StatusCode::BAD_REQUEST
+        );
+        let leftovers = std::fs::read_dir(dir.join("backups"))
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().starts_with('.'))
+            .count();
         assert_eq!(leftovers, 0);
         let (st, _) = call(&app, "DELETE", "/api/v1/backups/moved.tar.gz", "").await;
         assert_eq!(st, StatusCode::OK);
@@ -671,32 +880,73 @@ mod tests {
         let work = dir.join("unpacked");
         super::unpack(&path, &work).unwrap();
         let c = rusqlite::Connection::open(work.join(super::DB_NAME)).unwrap();
-        c.execute("UPDATE meta SET value = REPLACE(value, ?1, ?2) WHERE key = 'k'", [dir.to_string_lossy().as_ref(), other]).unwrap();
+        c.execute(
+            "UPDATE meta SET value = REPLACE(value, ?1, ?2) WHERE key = 'k'",
+            [dir.to_string_lossy().as_ref(), other],
+        )
+        .unwrap();
         drop(c);
-        let mut m: serde_json::Value = serde_json::from_slice(&std::fs::read(work.join(super::MANIFEST)).unwrap()).unwrap();
+        let mut m: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(work.join(super::MANIFEST)).unwrap()).unwrap();
         m["data_dir"] = other.into();
         std::fs::write(work.join(super::MANIFEST), serde_json::to_vec(&m).unwrap()).unwrap();
         let moved = dir.join("backups/tvmaster-moved.tar.gz");
-        let mut tar = tar::Builder::new(flate2::write::GzEncoder::new(std::fs::File::create(&moved).unwrap(), flate2::Compression::fast()));
-        tar.append_path_with_name(work.join(super::MANIFEST), super::MANIFEST).unwrap();
-        tar.append_path_with_name(work.join(super::DB_NAME), super::DB_NAME).unwrap();
+        let mut tar = tar::Builder::new(flate2::write::GzEncoder::new(
+            std::fs::File::create(&moved).unwrap(),
+            flate2::Compression::fast(),
+        ));
+        tar.append_path_with_name(work.join(super::MANIFEST), super::MANIFEST)
+            .unwrap();
+        tar.append_path_with_name(work.join(super::DB_NAME), super::DB_NAME)
+            .unwrap();
         tar.into_inner().unwrap().finish().unwrap();
-        let (st, r) = call(&app, "POST", "/api/v1/backups/tvmaster-moved.tar.gz/restore", "").await;
+        let (st, r) = call(
+            &app,
+            "POST",
+            "/api/v1/backups/tvmaster-moved.tar.gz/restore",
+            "",
+        )
+        .await;
         assert_eq!(st, StatusCode::OK, "{r}");
         let k = tvmaster_db::meta_get(&s.db(), "k").unwrap().unwrap();
-        assert_eq!(k, format!("{}/assets/logo.png", dir.to_string_lossy()), "paths follow the data folder");
+        assert_eq!(
+            k,
+            format!("{}/assets/logo.png", dir.to_string_lossy()),
+            "paths follow the data folder"
+        );
         // Nightly: made when none is a day old, then kept to the limit.
         let (st, _) = call(&app, "PUT", "/api/v1/backups/settings", r#"{"keep":2}"#).await;
         assert_eq!(st, StatusCode::OK);
         super::nightly(&s);
         let (_, l) = call(&app, "GET", "/api/v1/backups", "").await;
-        assert_eq!(l["backups"].as_array().unwrap().iter().filter(|b| b["auto"] == true).count(), 1);
+        assert_eq!(
+            l["backups"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|b| b["auto"] == true)
+                .count(),
+            1
+        );
         super::nightly(&s);
-        assert_eq!(super::list_all(&dir.join("backups")).iter().filter(|b| b.auto).count(), 1, "not again within a day");
+        assert_eq!(
+            super::list_all(&dir.join("backups"))
+                .iter()
+                .filter(|b| b.auto)
+                .count(),
+            1,
+            "not again within a day"
+        );
         let (st, _) = call(&app, "PUT", "/api/v1/backups/settings", r#"{"keep":0}"#).await;
         assert_eq!(st, StatusCode::BAD_REQUEST);
         // A server with no data folder cannot keep backups.
-        let (st, _) = call(&router(AppState::in_memory()), "POST", "/api/v1/backups", "{}").await;
+        let (st, _) = call(
+            &router(AppState::in_memory()),
+            "POST",
+            "/api/v1/backups",
+            "{}",
+        )
+        .await;
         assert_eq!(st, StatusCode::CONFLICT);
         let _ = std::fs::remove_dir_all(&dir);
     }

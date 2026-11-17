@@ -282,6 +282,19 @@ api -XPUT "$H/api/v1/theme" -d '{"theme":"auto","style":"retro"}' >/dev/null
 [[ "$(api -XPOST "$H/api/v1/ads/explain" -d '{"ads":{},"slot_minutes":30,"show_minutes":22}' | json "'8 minutes' in d['text']")" == "True" ]] && ok "break settings are explained in words" || bad "ads explain"
 [[ "$(api "$H/api/v1/setup" | json "d['needed']")" == "False" ]] && ok "a station with channels is not offered setup" || bad "setup state"
 
+# ---- the ticker over a programme -----------------------------------------
+section "Ticker"
+api -XPUT "$H/api/v1/theme" -d '{"theme":"midnight","style":"modern"}' >/dev/null
+N="$(api "$H/api/v1/channels/chaos" | json "d['number']")"; NM="$(api "$H/api/v1/channels/chaos" | json "d['name']")"
+api -XPOST "$H/api/v1/channels" -d "{\"id\":\"chaos\",\"number\":$N,\"name\":\"$NM\",\"options\":{\"overlay\":{\"ticker\":{\"enabled\":true,\"lines\":[\"Station notice: the bakery opens at six\"],\"label\":\"NEWS\",\"up_next\":true}}}}" >/dev/null
+grab chaos "$W/ticker.png"
+RGB="$(ffmpeg -hide_banner -loglevel error -i "$W/ticker.png" -vf "crop=1:1:6:700,format=rgb24" -f rawvideo - | od -An -tu1 | tr -s ' ' | sed 's/^ //')"; set -- $RGB
+[[ "${1:-255}" -lt 130 && "${2:-0}" -gt 150 && "${3:-0}" -gt 200 ]] && ok "a ticker's tab sits at the bottom of the programme (pixel: $RGB)" || bad "ticker tab" "rgb=$RGB"
+RGB="$(ffmpeg -hide_banner -loglevel error -i "$W/ticker.png" -vf "crop=1:1:700:712,format=rgb24" -f rawvideo - | od -An -tu1 | tr -s ' ' | sed 's/^ //')"; set -- $RGB
+[[ "${1:-255}" -lt 60 && "${3:-255}" -lt 90 ]] && ok "and its dark strip runs along the bottom (pixel: $RGB)" || bad "ticker strip" "rgb=$RGB"
+api -XPOST "$H/api/v1/channels" -d "{\"id\":\"chaos\",\"number\":$N,\"name\":\"$NM\",\"options\":{\"overlay\":{\"ticker\":{\"enabled\":false}}}}" >/dev/null
+api -XPUT "$H/api/v1/theme" -d '{"theme":"auto","style":"retro"}' >/dev/null
+
 # docker stop and systemd send SIGTERM: it must stop cleanly, like Ctrl-C does
 "$BIN" serve --bind "127.0.0.1:$HP2" --data-dir "$W/data3" >"$W/server4.log" 2>&1 &
 PID2=$!

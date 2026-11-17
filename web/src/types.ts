@@ -116,6 +116,7 @@ export interface ChannelOptions {
     bug: { enabled: boolean; text: string; image: string | null; position: Corner; opacity: number };
     clock: { enabled: boolean; position: Corner; hour12: boolean };
     show_title: { enabled: boolean; seconds: number };
+    ticker: TickerOptions;
   };
   shows: Record<string, ShowOptions>;
   /** This channel's own theme; absent = the station theme. */
@@ -123,6 +124,16 @@ export interface ChannelOptions {
 }
 
 export type GuideTheme = 'auto' | 'prevue' | 'amber' | 'phosphor' | 'neon' | 'sunset' | 'ocean' | 'slate' | 'paper' | 'midnight' | 'graphite' | 'snow' | 'forest' | 'berry' | 'mono' | 'custom';
+export interface TickerOptions {
+  enabled: boolean;
+  lines: string[];
+  up_next: boolean;
+  feeds: string[];
+  label: string;
+  position: 'bottom' | 'top';
+  speed: 'slow' | 'normal' | 'fast';
+  every_minutes: number;
+}
 export type GraphicsStyle = 'retro' | 'modern';
 export interface ThemeColors { primary: string | null; accent: string | null; background: string | null }
 /** One look for everything the station draws: guide, cards, bumpers, stand-by, alerts, graphics. */

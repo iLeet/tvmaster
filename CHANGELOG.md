@@ -4,6 +4,10 @@
 
 The first stable release.
 
+- **Promos:** make your own commercials and promos in the app (a sponsor spot, a programme promo or slides of text) in the station's look or your own, with a picture, a jingle or your music and an old-tape look; or use old ones: upload them or have the server download a direct link. They become video files in the commercials and air in breaks. See `docs/PROMOS.md`.
+- **Ticker:** a scrolling strip of text across any channel: messages, headlines from news feeds, and what is on next, at the top or bottom, with a tab, always on or now and then. Drawn in the station theme. See `docs/CHANNEL-OPTIONS.md`.
+- **Backup and restore** of the station (channels, lineups, libraries, show names, positions, settings, pictures) in one file, nightly if you like, downloadable, with a safety copy before every restore; this server's access token is never in a backup. See `docs/BACKUP.md`.
+- Debug builds are much smaller on disk.
 - **One theme for everything.** A station-wide theme and graphics style (Retro pixels or Modern smooth) dresses the guide, station and break cards, the stand-by and sign-off screens, alerts, the now-playing card, the channel logo and the clock. A channel can choose its own. New **Appearance** page in the web admin and the Mac app, with previews of each graphic. See `docs/THEMES.md`.
 - **Show titles and grouping.** "Bleach season 01" is now the show Bleach, season 1 (automatic, switchable). Any show can be renamed, several folders can be put together as one show with a season each, and a show can have a description, rating, tags and poster (used in IPTV guides). Lineups, per-show settings and episode positions follow a rename. See `docs/SHOWS.md`.
 - **Media from the app.** One click makes the station's own media folder on the server (shows, commercials, bumpers, music) to upload into from the web admin or the Mac app, by drag and drop too; linked folders keep working beside it.

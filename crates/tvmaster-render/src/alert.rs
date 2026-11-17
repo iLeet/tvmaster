@@ -353,21 +353,21 @@ pub struct AlertBar {
     pub band_h: u32,
 }
 
-struct Rgba {
-    w: usize,
-    h: usize,
-    px: Vec<u8>,
+pub(crate) struct Rgba {
+    pub(crate) w: usize,
+    pub(crate) h: usize,
+    pub(crate) px: Vec<u8>,
 }
 
 impl Rgba {
-    fn new(w: usize, h: usize) -> Self {
+    pub(crate) fn new(w: usize, h: usize) -> Self {
         Self {
             w,
             h,
             px: vec![0; w * h * 4],
         }
     }
-    fn fill(&mut self, x: i32, y: i32, w: i32, h: i32, col: Rgb, a: u8) {
+    pub(crate) fn fill(&mut self, x: i32, y: i32, w: i32, h: i32, col: Rgb, a: u8) {
         for yy in y.max(0)..(y + h).min(self.h as i32) {
             for xx in x.max(0)..(x + w).min(self.w as i32) {
                 let i = (yy as usize * self.w + xx as usize) * 4;
@@ -376,7 +376,7 @@ impl Rgba {
             }
         }
     }
-    fn blend(&mut self, x: i32, y: i32, col: Rgb, a: u8) {
+    pub(crate) fn blend(&mut self, x: i32, y: i32, col: Rgb, a: u8) {
         if x < 0 || y < 0 || x >= self.w as i32 || y >= self.h as i32 || a == 0 {
             return;
         }
@@ -394,7 +394,7 @@ impl Rgba {
         }
         self.px[i + 3] = oa as u8;
     }
-    fn text(&mut self, x: i32, y: i32, s: &str, px: f32, face: Face, col: Rgb) {
+    pub(crate) fn text(&mut self, x: i32, y: i32, s: &str, px: f32, face: Face, col: Rgb) {
         let baseline = y + (px * 0.82) as i32;
         for (ch, off) in text::layout(face, s, px) {
             let g = text::glyph(face, ch, px);
@@ -412,7 +412,7 @@ impl Rgba {
             }
         }
     }
-    fn png(&self) -> Graphic {
+    pub(crate) fn png(&self) -> Graphic {
         Graphic {
             w: self.w as u32,
             h: self.h as u32,
@@ -537,20 +537,10 @@ fn retro_bar(look: &AlertLook, event: &str, crawl_text: &str, width: u32) -> Ale
     }
 }
 
-/// A frame as it would look on air: the full screen, or the bar and crawl over a sample picture.
-pub fn alert_preview(
-    look: &AlertLook,
-    style: AlertStyle,
-    event: &str,
-    message: &str,
-    t: f32,
-) -> Canvas {
-    if style == AlertStyle::Full {
-        return alert_screen(look, event, message, t);
-    }
+/// A stand-in for whatever is on air: a sky and a hill, 1280x720.
+pub(crate) fn sample_picture() -> Canvas {
     let (w, h) = (1280usize, 720usize);
     let mut c = Canvas::new(w, h);
-    // A stand-in for whatever is on air: a sky and a hill.
     vgrad(&mut c, [92, 150, 214], [214, 226, 238]);
     c.rect(0, 470, w as i32, 250, [52, 110, 70]);
     disc(&mut c, 1010, 160, 70, [255, 224, 120]);
@@ -563,6 +553,23 @@ pub fn alert_preview(
         Face::Bold,
         [255, 255, 255],
     );
+    let _ = h;
+    c
+}
+
+/// A frame as it would look on air: the full screen, or the bar and crawl over a sample picture.
+pub fn alert_preview(
+    look: &AlertLook,
+    style: AlertStyle,
+    event: &str,
+    message: &str,
+    t: f32,
+) -> Canvas {
+    if style == AlertStyle::Full {
+        return alert_screen(look, event, message, t);
+    }
+    let (w, h) = (1280usize, 720usize);
+    let mut c = sample_picture();
     let bar = alert_bar(look, event, message, w as u32);
     let (bar_png, crawl_png) = (&bar.bar, &bar.crawl);
     let bar_y = h as i32 - bar_png.h as i32 - 36;
@@ -574,7 +581,7 @@ pub fn alert_preview(
     c
 }
 
-fn blit_png(c: &mut Canvas, g: &Graphic, x: i32, y: i32) {
+pub(crate) fn blit_png(c: &mut Canvas, g: &Graphic, x: i32, y: i32) {
     let px = &g.rgba;
     for row in 0..g.h as i32 {
         for col in 0..g.w as i32 {

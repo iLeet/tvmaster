@@ -277,6 +277,48 @@ impl Default for ShowTitleOptions {
     }
 }
 
+/// A strip of scrolling text across the picture: station news, announcements, headlines and what is
+/// on next, like a news channel's crawl.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TickerOptions {
+    #[serde(default)]
+    pub enabled: bool,
+    /// What it says, one message per line.
+    #[serde(default)]
+    pub lines: Vec<String>,
+    /// Add what is on next: "Up next: Cheers at 8:30 PM".
+    #[serde(default)]
+    pub up_next: bool,
+    /// News feeds (RSS or Atom addresses) whose headlines are added. Fetched every 15 minutes.
+    #[serde(default)]
+    pub feeds: Vec<String>,
+    /// A word in a coloured tab at the left (NEWS, NOTICE...); blank = none.
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub position: crate::TickerPosition,
+    #[serde(default)]
+    pub speed: crate::TickerSpeed,
+    /// 0 = on all the time. Otherwise it appears every this many minutes and crosses the screen once.
+    #[serde(default)]
+    pub every_minutes: u32,
+}
+
+impl Default for TickerOptions {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            lines: Vec::new(),
+            up_next: false,
+            feeds: Vec::new(),
+            label: String::new(),
+            position: crate::TickerPosition::Bottom,
+            speed: crate::TickerSpeed::Normal,
+            every_minutes: 0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct OverlayOptions {
     #[serde(default)]
@@ -285,6 +327,8 @@ pub struct OverlayOptions {
     pub clock: ClockOptions,
     #[serde(default)]
     pub show_title: ShowTitleOptions,
+    #[serde(default)]
+    pub ticker: TickerOptions,
 }
 
 /// Settings that differ for one show on this channel: anime in Japanese with
@@ -480,6 +524,40 @@ impl ChannelOptions {
                 .is_none_or(|i| i.trim().is_empty())
         {
             return Err("the off-air picture needs a file".into());
+        }
+        let tk = &self.overlay.ticker;
+        if tk.lines.len() > 20
+            || tk
+                .lines
+                .iter()
+                .any(|l| l.chars().count() > 200 || l.chars().any(char::is_control))
+        {
+            return Err("the ticker has at most 20 messages of 200 characters".into());
+        }
+        if tk.feeds.len() > 5
+            || tk.feeds.iter().any(|f| {
+                let l = f.to_lowercase();
+                f.len() > 500
+                    || f.chars().any(|c| c.is_control() || c == ' ')
+                    || !(l.starts_with("http://") || l.starts_with("https://"))
+            })
+        {
+            return Err(
+                "the ticker takes at most 5 feeds, each an http:// or https:// address".into(),
+            );
+        }
+        if tk.label.chars().count() > 16 || tk.label.chars().any(char::is_control) {
+            return Err("the ticker's tab says at most 16 characters".into());
+        }
+        if tk.every_minutes > 240 {
+            return Err("the ticker can appear every 0-240 minutes".into());
+        }
+        if tk.enabled
+            && tk.lines.iter().all(|l| l.trim().is_empty())
+            && !tk.up_next
+            && tk.feeds.is_empty()
+        {
+            return Err("the ticker needs a message, a feed, or \"up next\"".into());
         }
         if let Some(t) = &self.theme {
             t.validate()?;

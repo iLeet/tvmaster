@@ -214,3 +214,5 @@ The daemon also runs an autopilot loop (every minute) that tops up every channel
   (`{ "ads": {...}, "slot_minutes": 30, "show_minutes": 22 }` returns `{ "text", "preset" }`).
 - First-run setup: `GET /api/v1/setup` (`needed`, what exists), `POST /api/v1/setup/starter` (make a guide and
   a shuffled Mix channel from the media added so far), `POST /api/v1/setup/skip`.
+- Promos and old commercials: see `docs/PROMOS.md` (`/promos/...`, `POST /libraries/:id/fetch`).
+- Backup and restore: see `docs/BACKUP.md` (`/backups/...`).

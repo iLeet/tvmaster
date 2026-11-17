@@ -98,7 +98,9 @@ pub async fn station_folder(State(s): State<AppState>) -> ApiResult<Json<Value>>
         .iter()
         .map(|l| json!({ "id": l.id, "path": l.path, "kind": l.kind }))
         .collect();
-    Ok(Json(json!({ "root": root.to_string_lossy(), "libraries": made })))
+    Ok(Json(
+        json!({ "root": root.to_string_lossy(), "libraries": made }),
+    ))
 }
 
 /// The station's own media folder and its four libraries, made if they are not there yet.
@@ -342,36 +344,74 @@ pub async fn fetch(
 ) -> ApiResult<Json<Value>> {
     let url = b.url.trim().to_string();
     let lower = url.to_lowercase();
-    if !(lower.starts_with("http://") || lower.starts_with("https://")) || url.len() > 2000 || url.chars().any(|c| c.is_control() || c == ' ') {
-        return Err(ApiError::new(StatusCode::BAD_REQUEST, "give one http:// or https:// address"));
+    if !(lower.starts_with("http://") || lower.starts_with("https://"))
+        || url.len() > 2000
+        || url.chars().any(|c| c.is_control() || c == ' ')
+    {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "give one http:// or https:// address",
+        ));
     }
     let lib = tvmaster_db::get_library(&s.db(), id)?
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "no such library"))?;
     let root = PathBuf::from(&lib.path);
     if !root.is_dir() {
-        return Err(ApiError::new(StatusCode::CONFLICT, "the library folder is not reachable"));
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "the library folder is not reachable",
+        ));
     }
     let name = if b.path.trim().is_empty() {
-        let tail = url.split(['?', '#']).next().unwrap_or("").rsplit('/').next().unwrap_or("");
+        let tail = url
+            .split(['?', '#'])
+            .next()
+            .unwrap_or("")
+            .rsplit('/')
+            .next()
+            .unwrap_or("");
         let tail = percent_decode(tail);
-        if tail.is_empty() { "download.mp4".to_string() } else { tail }
+        if tail.is_empty() {
+            "download.mp4".to_string()
+        } else {
+            tail
+        }
     } else {
         b.path.trim().to_string()
     };
     let dest = upload_target(&root, &name, &lib.kind)
         .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, e))?;
     if dest.exists() && !b.overwrite {
-        return Err(ApiError::new(StatusCode::CONFLICT, "a file with that name is already there"));
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "a file with that name is already there",
+        ));
     }
     if let Some(dir) = dest.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("cannot make the folder: {e}")))?;
+        std::fs::create_dir_all(dir).map_err(|e| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("cannot make the folder: {e}"),
+            )
+        })?;
     }
     let part = dest.with_extension("part");
     let out = {
         let (url, part) = (url.clone(), part.clone());
         tokio::task::spawn_blocking(move || {
             std::process::Command::new("curl")
-                .args(["-fsSL", "--proto", "=http,https", "--proto-redir", "=http,https", "--max-filesize", "4294967296", "--max-time", "3600", "-o"])
+                .args([
+                    "-fsSL",
+                    "--proto",
+                    "=http,https",
+                    "--proto-redir",
+                    "=http,https",
+                    "--max-filesize",
+                    "4294967296",
+                    "--max-time",
+                    "3600",
+                    "-o",
+                ])
                 .arg(&part)
                 .arg("--")
                 .arg(&url)
@@ -380,23 +420,44 @@ pub async fn fetch(
         .await
         .map_err(|e| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
     };
-    let out = out.map_err(|_| ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "curl is not installed on this server"))?;
+    let out = out.map_err(|_| {
+        ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "curl is not installed on this server",
+        )
+    })?;
     if !out.status.success() {
         let _ = std::fs::remove_file(&part);
         let why = String::from_utf8_lossy(&out.stderr).trim().to_string();
-        return Err(ApiError::new(StatusCode::BAD_GATEWAY, format!("could not download that: {}", if why.is_empty() { "the address did not answer".to_string() } else { why })));
+        return Err(ApiError::new(
+            StatusCode::BAD_GATEWAY,
+            format!(
+                "could not download that: {}",
+                if why.is_empty() {
+                    "the address did not answer".to_string()
+                } else {
+                    why
+                }
+            ),
+        ));
     }
     let bytes = std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
     if bytes == 0 {
         let _ = std::fs::remove_file(&part);
-        return Err(ApiError::new(StatusCode::BAD_GATEWAY, "that address sent nothing"));
+        return Err(ApiError::new(
+            StatusCode::BAD_GATEWAY,
+            "that address sent nothing",
+        ));
     }
-    std::fs::rename(&part, &dest).map_err(|e| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    std::fs::rename(&part, &dest)
+        .map_err(|e| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let note = crate::monitor::rescan_with(&s, &lib, std::time::Duration::ZERO).await;
     let indexed = tvmaster_db::library_media_paths(&s.db(), lib.id)?
         .iter()
         .any(|(_, p, missing)| !missing && FsPath::new(p) == dest);
-    Ok(Json(json!({ "path": dest.to_string_lossy(), "bytes": bytes, "indexed": indexed, "added": note.map_or(0, |n| n.added) })))
+    Ok(Json(
+        json!({ "path": dest.to_string_lossy(), "bytes": bytes, "indexed": indexed, "added": note.map_or(0, |n| n.added) }),
+    ))
 }
 
 fn percent_decode(s: &str) -> String {
@@ -910,13 +971,38 @@ mod tests {
         let state = AppState::in_memory().with_data_dir(&dir);
         let app = router(state);
         let (_, v) = call(&app, "POST", "/api/v1/media/station-folder", "").await;
-        let id = v["libraries"].as_array().unwrap().iter().find(|l| l["kind"] == "commercials").unwrap()["id"].as_i64().unwrap();
-        for url in ["file:///etc/passwd", "ftp://example.com/a.mp4", "javascript:alert(1)", "http://exa mple.com/a.mp4", ""] {
+        let id = v["libraries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|l| l["kind"] == "commercials")
+            .unwrap()["id"]
+            .as_i64()
+            .unwrap();
+        for url in [
+            "file:///etc/passwd",
+            "ftp://example.com/a.mp4",
+            "javascript:alert(1)",
+            "http://exa mple.com/a.mp4",
+            "",
+        ] {
             let body = serde_json::json!({ "url": url }).to_string();
-            let (st, _) = call(&app, "POST", &format!("/api/v1/libraries/{id}/fetch"), &body).await;
+            let (st, _) = call(
+                &app,
+                "POST",
+                &format!("/api/v1/libraries/{id}/fetch"),
+                &body,
+            )
+            .await;
             assert_eq!(st, StatusCode::BAD_REQUEST, "{url}");
         }
-        let (st, _) = call(&app, "POST", "/api/v1/libraries/999/fetch", r#"{"url":"http://example.com/a.mp4"}"#).await;
+        let (st, _) = call(
+            &app,
+            "POST",
+            "/api/v1/libraries/999/fetch",
+            r#"{"url":"http://example.com/a.mp4"}"#,
+        )
+        .await;
         assert_eq!(st, StatusCode::NOT_FOUND);
         let _ = std::fs::remove_dir_all(&dir);
     }

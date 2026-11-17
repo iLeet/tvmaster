@@ -35,7 +35,7 @@ pub use model::{
 pub use options::{
     Aspect, AudioPrefs, BugOptions, ChannelOptions, ClockOptions, Corner, Deinterlace, Effective,
     Look, Loudness, OffAir, OverlayOptions, Quality, Screen, ShowOptions, ShowTitleOptions,
-    SubMode, SubPrefs, SubSize, SubStyle, VideoOptions,
+    SubMode, SubPrefs, SubSize, SubStyle, TickerOptions, VideoOptions,
 };
 pub use rng::fnv1a;
 pub use scheduler::{

@@ -126,6 +126,10 @@ pub trait ScheduleSource: Send + Sync + 'static {
     fn live_override(&self, _channel: &str) -> Option<LiveOverride> {
         None
     }
+    /// Headlines from the news feeds a channel's ticker follows (fetched elsewhere, so playout needs no network).
+    fn headlines(&self, _channel: &str) -> Vec<String> {
+        Vec::new()
+    }
     /// The listing to draw on a guide channel at `now_ms`.
     fn guide_data(&self, _channel: &str, _now_ms: i64) -> Option<GuideData> {
         None

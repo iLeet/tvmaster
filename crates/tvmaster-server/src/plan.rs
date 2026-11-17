@@ -168,6 +168,7 @@ pub struct DbSchedule {
     pub(crate) dirty: Arc<Mutex<HashSet<String>>>,
     pub(crate) wake: Arc<Notify>,
     pub(crate) live: Arc<Mutex<crate::live::Book>>,
+    pub(crate) headlines: crate::headlines::Book,
 }
 
 /// "8:30 PM", or "20:30" on a 24-hour clock.
@@ -387,6 +388,15 @@ impl ScheduleSource for DbSchedule {
             crate::theme::alert_theme(&crate::theme::effective(&db, &options), channel)
         };
         crate::live::current(&book, channel, now_ms(), station_look)
+    }
+
+    fn headlines(&self, channel: &str) -> Vec<String> {
+        self.headlines
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(channel)
+            .map(|e| e.items.clone())
+            .unwrap_or_default()
     }
 
     fn show_defaults(&self, _channel: &str, show: &str) -> Option<tvmaster_core::ShowOptions> {

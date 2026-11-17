@@ -28,3 +28,21 @@ final class PromoTests: XCTestCase {
         XCTAssertEqual(d.json.get(["theme", "style"])?.stringValue, "retro")
     }
 }
+
+final class TickerSettingsTests: XCTestCase {
+    func testATickerRoundTripsThroughAChannelsOptions() {
+        var ps = PictureSoundSettings(options: .object([:]), lineup: nil)
+        XCTAssertFalse(ps.tickerEnabled)
+        ps.tickerEnabled = true
+        ps.tickerLines = ["Hello", "  ", "Bakery opens at 6"]
+        ps.tickerFeeds = ["https://example.com/feed.xml"]
+        ps.tickerUpNext = true; ps.tickerLabel = "NEWS"; ps.tickerPosition = "top"; ps.tickerSpeed = "fast"; ps.tickerEvery = 15
+        let back = PictureSoundSettings(options: ps.apply(to: .object([:])), lineup: nil)
+        XCTAssertTrue(back.tickerEnabled)
+        XCTAssertEqual(back.tickerLines, ["Hello", "Bakery opens at 6"], "blank lines are dropped")
+        XCTAssertEqual(back.tickerFeeds, ["https://example.com/feed.xml"])
+        XCTAssertEqual([back.tickerLabel, back.tickerPosition, back.tickerSpeed], ["NEWS", "top", "fast"])
+        XCTAssertEqual(back.tickerEvery, 15)
+        XCTAssertTrue(back.tickerUpNext)
+    }
+}

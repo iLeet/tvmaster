@@ -655,6 +655,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_ticker_is_saved_with_a_channel_and_nonsense_is_refused() {
+        let app = router(AppState::in_memory());
+        let ok = r#"{"id":"n1","number":5,"name":"News","options":{"overlay":{"ticker":{"enabled":true,"lines":["Hello"],"up_next":true,"feeds":["https://example.com/feed.xml"],"label":"NEWS","position":"top","speed":"fast","every_minutes":10}}}}"#;
+        let (st, c) = call(&app, "POST", "/api/v1/channels", ok).await;
+        assert_eq!(st, StatusCode::CREATED, "{c}");
+        let (_, got) = call(&app, "GET", "/api/v1/channels/n1", "").await;
+        let t = &got["options"]["overlay"]["ticker"];
+        assert_eq!(
+            (
+                t["enabled"].as_bool(),
+                t["position"].as_str(),
+                t["speed"].as_str(),
+                t["every_minutes"].as_i64()
+            ),
+            (Some(true), Some("top"), Some("fast"), Some(10))
+        );
+        for bad in [
+            r#"{"enabled":true}"#,
+            r#"{"enabled":true,"lines":["x"],"feeds":["ftp://a.b/c"]}"#,
+            r#"{"enabled":true,"lines":["x"],"feeds":["http://a b"]}"#,
+            r#"{"enabled":true,"lines":["x"],"label":"this label is far too long"}"#,
+            r#"{"enabled":true,"lines":["x"],"every_minutes":999}"#,
+        ] {
+            let body = format!(
+                r#"{{"id":"n2","number":6,"name":"Bad","options":{{"overlay":{{"ticker":{bad}}}}}}}"#
+            );
+            let (st, _) = call(&app, "POST", "/api/v1/channels", &body).await;
+            assert_eq!(st, StatusCode::BAD_REQUEST, "{bad}");
+        }
+        // Off with nothing to say is fine.
+        let (st, _) = call(&app, "POST", "/api/v1/channels", r#"{"id":"n3","number":7,"name":"Quiet","options":{"overlay":{"ticker":{"enabled":false}}}}"#).await;
+        assert_eq!(st, StatusCode::CREATED);
+    }
+
+    #[tokio::test]
     async fn put_lineup_rerolls_the_future_without_burning_episodes() {
         let (app, lib) = app_with_media();
         let body = format!(

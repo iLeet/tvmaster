@@ -105,3 +105,15 @@ Unit tests cover track choice (languages, commentary, defaults, every subtitle m
 
 `run_out` decides what a time slot does once its show has aired every episode: `keep_going` (wrap to the first), `next_in_rotation`, `chaos_fill` (random content), `hybrid`, or **`off_air` ("Test screen")**. With `off_air` each episode airs once; when a show has run out, and for time outside your time slots (unless you set a `lineup.fill` yourself), the channel shows its off-air screen: the colour bars and tone, snow, black, a station card or your picture, whichever you chose under "When nothing is scheduled". "Start every show from episode 1" (Controls) makes the shows air again.
 
+## Ticker
+
+A strip of scrolling text across the picture, like a news channel's crawl (Sound & picture → Ticker).
+
+- **Messages**, one per line; **Add what is on next** ("Up next: Cheers at 8:30 PM"); **News feeds** (RSS or Atom
+  addresses, up to 5) whose latest headlines are added, refreshed every 15 minutes.
+- **Tab**: a word in a coloured tab at the left (NEWS, NOTICE...). **Where**: bottom or top. **Speed**: slow, normal, fast.
+- **Every N minutes**: 0 keeps it on all the time; otherwise it appears every N minutes and crosses the screen once.
+- It is drawn in the station's theme (Retro pixels or Modern smooth). The channel logo, the now-playing card and the
+  clock keep out of its way. It is not drawn on guide channels (they have their own ticker) and gives way to an
+  alert bar. Options: `options.overlay.ticker`.
+

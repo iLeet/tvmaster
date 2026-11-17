@@ -12,6 +12,7 @@ pub mod modern;
 pub mod overlay;
 pub mod png;
 pub mod text;
+pub mod ticker;
 
 pub use guide::{
     geometry, render_guide, Background, Geometry, GuideCell, GuideData, GuideLook, GuideRow,
@@ -503,17 +504,30 @@ pub(crate) fn draw_photo(c: &mut Canvas, photo: &Photo, t: f32, dur: f32, keep: 
         return;
     }
     let f = (t / dur.max(0.1)).clamp(0.0, 1.0);
-    let (x0, y0) = (((photo.w - w) as f32 * f) as usize, ((photo.h - h) as f32 * (1.0 - f)) as usize);
+    let (x0, y0) = (
+        ((photo.w - w) as f32 * f) as usize,
+        ((photo.h - h) as f32 * (1.0 - f)) as usize,
+    );
     for y in 0..h {
         let src = ((y0 + y) * photo.w + x0) * 3;
         let dst = y * w * 3;
-        for (d, s) in c.px[dst..dst + w * 3].iter_mut().zip(&photo.rgb[src..src + w * 3]) {
+        for (d, s) in c.px[dst..dst + w * 3]
+            .iter_mut()
+            .zip(&photo.rgb[src..src + w * 3])
+        {
             *d = (*s as f32 * keep) as u8;
         }
     }
 }
 
-fn promo_retro(c: &mut Canvas, th: &Theme, spec: &PromoSpec, photo: Option<&Photo>, t: f32, dur: f32) {
+fn promo_retro(
+    c: &mut Canvas,
+    th: &Theme,
+    spec: &PromoSpec,
+    photo: Option<&Photo>,
+    t: f32,
+    dur: f32,
+) {
     if let Some(p) = photo {
         draw_photo(c, p, t, dur, 0.55);
     }
@@ -562,7 +576,13 @@ fn promo_retro(c: &mut Canvas, th: &Theme, spec: &PromoSpec, photo: Option<&Phot
                 lines(c, y, &ls, scale.min(5), th.ink, local, 0.05);
             }
             for k in 0..n {
-                c.rect(300 + k as i32 * 16 - n as i32 * 8, 340, 8, 8, if k == i { th.accent } else { th.primary });
+                c.rect(
+                    300 + k as i32 * 16 - n as i32 * 8,
+                    340,
+                    8,
+                    8,
+                    if k == i { th.accent } else { th.primary },
+                );
             }
         }
     }
@@ -780,27 +800,67 @@ mod tests {
     fn every_kind_of_promo_draws_in_both_styles_with_and_without_a_picture() {
         let long = "AN ABSURDLY LONG HEADLINE THAT KEEPS GOING AND GOING UNTIL IT MUST BE FITTED";
         let specs = [
-            PromoSpec { kind: PromoKind::Sponsor, title: "Mel's Diner".into(), tagline: "Best pie in town".into(), contact: "Call 555-0134 - open daily".into(), slides: vec![] },
-            PromoSpec { kind: PromoKind::Sponsor, title: long.into(), tagline: long.into(), contact: long.into(), slides: vec![] },
-            PromoSpec { kind: PromoKind::ComingUp, title: "Cheers".into(), tagline: "Thursdays at 8".into(), contact: String::new(), slides: vec![] },
-            PromoSpec { kind: PromoKind::Slides, title: "Today".into(), tagline: String::new(), contact: String::new(), slides: vec!["Pie".into(), "Coffee".into(), long.into()] },
-            PromoSpec { kind: PromoKind::Slides, title: String::new(), tagline: String::new(), contact: String::new(), slides: vec![] },
+            PromoSpec {
+                kind: PromoKind::Sponsor,
+                title: "Mel's Diner".into(),
+                tagline: "Best pie in town".into(),
+                contact: "Call 555-0134 - open daily".into(),
+                slides: vec![],
+            },
+            PromoSpec {
+                kind: PromoKind::Sponsor,
+                title: long.into(),
+                tagline: long.into(),
+                contact: long.into(),
+                slides: vec![],
+            },
+            PromoSpec {
+                kind: PromoKind::ComingUp,
+                title: "Cheers".into(),
+                tagline: "Thursdays at 8".into(),
+                contact: String::new(),
+                slides: vec![],
+            },
+            PromoSpec {
+                kind: PromoKind::Slides,
+                title: "Today".into(),
+                tagline: String::new(),
+                contact: String::new(),
+                slides: vec!["Pie".into(), "Coffee".into(), long.into()],
+            },
+            PromoSpec {
+                kind: PromoKind::Slides,
+                title: String::new(),
+                tagline: String::new(),
+                contact: String::new(),
+                slides: vec![],
+            },
         ];
         for modern in [false, true] {
             let mut th = Theme::for_channel("promo");
             th.modern = modern;
             let (w, h) = th.frame_size();
-            let photo = Photo { w: w * 115 / 100, h: h * 115 / 100, rgb: std::sync::Arc::new(vec![180u8; (w * 115 / 100) * (h * 115 / 100) * 3]) };
+            let photo = Photo {
+                w: w * 115 / 100,
+                h: h * 115 / 100,
+                rgb: std::sync::Arc::new(vec![180u8; (w * 115 / 100) * (h * 115 / 100) * 3]),
+            };
             for spec in &specs {
                 for p in [None, Some(photo.clone())] {
-                    let sc = Scene::Promo { spec: spec.clone(), photo: p };
+                    let sc = Scene::Promo {
+                        spec: spec.clone(),
+                        photo: p,
+                    };
                     for t in [0.0, 1.0, 4.9] {
                         let c = render(&sc, &th, t, 5.0);
                         assert_eq!((c.w, c.h), (w, h));
                     }
-                    if matches!(&sc, Scene::Promo { photo: None, .. }) && !(spec.title.is_empty() && spec.slides.is_empty()) {
+                    if matches!(&sc, Scene::Promo { photo: None, .. })
+                        && !(spec.title.is_empty() && spec.slides.is_empty())
+                    {
                         let mid = render(&sc, &th, 2.5, 5.0);
-                        let distinct: std::collections::HashSet<&[u8]> = mid.px.chunks(3).step_by(37).collect();
+                        let distinct: std::collections::HashSet<&[u8]> =
+                            mid.px.chunks(3).step_by(37).collect();
                         assert!(distinct.len() > 4, "{spec:?} looks blank");
                     }
                 }
@@ -809,8 +869,15 @@ mod tests {
         // The picture drifts, the text moves in, and the same frame is always the same.
         let th = Theme::for_channel("p");
         let spec = specs[0].clone();
-        let photo = Photo { w: 736, h: 414, rgb: std::sync::Arc::new((0..736 * 414 * 3).map(|i| (i % 251) as u8).collect()) };
-        let sc = Scene::Promo { spec, photo: Some(photo) };
+        let photo = Photo {
+            w: 736,
+            h: 414,
+            rgb: std::sync::Arc::new((0..736 * 414 * 3).map(|i| (i % 251) as u8).collect()),
+        };
+        let sc = Scene::Promo {
+            spec,
+            photo: Some(photo),
+        };
         assert_ne!(render(&sc, &th, 1.0, 5.0).px, render(&sc, &th, 3.0, 5.0).px);
         assert_eq!(render(&sc, &th, 2.0, 5.0).px, render(&sc, &th, 2.0, 5.0).px);
     }

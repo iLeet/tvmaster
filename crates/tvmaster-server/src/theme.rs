@@ -151,6 +151,13 @@ pub struct PreviewBody {
     id: String,
     #[serde(default)]
     t: f32,
+    /// For `ticker`: what it says, the word in its tab, and whether it is at the top.
+    #[serde(default)]
+    text: Option<String>,
+    #[serde(default)]
+    label: Option<String>,
+    #[serde(default)]
+    top: bool,
     /// For `bumper`: `brb`, `back_to`, `up_next`, `later_today` or `station_id`.
     #[serde(default)]
     scene: Option<String>,
@@ -246,6 +253,24 @@ pub async fn preview(State(s): State<AppState>, Json(b): Json<PreviewBody>) -> A
             .await
             .map_err(internal)?
         }
+        "ticker" => {
+            let th = card_theme(&b.theme, &id);
+            let text = b.text.clone().filter(|t| !t.trim().is_empty()).unwrap_or_else(|| "Cheers is on at 8:30 PM   •   The bakery opens at 6   •   Power cut on Elm Street".into());
+            let label = b.label.clone().unwrap_or_else(|| "NEWS".into());
+            let top = b.top;
+            tokio::task::spawn_blocking(move || {
+                let text: String = text.chars().take(400).collect();
+                png_of(&tvmaster_render::ticker::ticker_preview(
+                    &th,
+                    &label,
+                    &text,
+                    top,
+                    t.max(2.0),
+                ))
+            })
+            .await
+            .map_err(internal)?
+        }
         "guide" => {
             let mut guide = GuideConfig::default();
             b.theme.apply_to_guide(&mut guide);
@@ -256,7 +281,7 @@ pub async fn preview(State(s): State<AppState>, Json(b): Json<PreviewBody>) -> A
         _ => {
             return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
-                "what must be card, bumper, guide, alert or bar",
+                "what must be card, bumper, ticker, guide, alert or bar",
             ))
         }
     };
@@ -316,7 +341,7 @@ mod tests {
             let (st, _) = call_raw(&app, "POST", "/api/v1/theme/preview", &body).await;
             assert_eq!(st, StatusCode::OK, "{scene}");
         }
-        for what in ["card", "bumper", "guide", "alert", "bar"] {
+        for what in ["card", "bumper", "ticker", "guide", "alert", "bar"] {
             let body =
                 format!(r#"{{"what":"{what}","theme":{{"theme":"snow","style":"modern"}}}}"#);
             let (st, png) = call_raw(&app, "POST", "/api/v1/theme/preview", &body).await;

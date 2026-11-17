@@ -303,7 +303,13 @@ fn promo(c: &mut Canvas, th: &Theme, spec: &PromoSpec, photo: Option<&Photo>, t:
     }
     match spec.kind {
         PromoKind::Sponsor => {
-            let (px, ls) = fit(&spec.title, Face::Bold, &[150.0, 120.0, 96.0, 76.0], 1100.0, 2);
+            let (px, ls) = fit(
+                &spec.title,
+                Face::Bold,
+                &[150.0, 120.0, 96.0, 76.0],
+                1100.0,
+                2,
+            );
             let y = 210 - (ls.len() as i32 - 1) * (px as i32 / 2);
             let end = block(c, th, 0, y, &ls, px, Face::Bold, th.ink, true, t, 0.1);
             let grow = arrive(t, 0.5);
@@ -311,27 +317,77 @@ fn promo(c: &mut Canvas, th: &Theme, spec: &PromoSpec, photo: Option<&Photo>, t:
             rect(c, W / 2 - w / 2, end + 8, w, 8, th.accent);
             if !spec.tagline.trim().is_empty() {
                 let (tp, tl) = fit(&spec.tagline, Face::Regular, &[56.0, 46.0, 38.0], 1080.0, 2);
-                block(c, th, 0, end + 40, &tl, tp, Face::Regular, th.accent, true, t, 0.7);
+                block(
+                    c,
+                    th,
+                    0,
+                    end + 40,
+                    &tl,
+                    tp,
+                    Face::Regular,
+                    th.accent,
+                    true,
+                    t,
+                    0.7,
+                );
             }
             if !spec.contact.trim().is_empty() {
                 let f = arrive(t, 1.4);
                 let rise = ((1.0 - f) * 90.0) as i32;
                 rect(c, 0, H - 118 + rise, W, 118, th.accent);
                 let (cp, cl) = fit(&spec.contact, Face::Bold, &[44.0, 36.0, 30.0], 1160.0, 1);
-                centred(c, W / 2, H - 82 + rise, &cl.join(" "), cp, Face::Bold, th.on_accent);
+                centred(
+                    c,
+                    W / 2,
+                    H - 82 + rise,
+                    &cl.join(" "),
+                    cp,
+                    Face::Bold,
+                    th.on_accent,
+                );
             }
         }
         PromoKind::ComingUp => {
             chip(c, th, 96, 170, "COMING UP", t, 0.05);
-            let (px, ls) = fit(&spec.title, Face::Bold, &[130.0, 108.0, 88.0, 70.0], 1090.0, 3);
+            let (px, ls) = fit(
+                &spec.title,
+                Face::Bold,
+                &[130.0, 108.0, 88.0, 70.0],
+                1090.0,
+                3,
+            );
             let end = block(c, th, 96, 270, &ls, px, Face::Bold, th.ink, false, t, 0.25);
             if !spec.tagline.trim().is_empty() {
                 let (tp, tl) = fit(&spec.tagline, Face::Regular, &[58.0, 48.0, 40.0], 1080.0, 2);
-                block(c, th, 96, end + 18, &tl, tp, Face::Regular, th.accent, false, t, 0.6);
+                block(
+                    c,
+                    th,
+                    96,
+                    end + 18,
+                    &tl,
+                    tp,
+                    Face::Regular,
+                    th.accent,
+                    false,
+                    t,
+                    0.6,
+                );
             }
             if !spec.contact.trim().is_empty() {
                 let (cp, cl) = fit(&spec.contact, Face::Regular, &[36.0, 30.0], 1090.0, 1);
-                block(c, th, 96, H - 110, &cl, cp, Face::Regular, th.ink, false, t, 1.1);
+                block(
+                    c,
+                    th,
+                    96,
+                    H - 110,
+                    &cl,
+                    cp,
+                    Face::Regular,
+                    th.ink,
+                    false,
+                    t,
+                    1.1,
+                );
             }
         }
         PromoKind::Slides => {
@@ -348,11 +404,33 @@ fn promo(c: &mut Canvas, th: &Theme, spec: &PromoSpec, photo: Option<&Photo>, t:
                 // Fade each slide out at its end so the next arrives cleanly.
                 let out = ((each - local) / 0.35).clamp(0.0, 1.0);
                 let fo = ease(out);
-                block(c, th, 0, y, &ls, px, Face::Bold, faded(th.ink, mix(th.dark, th.bottom, 0.5), fo), true, local, 0.05);
+                block(
+                    c,
+                    th,
+                    0,
+                    y,
+                    &ls,
+                    px,
+                    Face::Bold,
+                    faded(th.ink, mix(th.dark, th.bottom, 0.5), fo),
+                    true,
+                    local,
+                    0.05,
+                );
             }
             for k in 0..n {
-                let col = if k == i { th.accent } else { mix(th.dark, th.ink, 0.35) };
-                disc(c, W / 2 + (k as i32 * 28) - (n as i32 - 1) * 14, H - 56, 7, col);
+                let col = if k == i {
+                    th.accent
+                } else {
+                    mix(th.dark, th.ink, 0.35)
+                };
+                disc(
+                    c,
+                    W / 2 + (k as i32 * 28) - (n as i32 - 1) * 14,
+                    H - 56,
+                    7,
+                    col,
+                );
             }
         }
     }

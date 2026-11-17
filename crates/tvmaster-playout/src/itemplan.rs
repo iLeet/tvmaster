@@ -6,7 +6,7 @@ use crate::looks::{corner_xy, AudioFx, Burn, ClockFx, ItemPlan, OverlayInput};
 use crate::{ChannelSpec, EngineConfig, PlayItem};
 use std::path::{Path, PathBuf};
 use tokio::process::Command;
-use tvmaster_core::{choose, fnv1a, Deinterlace, SubPick, Tracks};
+use tvmaster_core::{choose, fnv1a, Corner, Deinterlace, SubPick, Tracks};
 
 fn cache_dir(cfg: &EngineConfig, what: &str) -> PathBuf {
     cfg.root.join("cache").join(what)
@@ -254,12 +254,47 @@ pub(crate) async fn plan_item(
 
     // Graphics over the picture.
     let ov = &opts.overlay;
+    // The ticker is prepared first: the other graphics keep out of its way.
+    let live = {
+        let (source, id) = (spec.source.clone(), spec.id.clone());
+        tokio::task::spawn_blocking(move || source.live_override(&id))
+            .await
+            .ok()
+            .flatten()
+    };
+    let alert_bar = matches!(
+        &live,
+        Some(crate::LiveOverride {
+            mode: crate::LiveMode::Alert {
+                style: tvmaster_render::alert::AlertStyle::Bar,
+                ..
+            },
+            ..
+        })
+    );
+    let ticker = if alert_bar {
+        None
+    } else {
+        prepare_ticker(cfg, spec, item, ov).await
+    };
+    let ticker_height = ticker.as_ref().map_or(0, |t| t.height);
+    let ticker_top = ticker.as_ref().map(|t| t.top);
+    let on_ticker_edge = |c: Corner| {
+        ticker_top.is_some_and(|top| top == matches!(c, Corner::TopLeft | Corner::TopRight))
+    };
     let logo = match ov.bug.image.as_deref().filter(|p| !p.trim().is_empty()) {
         Some(src) if ov.bug.enabled => logo_png(cfg, Path::new(src), ov.bug.opacity).await,
         _ => None,
     };
     if let Some(png) = logo {
-        let (x, y) = corner_xy(ov.bug.position, 24);
+        let (x, y) = corner_xy(
+            ov.bug.position,
+            24 + if on_ticker_edge(ov.bug.position) {
+                ticker_height
+            } else {
+                0
+            },
+        );
         plan.overlays.push(OverlayInput {
             png,
             x,
@@ -279,7 +314,14 @@ pub(crate) async fn plan_item(
             fnv1a(&format!("{text}|{}|{th:?}", ov.bug.opacity))
         );
         if let Some(png) = graphic(cfg, "bugs", &name, &g.png).await {
-            let (x, y) = corner_xy(ov.bug.position, 24);
+            let (x, y) = corner_xy(
+                ov.bug.position,
+                24 + if on_ticker_edge(ov.bug.position) {
+                    ticker_height
+                } else {
+                    0
+                },
+            );
             plan.overlays.push(OverlayInput {
                 png,
                 x,
@@ -303,20 +345,20 @@ pub(crate) async fn plan_item(
                 plan.overlays.push(OverlayInput {
                     png,
                     x: "40".into(),
-                    y: "main_h-overlay_h-48".into(),
+                    y: format!(
+                        "main_h-overlay_h-{}",
+                        48 + if ticker_top == Some(false) {
+                            ticker_height
+                        } else {
+                            0
+                        }
+                    ),
                     enable: Some(format!("between(t,0.5,{secs})")),
                 });
             }
         }
     }
     // An alert across the bottom of the programme.
-    let live = {
-        let (source, id) = (spec.source.clone(), spec.id.clone());
-        tokio::task::spawn_blocking(move || source.live_override(&id))
-            .await
-            .ok()
-            .flatten()
-    };
     if let Some(crate::LiveOverride {
         mode:
             crate::LiveMode::Alert {
@@ -366,16 +408,143 @@ pub(crate) async fn plan_item(
             }
         }
     }
+    if let Some(t) = ticker {
+        plan.overlays.extend(t.overlays);
+    }
     if ov.clock.enabled {
         if let Some(font) = &cfg.slate_font {
+            // The clock moves to the other edge if the ticker is where it would be.
+            let corner = match (
+                ov.clock.position,
+                ticker_height > 0 && on_ticker_edge(ov.clock.position),
+            ) {
+                (Corner::TopLeft, true) => Corner::BottomLeft,
+                (Corner::TopRight, true) => Corner::BottomRight,
+                (Corner::BottomLeft, true) => Corner::TopLeft,
+                (Corner::BottomRight, true) => Corner::TopRight,
+                (c, _) => c,
+            };
             plan.clock = Some(ClockFx {
                 font: font.clone(),
-                corner: ov.clock.position,
+                corner,
                 hour12: ov.clock.hour12,
             });
         }
     }
     plan
+}
+
+/// What the ticker adds to an item: its pictures, where they go, and how tall it is.
+struct PreparedTicker {
+    overlays: Vec<OverlayInput>,
+    height: u32,
+    top: bool,
+}
+
+/// The ticker for this item, or `None` when it is off, has nothing to say, or the item is not a programme.
+async fn prepare_ticker(
+    cfg: &EngineConfig,
+    spec: &ChannelSpec,
+    item: &PlayItem,
+    ov: &tvmaster_core::OverlayOptions,
+) -> Option<PreparedTicker> {
+    let tk = &ov.ticker;
+    if !tk.enabled || spec.guide.is_some() {
+        return None;
+    }
+    let mut parts: Vec<String> = tk
+        .lines
+        .iter()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect();
+    if !tk.feeds.is_empty() {
+        let (source, id) = (spec.source.clone(), spec.id.clone());
+        let heads = tokio::task::spawn_blocking(move || source.headlines(&id))
+            .await
+            .unwrap_or_default();
+        parts.extend(heads.into_iter().take(12));
+    }
+    if tk.up_next {
+        let (source, id, after) = (spec.source.clone(), spec.id.clone(), item.end_ms);
+        let up = tokio::task::spawn_blocking(move || source.upcoming(&id, after, 1))
+            .await
+            .unwrap_or_default();
+        if let Some((time, title)) = up.items.first() {
+            parts.push(format!("Up next: {title} at {time}"));
+        }
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    let text = parts.join("   •   ");
+    let th = crate::spec_theme(spec);
+    let width = cfg.profile.width;
+    let g = tvmaster_render::ticker::ticker(&th, &tk.label, &text, width);
+    let key = format!("{text}|{}|{th:?}|{width}", tk.label);
+    let h = fnv1a(&key);
+    let strip = graphic(cfg, "tickers", &format!("{h:016x}-strip.png"), &g.strip.png).await?;
+    let crawl = graphic(cfg, "tickers", &format!("{h:016x}-crawl.png"), &g.crawl.png).await?;
+    let chip = match &g.chip {
+        Some(c) => graphic(cfg, "tickers", &format!("{h:016x}-chip.png"), &c.png).await,
+        None => None,
+    };
+    let top = tk.position == tvmaster_core::TickerPosition::Top;
+    let k = width as f32 / 1280.0;
+    let speed = match tk.speed {
+        tvmaster_core::TickerSpeed::Slow => 90.0,
+        tvmaster_core::TickerSpeed::Normal => 140.0,
+        tvmaster_core::TickerSpeed::Fast => 200.0,
+    } * k;
+    let (sh, ch) = (g.height as i32, g.crawl.h as i32);
+    let strip_y = if top {
+        "0".to_string()
+    } else {
+        "main_h-overlay_h".to_string()
+    };
+    let crawl_y = if top {
+        format!("{}", (sh - ch) / 2)
+    } else {
+        format!("main_h-{}", sh - (sh - ch) / 2)
+    };
+    // Always on, or appearing now and then and crossing the screen once each time.
+    let (crawl_x, enable) = if tk.every_minutes == 0 {
+        (format!("main_w-mod(t*{speed:.0}\\,main_w+overlay_w)"), None)
+    } else {
+        let period = (tk.every_minutes as f32 * 60.0).max(30.0);
+        let show = ((width as f32 + g.crawl.w as f32) / speed + 1.0).min(period - 1.0);
+        (
+            format!("main_w-mod(t\\,{period:.0})*{speed:.0}"),
+            Some(format!("lt(mod(t\\,{period:.0})\\,{show:.1})")),
+        )
+    };
+    let mut overlays = vec![
+        OverlayInput {
+            png: strip,
+            x: "0".into(),
+            y: strip_y.clone(),
+            enable: enable.clone(),
+        },
+        OverlayInput {
+            png: crawl,
+            x: crawl_x,
+            y: crawl_y,
+            enable: enable.clone(),
+        },
+    ];
+    if let Some(chip) = chip {
+        overlays.push(OverlayInput {
+            png: chip,
+            x: "0".into(),
+            y: strip_y,
+            enable,
+        });
+    }
+    Some(PreparedTicker {
+        overlays,
+        height: g.height,
+        top,
+    })
 }
 
 impl ItemPlan {
