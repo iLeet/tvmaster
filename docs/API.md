@@ -205,3 +205,12 @@ The daemon also runs an autopilot loop (every minute) that tops up every channel
 - `POST /api/v1/channels/{id}/play` `{show | media_id | random: true}`: cut to something right now; the schedule carries on after it.
 - `POST /api/v1/channels/{id}/schedule/edit` `{from_ms, to_ms, show | media_id | random | off_air: true}`: change what airs in a stretch (at most 48 hours). Lasts until the next re-roll.
 - `GET /api/v1/channels/{id}/episodes?show=Name`: the episodes of a show the channel can air.
+
+## Themes, shows, setup and breaks
+
+- Themes: see `docs/THEMES.md` (`/theme`, `/theme/preview`).
+- Show names, grouping and details: see `docs/SHOWS.md` (`/shows/...`, `/media/station-folder`).
+- Breaks: `GET /api/v1/ads/options` (presets and station cards), `POST /api/v1/ads/explain`
+  (`{ "ads": {...}, "slot_minutes": 30, "show_minutes": 22 }` returns `{ "text", "preset" }`).
+- First-run setup: `GET /api/v1/setup` (`needed`, what exists), `POST /api/v1/setup/starter` (make a guide and
+  a shuffled Mix channel from the media added so far), `POST /api/v1/setup/skip`.

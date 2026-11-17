@@ -95,7 +95,7 @@ private struct ShowRow: View {
                 if !d.isEmpty { Badge(text: "Set") }
                 Spacer()
                 Button("Name & details") { openDetails() }.glassButton()
-                Text("\(show.episodes) episodes").font(.callout).foregroundStyle(.secondary)
+                Text("\(show.episodes) \(show.episodes == 1 ? "episode" : "episodes")").font(.callout).foregroundStyle(.secondary)
             }
         }
         .padding(12).glassCard(cornerRadius: 16)

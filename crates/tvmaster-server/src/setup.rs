@@ -98,7 +98,7 @@ pub async fn starter(State(s): State<AppState>, Json(b): Json<Starter>) -> ApiRe
         }
         let input: channels::ChannelInput = serde_json::from_value(body)
             .map_err(|e| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-        channels::upsert(State(s.clone()), Json(input)).await?;
+        let _ = channels::upsert(State(s.clone()), Json(input)).await?;
         made.push(json!({ "id": id, "number": number, "name": name }));
     }
     tvmaster_db::meta_set(&s.db(), DONE, "1")?;

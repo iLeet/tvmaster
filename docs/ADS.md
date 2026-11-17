@@ -2,6 +2,11 @@
 
 How TVMaster turns a 22-minute episode in a 30-minute slot into real-feeling television: breaks at natural spots, commercial pods that fill exactly, and station bumpers like "Up next" and "Later today".
 
+> The **Breaks** tab offers ready-made amounts (`GET /api/v1/ads/options`): No commercials, Light, Classic TV,
+> Heavy, After the show, and says in words what the settings do to a typical slot (`POST /api/v1/ads/explain`).
+> The numbers below are under *Fine-tune*. "Bumpers" are called station cards in the apps, and "your own
+> bumper clips" are your own station clips.
+
 ## The idea
 
 A show is shorter than its slot. The difference is the **ad budget**. TVMaster splits the show at natural break points, then fills every break to the second:

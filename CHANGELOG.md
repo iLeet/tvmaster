@@ -4,6 +4,13 @@
 
 The first stable release.
 
+- **One theme for everything.** A station-wide theme and graphics style (Retro pixels or Modern smooth) dresses the guide, station and break cards, the stand-by and sign-off screens, alerts, the now-playing card, the channel logo and the clock. A channel can choose its own. New **Appearance** page in the web admin and the Mac app, with previews of each graphic. See `docs/THEMES.md`.
+- **Show titles and grouping.** "Bleach season 01" is now the show Bleach, season 1 (automatic, switchable). Any show can be renamed, several folders can be put together as one show with a season each, and a show can have a description, rating, tags and poster (used in IPTV guides). Lineups, per-show settings and episode positions follow a rename. See `docs/SHOWS.md`.
+- **Media from the app.** One click makes the station's own media folder on the server (shows, commercials, bumpers, music) to upload into from the web admin or the Mac app, by drag and drop too; linked folders keep working beside it.
+- **Breaks, rewritten.** A tab called Breaks with ready-made amounts of advertising (none, light, classic, heavy, after the show), a sentence saying what that does to a 30-minute slot, a picture of each station card, and clearer names for everything. The numbers are under Fine-tune.
+- **First-run setup** in the web admin and the Mac app: add media, choose a look, make the first channels (a guide and a shuffled mix). The steps live on the server so every app asks the same thing.
+- **Mac app, closer to the web admin:** a week grid to drag slots around, the same Breaks and Look sections, the ad years, audio description, frame rate and bitrate settings. `scripts/parity-check.py` fails when a server setting is missing from either app.
+- **Fixed:** the Mac app crashed on its own keyboard shortcuts once it had ten sidebar pages.
 - **Guide channel:** many more options. Smooth modern lettering at 1280x720 next to the retro pixel look, rounded or square cells, text size, a picture or striped or solid background, a minimal heading, a ticker at the top or bottom, times on programmes, six more colour themes and a custom background colour, one-click looks, a live video window (one channel or flipping through several), and a live preview in the web admin and the Mac app.
 - **Upload videos to the server** (bumpers, commercials, shows, music) from the web admin or the Mac app, with progress, into a library folder, streamed to disk and added to the schedule at once. Make the library's folder from the app too, so a remote server needs no shell access.
 - **Docker:** a real image and compose file with FFmpeg, a non-root user that matches yours, a first-run access token, health checks and clean shutdown; see `docs/DOCKER.md`.

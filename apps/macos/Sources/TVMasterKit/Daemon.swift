@@ -28,7 +28,9 @@ public enum DaemonLocator {
         candidates: [URL]? = nil,
         isExecutable: (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) }
     ) -> URL? {
-        (candidates ?? Self.candidates()).first { isExecutable($0.path) }
+        // Never the app itself: run unbundled on a case-insensitive disk, `TVMaster` and `tvmaster` are one file.
+        let me = Bundle.main.executablePath?.lowercased()
+        return (candidates ?? Self.candidates()).first { isExecutable($0.path) && $0.path.lowercased() != me }
     }
 
     /// A `tvmaster` started from a GUI app gets a minimal PATH; FFmpeg usually

@@ -31,7 +31,7 @@ struct TVMasterApp: App {
         .windowResizability(.contentMinSize)
         .commands {
             CommandGroup(after: .sidebar) {
-                ForEach(Array(SidebarItem.allCases.enumerated()), id: \.element) { i, item in
+                ForEach(Array(SidebarItem.allCases.prefix(9).enumerated()), id: \.element) { i, item in
                     Button(item.title) { model.selection = item }.keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: .command)
                 }
             }

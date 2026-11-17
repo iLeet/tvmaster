@@ -15,10 +15,14 @@ struct ProgrammingForm: View {
             Section("Time slots") {
                 Text("A weekly lineup. Each slot airs its show between the times you give. Time outside every slot follows “When nothing is scheduled”.")
                     .font(.caption).foregroundStyle(.secondary)
-                ForEach($ls.slots) { $slot in
-                    SlotEditor(slot: $slot, shows: shows) { ls.slots.removeAll { $0.id == slot.id } }
+                WeekGridView(slots: $ls.slots, shows: shows, step: ls.gridMinutes ?? 30)
+                Text("Drag on an empty spot to add a slot, drag a slot to move it, drag its bottom edge to resize it, click it to edit.").font(.caption).foregroundStyle(.secondary)
+                DisclosureGroup("The slots as a list (\(ls.slots.count))") {
+                    ForEach($ls.slots) { $slot in
+                        SlotEditor(slot: $slot, shows: shows) { ls.slots.removeAll { $0.id == slot.id } }
+                    }
+                    Button { ls.slots.append(TimeSlot()) } label: { Label("Add a time slot", systemImage: "plus") }
                 }
-                Button { ls.slots.append(TimeSlot()) } label: { Label("Add a time slot", systemImage: "plus") }
             }
 
             Section("Seasons") {
