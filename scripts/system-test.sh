@@ -270,6 +270,18 @@ OUT="$(grab retro "$W/live-back.png")"
 RGB="$(meanrgb "$W/live-back.png")"
 [[ -s "$W/live-back.png" ]] && ok "and the channel carries on with its programming ($RGB)" || bad "back to programming" "$OUT"
 
+# ---- themes, show names, breaks and setup ---------------------------
+section "Themes, shows, breaks, setup"
+api -XPUT "$H/api/v1/theme" -d '{"theme":"midnight","style":"modern"}' >/dev/null
+curl -s -o "$W/card.png" -XPOST "${auth[@]}" -H 'content-type: application/json' -d '{"what":"card","theme":{"theme":"midnight","style":"modern"}}' "$H/api/v1/theme/preview"
+SZ="$(python3 -c "import struct,sys; d=open(sys.argv[1],'rb').read(); print(struct.unpack('>II', d[16:24]))" "$W/card.png" 2>/dev/null)"
+[[ "$SZ" == "(1280, 720)" ]] && ok "a modern station card is drawn at full size ($SZ)" || bad "modern card size" "$SZ"
+[[ "$(api "$H/api/v1/theme" | json "d['station']['style']+'/'+d['station']['theme']")" == "modern/midnight" ]] && ok "the station theme is saved" || bad "station theme"
+api -XPUT "$H/api/v1/theme" -d '{"theme":"auto","style":"retro"}' >/dev/null
+[[ "$(api "$H/api/v1/shows" | json "'folders' in d[0]")" == "True" ]] && ok "shows list the folders they are made of" || bad "show folders"
+[[ "$(api -XPOST "$H/api/v1/ads/explain" -d '{"ads":{},"slot_minutes":30,"show_minutes":22}' | json "'8 minutes' in d['text']")" == "True" ]] && ok "break settings are explained in words" || bad "ads explain"
+[[ "$(api "$H/api/v1/setup" | json "d['needed']")" == "False" ]] && ok "a station with channels is not offered setup" || bad "setup state"
+
 # docker stop and systemd send SIGTERM: it must stop cleanly, like Ctrl-C does
 "$BIN" serve --bind "127.0.0.1:$HP2" --data-dir "$W/data3" >"$W/server4.log" 2>&1 &
 PID2=$!
