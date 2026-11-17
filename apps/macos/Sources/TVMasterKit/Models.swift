@@ -226,7 +226,37 @@ public struct ShowSummary: Codable, Sendable, Hashable, Identifiable {
     public var subtitleLanguages: [String]?
     /// Settings that follow the show onto every channel.
     public var defaults: ShowDefaults?
+    /// The folders (detected names) the show is made of; absent on older servers.
+    public var folders: [ShowFolder]?
+    /// Description, rating, tags and poster.
+    public var info: ShowInfo?
     public var id: String { name }
+}
+
+/// One folder that is part of a show.
+public struct ShowFolder: Codable, Sendable, Hashable, Identifiable {
+    public var raw: String
+    public var episodes: Int
+    /// The season this folder stands for, if known.
+    public var season: Int?
+    /// A rule of the user's own covers it (rather than the automatic clean-up).
+    public var custom: Bool
+    public var id: String { raw }
+}
+
+/// What a show is about, for guides and apps.
+public struct ShowInfo: Codable, Sendable, Hashable {
+    public var description: String
+    public var rating: String
+    public var tags: [String]
+    public var poster: String?
+    public init(description: String = "", rating: String = "", tags: [String] = [], poster: String? = nil) {
+        self.description = description; self.rating = rating; self.tags = tags; self.poster = poster
+    }
+    var json: JSONValue {
+        .object(["description": .string(description), "rating": .string(rating),
+                 "tags": .array(tags.map { .string($0) }), "poster": (poster ?? "").isEmpty ? .null : .string(poster!)])
+    }
 }
 
 /// A show's own audio, subtitle and picture settings (blank = whatever the channel says).

@@ -184,7 +184,25 @@ pub fn list_media_of_kind(
             out.push(r?);
         }
     }
+    if kind == "shows" {
+        apply_names(conn, &mut out)?;
+    }
     Ok(out)
+}
+
+/// Replace detected show names (and seasons) with what the station calls them.
+fn apply_names(conn: &Connection, rows: &mut [MediaRow]) -> Result<()> {
+    let map = crate::NameMap::load(conn)?;
+    for r in rows {
+        let (title, season) = map.resolve(r.show.as_deref().unwrap_or(""));
+        if r.show.is_some() || !title.is_empty() {
+            r.show = Some(title);
+        }
+        if let Some(s) = season {
+            r.season = Some(s);
+        }
+    }
+    Ok(())
 }
 
 /// Set the analysed break points for a file.
@@ -211,9 +229,22 @@ pub fn list_media_in_libraries(conn: &Connection, library_ids: &[i64]) -> Result
     list_media_of_kind(conn, library_ids, "shows")
 }
 
+/// One folder (a detected name) that is part of a show.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct FolderSummary {
+    /// The name detected from the folder.
+    pub raw: String,
+    pub episodes: i64,
+    /// The season this folder stands for, if known (from its name or a rule).
+    pub season: Option<i64>,
+    /// A rule of the user's own covers it (rather than the automatic clean-up).
+    pub custom: bool,
+}
+
 /// A show in the libraries: how many episodes and how much airtime.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
 pub struct ShowSummary {
+    /// What the station calls it.
     pub name: String,
     pub episodes: i64,
     pub total_ms: i64,
@@ -223,74 +254,58 @@ pub struct ShowSummary {
     pub subtitle_languages: Vec<String>,
     /// Files in this show whose tracks have been read (scanned by a version that does).
     pub files_with_tracks: i64,
+    /// The folders it is made of.
+    pub folders: Vec<FolderSummary>,
 }
 
 /// The distinct shows in `shows` libraries (all of them if `library_ids` is
-/// empty), by name, case-insensitively.
+/// empty), by title, case-insensitively. Folders with the same title are one show.
 pub fn list_shows(conn: &Connection, library_ids: &[i64]) -> Result<Vec<ShowSummary>> {
     let mut st = conn.prepare(
-        "SELECT MIN(COALESCE(m.show, '')), COUNT(*), SUM(m.duration_ms)
+        "SELECT MIN(COALESCE(m.show, '')), m.library_id, COUNT(*), SUM(m.duration_ms)
          FROM media_items m JOIN libraries l ON l.id = m.library_id
          WHERE m.missing = 0 AND l.enabled = 1 AND l.kind = 'shows'
-         GROUP BY LOWER(COALESCE(m.show, ''))
-         ORDER BY LOWER(COALESCE(m.show, ''))",
+         GROUP BY LOWER(COALESCE(m.show, '')), m.library_id",
     )?;
-    // Filtering by library happens in a second pass so one statement serves both cases.
-    let all: Vec<(String, i64, i64)> = st
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+    let rows: Vec<(String, i64, i64, i64)> = st
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
         .collect::<Result<_>>()?;
-    if library_ids.is_empty() {
-        return Ok(all
-            .into_iter()
-            .map(|(name, episodes, total_ms)| ShowSummary {
-                name,
-                episodes,
-                total_ms,
-                ..Default::default()
-            })
-            .collect::<Vec<_>>())
-        .map(|mut v| {
-            fill_languages(conn, &mut v);
-            v
-        });
-    }
-    let mut out = Vec::new();
-    let mut by_lib = conn.prepare(
-        "SELECT MIN(COALESCE(show, '')), COUNT(*), SUM(duration_ms)
-         FROM media_items
-         WHERE missing = 0 AND library_id = ?1
-         GROUP BY LOWER(COALESCE(show, ''))",
-    )?;
+    let map = crate::NameMap::load(conn)?;
     let mut merged: std::collections::BTreeMap<String, ShowSummary> = Default::default();
-    for lib in library_ids {
-        for row in by_lib.query_map([lib], |r| {
-            Ok(ShowSummary {
-                name: r.get(0)?,
-                episodes: r.get(1)?,
-                total_ms: r.get(2)?,
-                ..Default::default()
-            })
-        })? {
-            let row = row?;
-            merged
-                .entry(row.name.to_lowercase())
-                .and_modify(|e| {
-                    e.episodes += row.episodes;
-                    e.total_ms += row.total_ms;
-                })
-                .or_insert(row);
+    for (raw, lib, episodes, total_ms) in rows {
+        if !library_ids.is_empty() && !library_ids.contains(&lib) {
+            continue;
+        }
+        let (title, season) = map.resolve(&raw);
+        let e = merged.entry(title.to_lowercase()).or_insert_with(|| ShowSummary {
+            name: title.clone(),
+            ..Default::default()
+        });
+        e.episodes += episodes;
+        e.total_ms += total_ms;
+        match e.folders.iter_mut().find(|f| f.raw.eq_ignore_ascii_case(&raw)) {
+            Some(f) => f.episodes += episodes,
+            None => e.folders.push(FolderSummary {
+                custom: map.has_rule(&raw),
+                raw,
+                episodes,
+                season,
+            }),
         }
     }
-    out.extend(merged.into_values());
-    fill_languages(conn, &mut out);
+    let mut out: Vec<ShowSummary> = merged.into_values().collect();
+    for s in &mut out {
+        s.folders.sort_by(|a, b| (a.season, &a.raw).cmp(&(b.season, &b.raw)));
+    }
+    fill_languages(conn, &map, &mut out);
     Ok(out)
 }
 
 /// Add the audio and subtitle languages found in each show's files.
-fn fill_languages(conn: &Connection, shows: &mut [ShowSummary]) {
+fn fill_languages(conn: &Connection, map: &crate::NameMap, shows: &mut [ShowSummary]) {
     use std::collections::{BTreeMap, BTreeSet};
     let Ok(mut st) = conn.prepare(
-        "SELECT LOWER(COALESCE(show, '')), tracks_json FROM media_items WHERE missing = 0 AND tracks_json IS NOT NULL",
+        "SELECT COALESCE(show, ''), tracks_json FROM media_items WHERE missing = 0 AND tracks_json IS NOT NULL",
     ) else {
         return;
     };
@@ -303,7 +318,7 @@ fn fill_languages(conn: &Connection, shows: &mut [ShowSummary]) {
         let Some(t) = tvmaster_core::Tracks::from_json(&json) else {
             continue;
         };
-        let e = found.entry(show).or_default();
+        let e = found.entry(map.resolve(&show).0.to_lowercase()).or_default();
         e.0.extend(
             t.audio
                 .iter()
@@ -351,12 +366,22 @@ pub fn delete_tv(conn: &Connection, id: &str) -> Result<bool> {
 }
 
 pub fn get_media(conn: &Connection, id: i64) -> Result<Option<MediaRow>> {
-    conn.query_row(
-        &format!("SELECT {MEDIA_COLS} FROM media_items WHERE id = ?1"),
-        [id],
-        media_from,
-    )
-    .optional()
+    let row = conn
+        .query_row(
+            &format!("SELECT {MEDIA_COLS} FROM media_items WHERE id = ?1"),
+            [id],
+            media_from,
+        )
+        .optional()?;
+    Ok(match row {
+        Some(r) => {
+            let mut v = [r];
+            apply_names(conn, &mut v)?;
+            let [r] = v;
+            Some(r)
+        }
+        None => None,
+    })
 }
 
 pub fn count_media(conn: &Connection, library_id: i64) -> Result<i64> {

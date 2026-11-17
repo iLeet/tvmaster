@@ -73,6 +73,7 @@ pub async fn guide(State(s): State<AppState>) -> ApiResult<Response> {
     }
     let start = now_ms();
     let end = start + GUIDE_HOURS * 3_600_000;
+    let info = tvmaster_db::list_show_info(&s.db())?;
     for c in channels {
         if c.kind == tvmaster_core::ChannelKind::Guide {
             // One long programme, so clients show the guide channel as "on".
@@ -102,6 +103,20 @@ pub async fn guide(State(s): State<AppState>) -> ApiResult<Response> {
                     "    <sub-title>{}</sub-title>\n",
                     xml_escape(&p.title)
                 ));
+            }
+            if let Some(i) = p.show.as_ref().and_then(|n| info.get(&n.trim().to_lowercase())) {
+                if !i.description.trim().is_empty() {
+                    xml.push_str(&format!("    <desc>{}</desc>\n", xml_escape(i.description.trim())));
+                }
+                for t in &i.tags {
+                    xml.push_str(&format!("    <category>{}</category>\n", xml_escape(t)));
+                }
+                if !i.rating.trim().is_empty() {
+                    xml.push_str(&format!(
+                        "    <rating><value>{}</value></rating>\n",
+                        xml_escape(i.rating.trim())
+                    ));
+                }
             }
             if let Some(label) = &p.label {
                 xml.push_str(&format!("    <category>{}</category>\n", xml_escape(label)));

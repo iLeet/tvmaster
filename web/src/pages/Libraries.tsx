@@ -106,8 +106,8 @@ function UploadFiles({ library, onClose, onDone }: { library: Library; onClose: 
         </>
       }
     >
-      <div className="stack">
-        <p className="small dim">The files are copied into this library's folder on the server, then added to the schedule. {library.kind === 'shows' ? 'Pick a whole folder to keep its Show/Season layout.' : ''}</p>
+      <div className="stack" onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); add(e.dataTransfer.files); }}>
+        <p className="small dim">Drop files here, or choose them. The files are copied into this library's folder on the server, then added to the schedule. {library.kind === 'shows' ? 'Pick a whole folder to keep its Show/Season layout.' : ''}</p>
         <div className="row wrap" style={{ alignItems: 'flex-end' }}>
           <label className="btn"><input type="file" multiple hidden accept={ACCEPT[library.kind]} onChange={(e) => { add(e.target.files); e.target.value = ''; }} />Choose files…</label>
           <label className="btn"><input type="file" hidden multiple {...({ webkitdirectory: '' } as object)} onChange={(e) => { add(e.target.files); e.target.value = ''; }} />Choose a folder…</label>
@@ -193,6 +193,8 @@ export function Libraries() {
   const [uploading, setUploading] = useState<Library | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
   const { say, attempt } = useToast();
+  const sys = useQuery(() => api.get<System>('/system'));
+  const hasStation = !!sys.data?.data_dir && (libs.data ?? []).some((l) => l.path.replace(/\\/g, '/').startsWith(`${sys.data!.data_dir!.replace(/\\/g, '/')}/media/`));
 
   // Poll while break detection is running so the progress bar moves.
   const analysing = (libs.data ?? []).some((l) => l.analysis?.running);
@@ -218,6 +220,13 @@ export function Libraries() {
         <Btn kind="primary" icon="plus" className="right" onClick={() => setAdding(true)}>Add library</Btn>
       </div>
       {libs.error && <div className="err-banner">{libs.error}</div>}
+      {sys.data?.data_dir && !hasStation && (
+        <Card className="stack">
+          <h2>Upload from here</h2>
+          <p className="small dim">Make the station's own media folder on the server, with a place for shows, commercials, bumper clips and music. Then you can upload files straight from this page or the app, with nothing to set up on the server. Libraries that link to other folders keep working beside it.</p>
+          <div><Btn kind="primary" icon="folder" onClick={() => attempt(() => api.post('/media/station-folder'), 'Station media folder ready').then(libs.reload)}>Create the station media folder</Btn></div>
+        </Card>
+      )}
       <Card>
         {libs.loading && !libs.data ? <div className="empty"><Spinner /></div> : (libs.data ?? []).length === 0 ? (
           <Empty>No libraries yet. Add the folder where your TV collection lives.</Empty>

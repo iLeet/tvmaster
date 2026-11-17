@@ -19,6 +19,16 @@ struct LibrariesView: View {
                     Button { adding = true } label: { Label("Add library", systemImage: "plus") }.glassButton(prominent: true)
                 }
                 if let note { Label(note, systemImage: "checkmark.circle").foregroundStyle(.green) }
+                if let dir = model.system?.dataDir, !model.libraries.contains(where: { $0.path.replacingOccurrences(of: "\\", with: "/").hasPrefix(dir.replacingOccurrences(of: "\\", with: "/") + "/media/") }) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Upload from here").font(.headline)
+                        Text("Make the station's own media folder on the server, with a place for shows, commercials, bumper clips and music. Then you can upload files straight from this app or the web admin, with nothing to set up on the server. Libraries that link to other folders keep working beside it.")
+                            .font(.callout).foregroundStyle(.secondary)
+                        Button { Task { _ = await model.run { try await model.client?.createStationFolder() }; await model.refreshLibraries(); note = "Station media folder ready" } } label: { Label("Create the station media folder", systemImage: "folder.badge.plus") }
+                            .glassButton(prominent: true)
+                    }
+                    .padding(16).frame(maxWidth: .infinity, alignment: .leading).glassCard(cornerRadius: 20)
+                }
                 if model.libraries.isEmpty {
                     Text("No libraries yet. Add the folder where your TV collection lives.").foregroundStyle(.secondary)
                 }

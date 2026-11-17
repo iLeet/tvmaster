@@ -50,6 +50,43 @@ pub enum Source {
     Chaos,
 }
 
+impl Source {
+    /// Replace every show name in this source using `f`. Returns whether anything changed.
+    pub fn map_shows(&mut self, f: &mut dyn FnMut(&str) -> String) -> bool {
+        let mut changed = false;
+        match self {
+            Source::Show { show } => {
+                let n = f(show);
+                if n != *show {
+                    *show = n;
+                    changed = true;
+                }
+            }
+            Source::Pool { shows, .. } => {
+                for s in shows.iter_mut() {
+                    let n = f(s);
+                    if n != *s {
+                        *s = n;
+                        changed = true;
+                    }
+                }
+                // Two names that became one show are listed once.
+                let mut seen = std::collections::HashSet::new();
+                let before = shows.len();
+                shows.retain(|s| seen.insert(s.to_lowercase()));
+                changed |= shows.len() != before;
+            }
+            Source::Rotation { items, .. } => {
+                for i in items {
+                    changed |= i.map_shows(f);
+                }
+            }
+            Source::Chaos => {}
+        }
+        changed
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Block {
     #[serde(default)]
@@ -134,6 +171,29 @@ pub struct Lineup {
     /// Hours the station goes off the air (bars and a tone, or snow).
     #[serde(default)]
     pub signoff: Option<SignOff>,
+}
+
+impl Lineup {
+    /// Replace every show name in the lineup using `f` (when a show is renamed
+    /// or several folders become one show). Returns whether anything changed.
+    pub fn map_shows(&mut self, f: &mut dyn FnMut(&str) -> String) -> bool {
+        let mut changed = false;
+        for b in &mut self.blocks {
+            changed |= b.source.map_shows(f);
+        }
+        for s in &mut self.seasons {
+            for b in &mut s.blocks {
+                changed |= b.source.map_shows(f);
+            }
+        }
+        for e in &mut self.events {
+            changed |= e.source.map_shows(f);
+        }
+        if let Some(fill) = &mut self.fill {
+            changed |= fill.map_shows(f);
+        }
+        changed
+    }
 }
 
 /// What airs while the station is signed off: the same screens as when nothing is on air.

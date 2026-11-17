@@ -16,6 +16,7 @@ mod pip;
 mod plan;
 #[cfg(test)]
 mod soak;
+mod shownames;
 mod station;
 mod stream;
 mod theme;
@@ -382,6 +383,8 @@ impl AppState {
         // (Two database guards in one expression would wait on each other forever.)
         let zone = station::effective_timezone(&state.db());
         autopilot::fill_blank_timezones(&state.db(), &zone);
+        // Lineups and settings use the shows' current names (clean-ups from a newer version, say).
+        let _ = tvmaster_db::normalize_names(&state.db());
         // A timed override ends by itself.
         let ticker = state.clone();
         tokio::spawn(async move {
@@ -482,6 +485,7 @@ fn build_router(state: AppState, https: bool) -> Router {
             "/api/v1/libraries/:id",
             axum::routing::delete(libraries::remove).patch(libraries::patch),
         )
+        .route("/api/v1/media/station-folder", post(libraries::station_folder))
         .route("/api/v1/libraries/:id/scan", post(libraries::scan))
         .route("/api/v1/libraries/:id/analyze", post(libraries::analyze))
         .route(
@@ -568,6 +572,12 @@ fn build_router(state: AppState, https: bool) -> Router {
             get(assets::get_one).delete(assets::delete_one),
         )
         .route("/api/v1/shows", get(admin::shows))
+        .route("/api/v1/shows/names", get(shownames::get_names))
+        .route("/api/v1/shows/folder", axum::routing::put(shownames::put_folder))
+        .route("/api/v1/shows/folder/reset", post(shownames::reset_folder))
+        .route("/api/v1/shows/merge", post(shownames::merge))
+        .route("/api/v1/shows/info", axum::routing::put(shownames::put_info))
+        .route("/api/v1/shows/auto-clean", axum::routing::put(shownames::put_auto_clean))
         .route(
             "/api/v1/show-settings",
             get(admin::show_settings).put(admin::put_show_settings),

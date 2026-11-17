@@ -7,6 +7,10 @@ struct ShowsView: View {
     @State private var shows: [ShowSummary] = []
     @State private var filter = ""
     @State private var loading = true
+    @State private var tidy = true
+    @State private var picked: Set<String> = []
+    @State private var details: ShowSummary?
+    @State private var merging = false
 
     private var shown: [ShowSummary] {
         filter.isEmpty ? shows : shows.filter { $0.name.localizedCaseInsensitiveContains(filter) }
@@ -18,11 +22,19 @@ struct ShowsView: View {
                 PageHeader(title: "Shows", subtitle: "Audio, subtitles and look for each show, on every channel.")
                 Text("Set a show up once here and every channel that airs it follows: anime in Japanese with English subtitles, a show with subtitles already burned in (set Subtitles to Off), a 1950s serial in black and white. A channel can still override a show for itself in its Picture & sound tab.")
                     .font(.callout).foregroundStyle(.secondary)
+                HStack {
+                    Toggle("Tidy folder names (“Bleach season 01” becomes the show Bleach, season 1)", isOn: Binding(get: { tidy }, set: { v in
+                        tidy = v
+                        Task { if let c = model.client { _ = await model.run { try await c.setAutoCleanNames(v) }; await load() } }
+                    }))
+                    Spacer()
+                    Button(picked.count > 1 ? "Put \(picked.count) together…" : "Rename…") { merging = true }.glassButton().disabled(picked.isEmpty)
+                }
                 if shows.count > 8 { TextField("Filter shows…", text: $filter).textFieldStyle(.roundedBorder).frame(maxWidth: 300) }
                 if loading && shows.isEmpty { ProgressView() }
                 if !loading && shows.isEmpty { Text("No shows yet. Add a TV shows library first.").foregroundStyle(.secondary) }
                 ForEach(shown) { show in
-                    ShowRow(show: show) { updated in
+                    ShowRow(show: show, picked: Binding(get: { picked.contains(show.name) }, set: { on in if on { picked.insert(show.name) } else { picked.remove(show.name) } }), openDetails: { details = show }) { updated in
                         if let i = shows.firstIndex(where: { $0.name == show.name }) { shows[i].defaults = updated.isEmpty ? nil : updated }
                         Task { if let c = model.client { _ = await model.run { try await c.setShowSettings(show: show.name, updated) } } }
                     }
@@ -30,7 +42,9 @@ struct ShowsView: View {
             }
             .padding(28)
         }
-        .task { await load() }
+        .task { await load(); tidy = (try? await model.client?.autoCleanNames()) ?? true }
+        .sheet(item: $details) { show in ShowDetailsSheet(show: show) { Task { await load() } } }
+        .sheet(isPresented: $merging) { MergeSheet(names: shown.map(\.name).filter { picked.contains($0) }) { picked = []; Task { await load() } } }
     }
 
     private func load() async {
@@ -42,6 +56,8 @@ struct ShowsView: View {
 
 private struct ShowRow: View {
     var show: ShowSummary
+    @Binding var picked: Bool
+    var openDetails: () -> Void
     var onChange: (ShowDefaults) -> Void
     @State private var open = false
     @State private var audio = ""
@@ -74,9 +90,11 @@ private struct ShowRow: View {
             .padding(.top, 6)
         } label: {
             HStack {
+                Toggle("", isOn: $picked).labelsHidden().toggleStyle(.checkbox)
                 Text(show.name).fontWeight(.semibold)
                 if !d.isEmpty { Badge(text: "Set") }
                 Spacer()
+                Button("Name & details") { openDetails() }.glassButton()
                 Text("\(show.episodes) episodes").font(.callout).foregroundStyle(.secondary)
             }
         }

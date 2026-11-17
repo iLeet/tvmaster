@@ -39,7 +39,7 @@ struct UploadSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Upload to \(library.name)").font(.title2.bold())
-            Text("The files are copied into this library's folder on the server, then added to the schedule.\(library.kind == .shows ? " Choose a whole folder to keep its Show/Season layout." : "")")
+            Text("Drop files or folders here, or choose them. The files are copied into this library's folder on the server, then added to the schedule.\(library.kind == .shows ? " Choose a whole folder to keep its Show/Season layout." : "")")
                 .font(.callout).foregroundStyle(.secondary)
             HStack {
                 Button("Choose files or folders…") { choose() }.glassButton().disabled(running)
@@ -74,6 +74,11 @@ struct UploadSheet: View {
             }
         }
         .padding(24).frame(width: 640, height: 520)
+        .dropDestination(for: URL.self) { urls, _ in
+            guard !running else { return false }
+            for url in urls { addURL(url) }
+            return !urls.isEmpty
+        }
     }
 
     private func choose() {
@@ -83,17 +88,19 @@ struct UploadSheet: View {
         panel.allowsMultipleSelection = true
         panel.prompt = "Choose"
         guard panel.runModal() == .OK else { return }
-        for url in panel.urls {
-            var isDir: ObjCBool = false
-            FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
-            if isDir.boolValue {
-                // A folder keeps its own name and layout: Show/Season 1/Episode.mkv.
-                let base = url.deletingLastPathComponent()
-                let walker = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey], options: [.skipsHiddenFiles])
-                while let f = walker?.nextObject() as? URL { add(f, base: base) }
-            } else {
-                add(url, base: url.deletingLastPathComponent())
-            }
+        for url in panel.urls { addURL(url) }
+    }
+
+    /// A file, or a whole folder (which keeps its own name and layout: Show/Season 1/Episode.mkv).
+    private func addURL(_ url: URL) {
+        var isDir: ObjCBool = false
+        FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
+        if isDir.boolValue {
+            let base = url.deletingLastPathComponent()
+            let walker = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey], options: [.skipsHiddenFiles])
+            while let f = walker?.nextObject() as? URL { add(f, base: base) }
+        } else {
+            add(url, base: url.deletingLastPathComponent())
         }
     }
 

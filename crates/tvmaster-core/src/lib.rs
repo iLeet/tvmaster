@@ -10,6 +10,7 @@ mod model;
 mod options;
 mod rng;
 mod scheduler;
+mod showname;
 mod timefmt;
 mod tracks;
 
@@ -37,6 +38,7 @@ pub use options::{
     SubMode, SubPrefs, SubSize, SubStyle, VideoOptions,
 };
 pub use rng::fnv1a;
+pub use showname::split_season_suffix;
 pub use scheduler::{
     align_start, commit_aired, generate, rebuild_reservations, Cursors, ItemKind, SchedConfig,
     ScheduledItem,

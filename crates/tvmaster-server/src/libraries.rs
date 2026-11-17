@@ -89,6 +89,40 @@ pub async fn add(
     Ok((StatusCode::CREATED, Json(json!(lib))))
 }
 
+/// `POST /api/v1/media/station-folder`: make the station's own media folder, with a library
+/// for shows, commercials, bumper clips and music inside it, so files can be uploaded straight
+/// from any app. Safe to repeat; folders and libraries that exist are left alone.
+pub async fn station_folder(State(s): State<AppState>) -> ApiResult<Json<Value>> {
+    let Some(data) = s.data_dir.clone() else {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "this server has no data folder to keep media in",
+        ));
+    };
+    let mut made = Vec::new();
+    for kind in KINDS {
+        let dir = data.join("media").join(kind);
+        std::fs::create_dir_all(&dir).map_err(|e| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("could not make {}: {e}", dir.display()),
+            )
+        })?;
+        let canonical = dir.canonicalize().unwrap_or(dir);
+        let path = canonical.to_string_lossy().to_string();
+        let db = s.db();
+        let existing = tvmaster_db::list_libraries(&db)?
+            .into_iter()
+            .find(|l| l.path == path);
+        let lib = match existing {
+            Some(l) => l,
+            None => tvmaster_db::add_library(&db, &path, kind)?,
+        };
+        made.push(json!({ "id": lib.id, "path": lib.path, "kind": lib.kind }));
+    }
+    Ok(Json(json!({ "root": data.join("media").to_string_lossy(), "libraries": made })))
+}
+
 pub async fn scan(State(s): State<AppState>, Path(id): Path<i64>) -> ApiResult<Json<Value>> {
     let ffmpeg = s
         .ffmpeg
@@ -122,6 +156,8 @@ pub async fn scan(State(s): State<AppState>, Path(id): Path<i64>) -> ApiResult<J
         }
     }
 
+    // New folders may need their names tidied in lineups before the plan is redone.
+    let _ = tvmaster_db::normalize_names(&s.db());
     // Channels on autopilot pick up new and removed files right away.
     {
         let db = s.db();
@@ -727,6 +763,29 @@ mod tests {
         );
         assert!(ok("Show S01E01.srt", "commercials").is_err());
         assert!(ok("", "shows").is_err());
+    }
+
+    #[tokio::test]
+    async fn the_station_media_folder_makes_a_library_for_each_kind_and_is_safe_to_repeat() {
+        use crate::test_util::call;
+        let dir = std::env::temp_dir().join(format!("tvm-station-{}", crate::generate_token()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let state = AppState::in_memory().with_data_dir(&dir);
+        let app = router(state);
+        let (st, v) = call(&app, "POST", "/api/v1/media/station-folder", "").await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["libraries"].as_array().unwrap().len(), 4);
+        for k in ["shows", "commercials", "bumpers", "music"] {
+            assert!(dir.join("media").join(k).is_dir(), "{k} folder");
+        }
+        let (_, again) = call(&app, "POST", "/api/v1/media/station-folder", "").await;
+        assert_eq!(again["libraries"], v["libraries"], "the same libraries, none added twice");
+        let (_, libs) = call(&app, "GET", "/api/v1/libraries", "").await;
+        assert_eq!(libs.as_array().unwrap().len(), 4);
+        // No data folder, no station folder.
+        let (st, _) = call(&router(AppState::in_memory()), "POST", "/api/v1/media/station-folder", "").await;
+        assert_eq!(st, StatusCode::CONFLICT);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]

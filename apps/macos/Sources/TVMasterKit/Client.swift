@@ -466,6 +466,40 @@ public struct TVMasterClient: Sendable {
 
     public func shows() async throws -> [ShowSummary] { try await get("/shows") }
 
+    /// Make the station's own media folder on the server, with a library for each kind inside it.
+    public func createStationFolder() async throws {
+        _ = try await send("POST", "/media/station-folder")
+    }
+
+    /// Whether "season N" is split off folder names by itself.
+    public func autoCleanNames() async throws -> Bool {
+        let data = try await send("GET", "/shows/names")
+        return (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["auto_clean"] as? Bool ?? true
+    }
+
+    public func setAutoCleanNames(_ on: Bool) async throws {
+        _ = try await send("PUT", "/shows/auto-clean", body: .object(["enabled": .bool(on)]))
+    }
+
+    /// Call `shows` one show named `title` (a rename, or several shows put together).
+    public func mergeShows(_ shows: [String], title: String) async throws {
+        _ = try await send("POST", "/shows/merge", body: .object(["shows": .array(shows.map { .string($0) }), "title": .string(title)]))
+    }
+
+    /// Say which season a folder is.
+    public func setFolderSeason(raw: String, title: String, season: Int?) async throws {
+        _ = try await send("PUT", "/shows/folder", body: .object(["raw": .string(raw), "title": .string(title), "season": season.map { .number(Double($0)) } ?? .null]))
+    }
+
+    /// Forget a folder's own rule.
+    public func resetFolder(raw: String) async throws {
+        _ = try await send("POST", "/shows/folder/reset", body: .object(["raw": .string(raw)]))
+    }
+
+    public func setShowInfo(show: String, _ info: ShowInfo) async throws {
+        _ = try await send("PUT", "/shows/info", body: .object(["show": .string(show), "info": info.json]))
+    }
+
     /// Save the settings that follow `show` onto every channel (all blank = remove them).
     public func setShowSettings(show: String, _ settings: ShowDefaults) async throws {
         try await send("PUT", "/show-settings", body: .object(["show": .string(show), "settings": settings.json]))

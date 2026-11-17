@@ -240,6 +240,27 @@ export interface ShowSummary {
   files_with_tracks: number;
   /** Settings that follow this show onto every channel (null = none). */
   defaults: ShowOptions | null;
+  /** The folders (detected names) this show is made of. */
+  folders: ShowFolder[];
+  /** Description, rating, tags and poster (null = none). */
+  info: ShowInfo | null;
+}
+
+export interface ShowFolder {
+  raw: string;
+  episodes: number;
+  /** The season this folder stands for, if known. */
+  season: number | null;
+  /** A rule of your own covers it, rather than the automatic clean-up. */
+  custom: boolean;
+}
+
+export interface ShowInfo {
+  title?: string;
+  description: string;
+  rating: string;
+  tags: string[];
+  poster: string | null;
 }
 
 export interface System {

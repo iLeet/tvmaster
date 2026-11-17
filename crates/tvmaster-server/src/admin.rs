@@ -148,6 +148,7 @@ pub async fn shows(
         .collect();
     let db = s.db();
     let settings = tvmaster_db::list_show_settings(&db)?;
+    let info = tvmaster_db::list_show_info(&db)?;
     let mut shows = json!(tvmaster_db::list_shows(&db, &ids)?);
     // Attach each show's own settings (the ones that follow it onto every channel).
     if let Some(list) = shows.as_array_mut() {
@@ -158,6 +159,7 @@ pub async fn shows(
                 .find(|(n, _)| n.to_lowercase() == name)
                 .map(|(_, o)| json!(o))
                 .unwrap_or(Value::Null);
+            row["info"] = info.get(&name).map(|i| json!(i)).unwrap_or(Value::Null);
         }
     }
     Ok(Json(shows))

@@ -60,7 +60,7 @@ export function LanguageList({ value, onChange, placeholder }: { value: string[]
  * Picture & sound tab (an override for that channel only).
  */
 export function ShowSettingsRow({
-  show, ov, inheritLabel, inheritWhat, wantedAudio, onChange, badge,
+  show, ov, inheritLabel, inheritWhat, wantedAudio, onChange, badge, actions, check,
 }: {
   show: ShowSummary;
   ov: ShowOptions;
@@ -71,6 +71,10 @@ export function ShowSettingsRow({
   wantedAudio: string[];
   onChange: (p: ShowOptions) => void;
   badge?: string;
+  /** Extra buttons beside Customise. */
+  actions?: React.ReactNode;
+  /** A tick box in front of the name. */
+  check?: { on: boolean; set: (v: boolean) => void };
 }) {
   const customised = Object.values(ov).some((v) => (Array.isArray(v) ? v.length > 0 : !!v));
   const [open, setOpen] = useState(false);
@@ -79,11 +83,12 @@ export function ShowSettingsRow({
     <div className="block-card stack" style={{ gap: 8 }}>
       <div className="row wrap between">
         <div>
+          {check && <input type="checkbox" checked={check.on} onChange={(e) => check.set(e.target.checked)} aria-label={`Select ${show.name}`} style={{ marginRight: 8 }} />}
           <strong>{show.name || '(no name)'}</strong> {customised && <Badge tone="accent">{badge ?? 'custom'}</Badge>}
           <div className="small dim">{trackNote(show)}</div>
           {!audioMatches(show, wanted) && <div className="small" style={{ color: 'var(--warn)' }}>None of its audio is in {wanted.map(langName).join(' or ')}; the file's default will play.</div>}
         </div>
-        <Btn small onClick={() => setOpen(!open)}>{open ? 'Done' : customised ? 'Edit' : 'Customise'}</Btn>
+        <span className="row">{actions}<Btn small onClick={() => setOpen(!open)}>{open ? 'Done' : customised ? 'Edit' : 'Customise'}</Btn></span>
       </div>
       {open && (
         <div className="stack nest" style={{ gap: 10 }}>

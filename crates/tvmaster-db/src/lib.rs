@@ -1,7 +1,9 @@
 //! SQLite persistence: schema, connection helpers and typed queries.
 
+mod names;
 mod store;
 
+pub use names::*;
 pub use store::*;
 
 use rusqlite::Connection;
@@ -97,6 +99,20 @@ CREATE TABLE IF NOT EXISTS show_settings (
     show TEXT PRIMARY KEY,   -- lower-cased name
     name TEXT NOT NULL,
     json TEXT NOT NULL
+);
+
+-- What the station calls a detected show (and which season its folder is); several
+-- detected names with one title are one show.
+CREATE TABLE IF NOT EXISTS show_names (
+    raw    TEXT PRIMARY KEY,   -- lower-cased detected name
+    title  TEXT NOT NULL,
+    season INTEGER
+);
+
+-- Description, rating, tags, poster and visibility of a show (keyed by lower-cased title).
+CREATE TABLE IF NOT EXISTS show_info (
+    title TEXT PRIMARY KEY,
+    json  TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS tvs (
