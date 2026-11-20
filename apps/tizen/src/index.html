@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>TVMaster Guide</title>
+<meta name="viewport" content="width=1920, initial-scale=1">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body data-theme="classic">
+<!-- Video layers sit behind the web layer: AVPlay draws into the <object> on a TV,
+     the <video> (hls.js) is used in a desktop browser. -->
+<object id="av" type="application/avplayer"></object>
+
+<div id="stage">
+  <video id="vid" playsinline autoplay></video>
+  <div id="testcard" class="hide"></div>
+
+  <div id="banner" class="hide">
+    <div class="b-num" id="b-num"></div>
+    <div class="b-main">
+      <div class="b-name" id="b-name"></div>
+      <div class="b-now"><span class="b-title" id="b-title"></span><span class="b-time" id="b-time"></span></div>
+      <div class="b-bar"><i id="b-bar"></i></div>
+      <div class="b-next"><b>NEXT</b><span id="b-next"></span></div>
+    </div>
+    <div class="b-clock" id="b-clock"></div>
+  </div>
+
+  <div id="numpad" class="hide"></div>
+  <div id="toast" class="hide"></div>
+
+  <div id="guide" class="hide">
+    <div class="g-bg"></div>
+    <div class="g-pip"></div>
+    <div class="g-info">
+      <div class="gi-top">
+        <div class="gi-ch" id="gi-ch"></div>
+        <div class="gi-clock" id="gi-clock"></div>
+      </div>
+      <div class="gi-title" id="gi-title"></div>
+      <div class="gi-sub" id="gi-sub"></div>
+      <div class="gi-time" id="gi-time"></div>
+      <div class="gi-tag" id="gi-tag"></div>
+    </div>
+    <div class="g-timebar" id="g-timebar"></div>
+    <div class="g-view" id="g-view"><div class="g-rows" id="g-rows"></div></div>
+    <div class="g-hints"><b>OK</b> Watch <b>&#9664;&#9654;</b> Time <b>CH&#9650;&#9660;</b> Page <b>0-9</b> Go to channel <b>Green</b> Theme <b>Back</b> Exit guide</div>
+  </div>
+
+  <div id="settings" class="hide">
+    <div class="st-card set-card">
+      <div class="st-title">Settings</div>
+      <label for="set-server">TVMaster server</label>
+      <input id="set-server" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="10.0.0.251 or http://10.0.0.251:8787">
+      <label for="set-token">Access token <small>(only if the server asks for one)</small></label>
+      <input id="set-token" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="leave empty if viewing is open">
+      <div class="set-msg" id="set-msg"></div>
+      <div class="set-btns">
+        <button id="set-save" type="button">Save &amp; connect</button>
+        <button id="set-reset" type="button">Use built-in address</button>
+        <button id="set-cancel" type="button">Cancel</button>
+      </div>
+      <div class="set-help">&#9650;&#9660; move &nbsp; OK on a field opens the keyboard</div>
+    </div>
+  </div>
+
+  <div id="status" class="hide"><div class="st-card"><div class="st-title" id="st-title"></div><div class="st-text" id="st-text"></div></div></div>
+  <pre id="debug" class="hide"></pre>
+</div>
+
+<script src="$WEBAPIS/webapis/webapis.js"></script>
+<script src="vendor/hls.min.js"></script>
+<script src="js/config.js"></script>
+<script src="js/log.js"></script>
+<script src="js/fmt.js"></script>
+<script src="js/api.js"></script>
+<script src="js/demo.js"></script>
+<script src="js/data.js"></script>
+<script src="js/player.js"></script>
+<script src="js/keys.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/settings.js"></script>
+<script src="js/guide.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
