@@ -1,12 +1,22 @@
 import { useState } from 'react';
 import { api } from '../api';
+import { href } from '../router';
 import { isLoopback, shareHosts, shareLinks, shareSchemes, type Scheme } from '../share';
 import { useQuery } from '../live';
 import type { AuthStatus, MonitorSettings, MonitorState, SecurityStatus, System, TimezoneState } from '../types';
 import { Badge, Btn, Card, ConfirmBtn, CopyField, Field, Segmented, Spinner, Toggle, useToast } from '../ui';
 import { Backups } from './Backups';
 
-export function Settings() {
+const TABS: { id: string; label: string }[] = [
+  { id: 'station', label: 'Station' },
+  { id: 'devices', label: 'Connect devices' },
+  { id: 'alerts', label: 'Alerts' },
+  { id: 'backups', label: 'Backups' },
+  { id: 'server', label: 'Server' },
+];
+
+export function Settings({ tab: wanted }: { tab?: string }) {
+  const tab = TABS.some((t) => t.id === wanted) ? (wanted as string) : 'station';
   const sys = useQuery(() => api.get<System>('/system'));
   const auth = useQuery(() => api.get<AuthStatus>('/auth'));
   const sec = useQuery(() => api.get<SecurityStatus>('/security'));
@@ -57,10 +67,13 @@ export function Settings() {
 
   return (
     <div className="page">
-      <div className="page-head"><h1>Settings</h1><span className="sub">Connect players, tuners and apps</span></div>
+      <div className="page-head"><h1>Settings</h1></div>
+      <div className="tabs" role="tablist">
+        {TABS.map((t) => <a key={t.id} role="tab" className={tab === t.id ? 'on' : ''} href={href(t.id === 'station' ? 'settings' : `settings/${t.id}`)}>{t.label}</a>)}
+      </div>
 
-      <Card className="stack">
-        <h2>Share</h2>
+      {tab === 'devices' && <Card className="stack">
+        <h2>Connect devices</h2>
         <p className="small dim">Addresses to give other apps, TVs and phones. Pick how they will reach this server.</p>
         <div className="row wrap" style={{ alignItems: 'flex-end' }}>
           {hosts.length > 1 && (
@@ -100,9 +113,9 @@ export function Settings() {
         <h3>Browser and phone</h3>
         <p className="small dim">On a phone, open the remote and use “Add to Home Screen” to keep it like an app.</p>
         {links.web.map((l) => <CopyField key={l.id} label={l.label} value={l.value} />)}
-      </Card>
+      </Card>}
 
-      <Card className="stack">
+      {tab === 'station' && <Card className="stack">
         <h2>Time zone</h2>
         <p className="small dim">Every schedule, the guide and the clock on screen use this. It starts as the server's own zone; if that is not where you are (a server in a container is often on UTC), set it here.</p>
         {!tz.data ? <Spinner /> : (
@@ -120,10 +133,10 @@ export function Settings() {
             {tz.data.channels_elsewhere.length > 0 && <p className="small" style={{ color: 'var(--warn)' }}>{tz.data.channels_elsewhere.map((c) => `${c.name} (${c.zone})`).join(', ')} {tz.data.channels_elsewhere.length === 1 ? 'is' : 'are'} in another zone.</p>}
           </>
         )}
-      </Card>
+      </Card>}
 
-      <Card className="stack">
-        <h2>Watching and alerts</h2>
+      {tab === 'station' && <Card className="stack">
+        <h2>New episodes</h2>
         {!monitor.data ? <Spinner /> : (
           <>
             <Field label="Look for new episodes" hint="Re-reads every library's folder so files you add (or remove) show up by themselves. Only what changed is read, and a file is left alone until it has stopped being copied.">
@@ -133,7 +146,16 @@ export function Settings() {
               </select>
             </Field>
             <div><Btn onClick={() => attempt(async () => { const r = await api.post<{ added: number; removed: number; back: number; unreachable: number }>('/monitor/rescan'); return r; }, 'Libraries re-read').then(() => monitor.reload())}>Re-read every library now</Btn></div>
-            <Toggle checked={monitor.data.settings.alerts} onChange={(v) => saveMonitor({ alerts: v })} label={<span>Tell me when something goes wrong <span className="dim small">a library that goes offline, a channel that keeps failing, FFmpeg missing</span></span>} />
+          </>
+        )}
+      </Card>}
+
+      {tab === 'alerts' && <Card className="stack">
+        <h2>Alerts</h2>
+        <p className="small dim">Told about problems before the family is: a drive that goes offline, a channel that keeps failing, FFmpeg missing.</p>
+        {!monitor.data ? <Spinner /> : (
+          <>
+            <Toggle checked={monitor.data.settings.alerts} onChange={(v) => saveMonitor({ alerts: v })} label="Tell me when something goes wrong" />
             {monitor.data.settings.alerts && (
               <div className="stack nest">
                 <Field label="Also send alerts to a web address" hint="ntfy, Slack, Discord, Home Assistant and similar take a POST. Leave blank to see alerts only here and in the app.">
@@ -151,9 +173,9 @@ export function Settings() {
             {monitor.data.alerts.length === 0 ? <p className="small dim">Nothing is wrong right now.</p> : monitor.data.alerts.map((a) => <p key={a.id} className="small" style={{ color: 'var(--warn)' }}><strong>{a.title}.</strong> {a.detail}</p>)}
           </>
         )}
-      </Card>
+      </Card>}
 
-      <Card className="stack">
+      {tab === 'server' && <Card className="stack">
         <h2>Access token</h2>
         <p className="small dim">Optional. With a token on, every app, TV and browser must present it; with it off, anyone on your network can use and change this server.</p>
         {!sec.data ? <Spinner /> : sec.data.locked ? (
@@ -196,9 +218,9 @@ export function Settings() {
             {sec.data.enabled && net && !net.tls.enabled && <p className="small" style={{ color: 'var(--warn)' }}>HTTPS is off, so the token crosses your network unencrypted.</p>}
           </>
         )}
-      </Card>
+      </Card>}
 
-      {net?.tls.enabled && (
+      {tab === 'server' && net?.tls.enabled && (
         <Card className="stack">
           <h2>HTTPS certificate</h2>
           <p className="small dim">{net.tls.self_signed
@@ -207,17 +229,17 @@ export function Settings() {
           {net.tls.fingerprint && <CopyField label="SHA-256 fingerprint" value={net.tls.fingerprint} />}
         </Card>
       )}
-      {net && !net.tls.enabled && (
+      {tab === 'server' && net && !net.tls.enabled && (
         <Card className="stack">
           <h2>HTTPS</h2>
           <p className="small dim">HTTPS is off, so the access token crosses your network unencrypted. Turn it on with <span className="mono">tvmaster serve --tls</span> (or <span className="mono">TVMASTER_TLS=1</span>). It uses a self-signed certificate unless you give it <span className="mono">--tls-cert</span> and <span className="mono">--tls-key</span>.</p>
         </Card>
       )}
 
-      <Backups />
+      {tab === 'backups' && <Backups />}
 
-      <Card className="stack">
-        <h2>Server</h2>
+      {tab === 'server' && <Card className="stack">
+        <h2>This server</h2>
         {!s ? <Spinner /> : (
           <table className="table">
             <tbody>
@@ -235,7 +257,7 @@ export function Settings() {
           {auth.data?.required && <Btn onClick={() => attempt(() => api.post('/auth/logout')).then(() => location.reload())}>Sign out</Btn>}
           <ConfirmBtn label="Restart the server" confirm="Restart the server now? Every channel stops for about ten seconds. It comes back by itself when it runs in Docker, as a service, or as the Linux or Windows package; started by hand it just stops." onConfirm={() => attempt(() => api.post('/server/restart'), 'Restarting… the page reconnects in a moment')} />
         </div>
-      </Card>
+      </Card>}
     </div>
   );
 }

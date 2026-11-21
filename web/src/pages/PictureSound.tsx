@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { emptyOptions, setShowOption, showOverride } from '../options';
 import type { ChannelOptions, Corner, ShowSummary, System } from '../types';
-import { Badge, Card, ConfirmBtn, Field, Segmented, Toggle } from '../ui';
+import { Badge, Card, ConfirmBtn, Field, More, Segmented, Toggle } from '../ui';
 import { OffAirEditor } from './OffAir';
 import { PictureField } from '../PictureField';
 import { ThemePreview, emptyChoice, useThemeCatalogue } from '../ThemePicker';
@@ -41,76 +41,30 @@ export function PictureSound({
 
   if (testOnly) return <div className="stack gap-lg"><OffAirEditor options={o} onChange={onChange} intro="What this channel shows, all the time. For a station card, add your own words; or use a picture of your own. (To make an ordinary channel go off the air at night, use its Programming tab.)" /></div>;
 
+
   return (
     <div className="stack gap-lg">
       <div className="row"><span className="small dim grow">Everything on this tab applies to this channel; per-show settings override it.</span>
         <ConfirmBtn small label="Reset to defaults" confirm="Audio, subtitles, picture and graphics go back to their defaults. Per-show settings are kept." onConfirm={() => onChange({ ...emptyOptions(), shows: o.shows })} /></div>
-      <Card className="stack">
-        <div><h2>Audio</h2><p className="small dim">Many files carry several audio tracks (original and dubbed languages, commentary). The channel picks one for every programme.</p></div>
-        <Field label="Preferred languages" hint="In order. The first one a file has is used; if none match, the file's own default track plays. Commentary and audio-description tracks are skipped unless they are all there is.">
-          <LanguageList value={o.audio.languages} onChange={(languages) => patch('audio', { languages })} placeholder="Any (the file's default)" />
-        </Field>
-        <div className="row wrap">
-          <Toggle checked={o.audio.avoid_commentary} onChange={(v) => patch('audio', { avoid_commentary: v })} label="Skip commentary tracks" />
-          <Toggle checked={o.audio.avoid_description} onChange={(v) => patch('audio', { avoid_description: v })} label="Skip audio description" />
-        </div>
-        <Field label="Volume levelling" hint={{ off: 'Leave levels as they are.', light: 'Gentle automatic levelling: cheap on the CPU.', broadcast: 'EBU R128 broadcast loudness: shows and commercials come out equally loud.' }[o.audio.loudness]}>
-          <Segmented value={o.audio.loudness} options={[{ value: 'off', label: 'Off' }, { value: 'light', label: 'Light' }, { value: 'broadcast', label: 'Broadcast' }]} onChange={(loudness) => patch('audio', { loudness })} />
-        </Field>
-        <div className="row wrap">
-          <Toggle checked={o.audio.night_mode} onChange={(v) => patch('audio', { night_mode: v })} label={<span>Night mode <span className="dim small">quieter explosions, clearer speech</span></span>} />
-          <Toggle checked={o.audio.dialogue_boost} onChange={(v) => patch('audio', { dialogue_boost: v })} label={<span>Dialogue boost <span className="dim small">surround sources only</span></span>} />
-          <Toggle checked={o.audio.mono} onChange={(v) => patch('audio', { mono: v })} label={<span>Mono <span className="dim small">one speaker, like an old set</span></span>} />
-        </div>
-      </Card>
 
       <Card className="stack">
-        <div><h2>Subtitles</h2><p className="small dim">Subtitles are burned into the picture, so every TV, phone and IPTV app shows them. They come from the video file or from a subtitle file beside it (<span className="mono">Show S01E01.en.srt</span>).</p></div>
-        {noLibass && (
-          <div className="err-banner">This server's FFmpeg cannot draw text subtitles (it was built without libass). Subtitles that are pictures (many Blu-ray and DVD rips) still work. Install a full FFmpeg build for text ones; <span className="mono">tvmaster doctor</span> shows what yours has.</div>
-        )}
-        <Field label="When to show them" hint={SUB_MODES.find((m) => m.value === o.subtitles.mode)?.help}>
+        <div><h2>The basics</h2><p className="small dim">The three things most people change. Everything else is under More options below.</p></div>
+        <Field label="Picture quality" hint="Lower sizes suit old TVs, slow networks and small servers. 720p is a good all-round choice.">
+          <Segmented value={o.video.quality} options={[{ value: '480', label: '480p (smallest)' }, { value: '720', label: '720p' }, { value: '1080', label: '1080p (sharpest)' }]} onChange={(quality) => patch('video', { quality })} />
+        </Field>
+        <Field label="Subtitles" hint={SUB_MODES.find((m) => m.value === o.subtitles.mode)?.help}>
           <Segmented value={o.subtitles.mode} options={SUB_MODES} onChange={(mode) => patch('subtitles', { mode })} />
         </Field>
-        {o.subtitles.mode !== 'off' && (
-          <>
-            <Field label="Subtitle languages" hint="In order. Blank = the same as your audio languages.">
-              <LanguageList value={o.subtitles.languages} onChange={(languages) => patch('subtitles', { languages })} placeholder="Same as audio" />
-            </Field>
-            <div className="row wrap">
-              <Field label="Size"><Segmented value={o.subtitles.size} options={[{ value: 'small', label: 'Small' }, { value: 'medium', label: 'Medium' }, { value: 'large', label: 'Large' }]} onChange={(size) => patch('subtitles', { size })} /></Field>
-              <Field label="Style"><Segmented value={o.subtitles.style} options={[{ value: 'outline', label: 'Outline' }, { value: 'box', label: 'Caption box' }]} onChange={(style) => patch('subtitles', { style })} /></Field>
-            </div>
-          </>
+        {noLibass && o.subtitles.mode !== 'off' && (
+          <div className="err-banner">This server's FFmpeg cannot draw text subtitles (it was built without libass). Subtitles that are pictures (many Blu-ray and DVD rips) still work. Install a full FFmpeg build for text ones; <span className="mono">tvmaster doctor</span> shows what yours has.</div>
         )}
-      </Card>
-
-      <Card className="stack">
-        <div><h2>Picture</h2><p className="small dim">How everything on this channel is shaped and styled before it is streamed.</p></div>
-        <div className="row wrap" style={{ alignItems: 'flex-start' }}>
-          <Field label="Quality" hint="Lower sizes suit old TVs and slow networks.">
-            <Segmented value={o.video.quality} options={[{ value: '480', label: '480p' }, { value: '720', label: '720p' }, { value: '1080', label: '1080p' }]} onChange={(quality) => patch('video', { quality })} />
-          </Field>
-          <Field label="Frame rate" hint="Blank = 30.">
-            <input className="input num" type="number" min={15} max={60} placeholder="30" value={o.video.fps ?? ''} onChange={(e) => patch('video', { fps: e.target.value ? Number(e.target.value) : null })} />
-          </Field>
-          <Field label="Bitrate (kbit/s)" hint="Blank = the quality's default.">
-            <input className="input num" type="number" min={300} max={40000} step={100} placeholder="auto" value={o.video.kbps ?? ''} onChange={(e) => patch('video', { kbps: e.target.value ? Number(e.target.value) : null })} />
-          </Field>
-        </div>
-        <Field label="Screen shape" hint={ASPECTS.find((a) => a.value === o.video.aspect)?.help}>
-          <Segmented value={o.video.aspect} options={ASPECTS} onChange={(aspect) => patch('video', { aspect })} />
-        </Field>
-        <Field label="Deinterlacing" hint="Old broadcast video is interlaced and shows combing on moving edges.">
-          <Segmented value={o.video.deinterlace} options={[{ value: 'auto', label: 'When the file says so' }, { value: 'always', label: 'Always' }, { value: 'off', label: 'Never' }]} onChange={(deinterlace) => patch('video', { deinterlace })} />
-        </Field>
-        <Field label="Look" hint={LOOKS.find((l) => l.value === o.video.look)?.help}>
-          <Segmented value={o.video.look} options={LOOKS} onChange={(look) => patch('video', { look })} />
+        <Field label="Even out loud and quiet" hint={{ off: 'Leave levels as they are.', light: 'Gentle automatic levelling: cheap on the processor.', broadcast: 'Broadcast loudness: shows and commercials come out equally loud.' }[o.audio.loudness]}>
+          <Segmented value={o.audio.loudness} options={[{ value: 'off', label: 'Off' }, { value: 'light', label: 'Light' }, { value: 'broadcast', label: 'Broadcast' }]} onChange={(loudness) => patch('audio', { loudness })} />
         </Field>
       </Card>
 
       <Card className="stack">
-        <div><h2>On-screen graphics</h2><p className="small dim">The little touches that make it feel like a station.</p></div>
+        <div><h2>On-screen extras</h2><p className="small dim">The little touches that make it feel like a station. Turn one on to see its options.</p></div>
         <Toggle checked={o.overlay.bug.enabled} onChange={(v) => patch('overlay', { bug: { ...o.overlay.bug, enabled: v } })} label={<span><strong>Channel logo</strong> <span className="dim">in a corner of the picture</span></span>} />
         {o.overlay.bug.enabled && (
           <div className="row wrap nest" style={{ alignItems: 'flex-end' }}>
@@ -132,10 +86,6 @@ export function PictureSound({
             {noDrawtext && <Badge tone="warn">needs FFmpeg with drawtext (this one has none, so no clock appears)</Badge>}
           </div>
         )}
-      </Card>
-
-      <Card className="stack">
-        <div><h2>Ticker</h2><p className="small dim">A strip of scrolling text across the picture, like a news channel's crawl: station notices, headlines from a news feed, and what is on next.</p></div>
         <Toggle checked={o.overlay.ticker.enabled} onChange={(v) => patch('overlay', { ticker: { ...o.overlay.ticker, enabled: v } })} label={<strong>Show a ticker</strong>} />
         {o.overlay.ticker.enabled && (() => {
           const tk = o.overlay.ticker;
@@ -159,8 +109,58 @@ export function PictureSound({
         })()}
       </Card>
 
-      <Card className="stack">
-        <div><h2>Per-show settings</h2><p className="small dim">Some shows want different treatment: anime in Japanese with English subtitles, a sitcom plain, a 1950s serial in black and white. A setting here applies on this channel only and beats both the channel's settings and anything set for the show on the Shows page.</p></div>
+      <More summary="languages, subtitle style, frame rate, screen shape, look, per-show settings">
+        <div className="stack">
+          <div><strong>Audio</strong><p className="small dim">Many files carry several audio tracks (original and dubbed languages, commentary). The channel picks one for every programme.</p></div>
+        <Field label="Preferred languages" hint="In order. The first one a file has is used; if none match, the file's own default track plays. Commentary and audio-description tracks are skipped unless they are all there is.">
+          <LanguageList value={o.audio.languages} onChange={(languages) => patch('audio', { languages })} placeholder="Any (the file's default)" />
+        </Field>
+        <div className="row wrap">
+          <Toggle checked={o.audio.avoid_commentary} onChange={(v) => patch('audio', { avoid_commentary: v })} label="Skip commentary tracks" />
+          <Toggle checked={o.audio.avoid_description} onChange={(v) => patch('audio', { avoid_description: v })} label="Skip audio description" />
+        </div>
+        <div className="row wrap">
+          <Toggle checked={o.audio.night_mode} onChange={(v) => patch('audio', { night_mode: v })} label={<span>Night mode <span className="dim small">quieter explosions, clearer speech</span></span>} />
+          <Toggle checked={o.audio.dialogue_boost} onChange={(v) => patch('audio', { dialogue_boost: v })} label={<span>Dialogue boost <span className="dim small">surround sources only</span></span>} />
+          <Toggle checked={o.audio.mono} onChange={(v) => patch('audio', { mono: v })} label={<span>Mono <span className="dim small">one speaker, like an old set</span></span>} />
+        </div>
+        </div>
+        <div className="stack">
+          <div><strong>Subtitles</strong><p className="small dim">Subtitles are burned into the picture, so every TV, phone and IPTV app shows them. They come from the video file or from a subtitle file beside it (<span className="mono">Show S01E01.en.srt</span>).</p></div>
+          {o.subtitles.mode === 'off' ? <p className="small dim">Subtitles are off. Choose when to show them under The basics.</p> : (
+            <>
+            <Field label="Subtitle languages" hint="In order. Blank = the same as your audio languages.">
+              <LanguageList value={o.subtitles.languages} onChange={(languages) => patch('subtitles', { languages })} placeholder="Same as audio" />
+            </Field>
+            <div className="row wrap">
+              <Field label="Size"><Segmented value={o.subtitles.size} options={[{ value: 'small', label: 'Small' }, { value: 'medium', label: 'Medium' }, { value: 'large', label: 'Large' }]} onChange={(size) => patch('subtitles', { size })} /></Field>
+              <Field label="Style"><Segmented value={o.subtitles.style} options={[{ value: 'outline', label: 'Outline' }, { value: 'box', label: 'Caption box' }]} onChange={(style) => patch('subtitles', { style })} /></Field>
+            </div>
+            </>
+          )}
+        </div>
+        <div className="stack">
+          <div><strong>Picture</strong><p className="small dim">How everything on this channel is shaped and styled before it is streamed.</p></div>
+        <div className="row wrap" style={{ alignItems: 'flex-start' }}>
+          <Field label="Frame rate" hint="Blank = 30.">
+            <input className="input num" type="number" min={15} max={60} placeholder="30" value={o.video.fps ?? ''} onChange={(e) => patch('video', { fps: e.target.value ? Number(e.target.value) : null })} />
+          </Field>
+          <Field label="Bitrate (kbit/s)" hint="Blank = the quality's default.">
+            <input className="input num" type="number" min={300} max={40000} step={100} placeholder="auto" value={o.video.kbps ?? ''} onChange={(e) => patch('video', { kbps: e.target.value ? Number(e.target.value) : null })} />
+          </Field>
+        </div>
+        <Field label="Screen shape" hint={ASPECTS.find((a) => a.value === o.video.aspect)?.help}>
+          <Segmented value={o.video.aspect} options={ASPECTS} onChange={(aspect) => patch('video', { aspect })} />
+        </Field>
+        <Field label="Deinterlacing" hint="Old broadcast video is interlaced and shows combing on moving edges.">
+          <Segmented value={o.video.deinterlace} options={[{ value: 'auto', label: 'When the file says so' }, { value: 'always', label: 'Always' }, { value: 'off', label: 'Never' }]} onChange={(deinterlace) => patch('video', { deinterlace })} />
+        </Field>
+        <Field label="Look" hint={LOOKS.find((l) => l.value === o.video.look)?.help}>
+          <Segmented value={o.video.look} options={LOOKS} onChange={(look) => patch('video', { look })} />
+        </Field>
+        </div>
+        <div className="stack">
+          <div><strong>Per-show settings</strong><p className="small dim">Some shows want different treatment: anime in Japanese with English subtitles, a sitcom plain, a 1950s serial in black and white. A setting here applies on this channel only and beats both the channel's settings and anything set for the show on the Shows page.</p></div>
         {staleLibraries && <p className="small" style={{ color: 'var(--warn)' }}>Some files were scanned before audio and subtitle tracks were read. Re-scan the libraries (Libraries page) to see their languages.</p>}
         {shows.length > 8 && <input className="input" style={{ maxWidth: 280 }} placeholder="Filter shows…" value={showFilter} onChange={(e) => setShowFilter(e.target.value)} />}
         {shows.length === 0 && <p className="small dim">No shows in the libraries yet.</p>}
@@ -178,7 +178,8 @@ export function PictureSound({
             />
           ))}
         </div>
-      </Card>
+        </div>
+      </More>
     </div>
   );
 }

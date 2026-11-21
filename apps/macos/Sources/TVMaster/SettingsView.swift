@@ -15,6 +15,87 @@ struct SettingsView: View {
         @Bindable var model = model
         TabView {
             Form {
+                Section("Time zone") {
+                    if let tz = model.timezone {
+                        LabeledContent("Station time zone", value: tz.zone)
+                        Text(tz.source == "setting" ? "Chosen by you." : tz.source == "environment" ? "From the server's TZ setting." : "Automatic: the server machine's own zone. A server in a container is often on UTC.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Toggle("Move every channel's schedule into the zone I choose", isOn: $tzApplyAll)
+                        HStack {
+                            if tz.zone != TimeZone.current.identifier {
+                                Button("Use this Mac's: \(TimeZone.current.identifier)") { Task { await model.setTimezone(TimeZone.current.identifier, applyToChannels: tzApplyAll) } }.glassButton(prominent: true)
+                            }
+                            if tz.source == "setting" { Button("Back to automatic") { Task { await model.setTimezone(nil, applyToChannels: tzApplyAll) } }.glassButton() }
+                        }
+                        if !tz.channelsElsewhere.isEmpty {
+                            Label(tz.channelsElsewhere.map { "\($0.name) (\($0.zone))" }.joined(separator: ", ") + " in another zone", systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange)
+                        }
+                    } else { Text("Connect to a server to set its time zone.").font(.caption).foregroundStyle(.secondary) }
+                }
+                Section("New episodes") {
+                    if let m = model.monitor {
+                        Picker("Look for new episodes", selection: Binding(get: { m.settings.watchMinutes }, set: { v in var s = m.settings; s.watchMinutes = v; Task { await model.saveMonitor(s) } })) {
+                            Text("Only when I ask").tag(0)
+                            ForEach([5, 10, 15, 30, 60, 120, 360], id: \.self) { Text($0 >= 60 ? "Every \($0 / 60) hour\($0 > 60 ? "s" : "")" : "Every \($0) minutes").tag($0) }
+                        }
+                        Text("Re-reads every library's folder so files you add or remove show up by themselves. Only what changed is read.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Button("Re-read every library now") { Task { _ = await model.run { try await model.client!.rescanAllLibraries() }; await model.refreshAll() } }.glassButton()
+                    } else {
+                        Text("Connect to a server to manage monitoring.").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .formStyle(.grouped).tabItem { Label("Station", systemImage: "antenna.radiowaves.left.and.right") }
+
+            Form {
+                Section("This Mac as a TV") {
+                    Toggle("Let a remote control this Mac's Watch screen", isOn: $model.macIsTV)
+                    Text("Shows up under TVs as “\(Host.current().localizedName ?? "This Mac")” and follows channel changes from your phone or the web admin.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Section("Links for other apps and devices") {
+                    Text("Playlists, guide, tuner address and a phone-remote QR code live under Share in the sidebar.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Button("Open Share") { model.selection = .share }.glassButton()
+                }
+            }
+            .formStyle(.grouped).tabItem { Label("Connect devices", systemImage: "tv.and.mediabox") }
+
+            Form {
+                Section("Alerts") {
+                    Text("Told about problems before the family is: a drive that goes offline, a channel that keeps failing, FFmpeg missing.").font(.caption).foregroundStyle(.secondary)
+                    if let m = model.monitor {
+                        Toggle("Tell me when something goes wrong", isOn: Binding(get: { m.settings.alerts }, set: { v in var s = m.settings; s.alerts = v; Task { await model.saveMonitor(s) } }))
+                        if m.settings.alerts {
+                            TextField("Also send alerts to a web address", text: $webhookText, prompt: Text("https://ntfy.sh/my-tv-station"))
+                                .font(.body.monospaced())
+                                .onSubmit { var s = m.settings; s.webhook = webhookText.trimmingCharacters(in: .whitespaces); Task { await model.saveMonitor(s) } }
+                                .onAppear { webhookText = m.settings.webhook ?? "" }
+                            HStack {
+                                Button("Save address") { var s = m.settings; s.webhook = webhookText.trimmingCharacters(in: .whitespaces); Task { await model.saveMonitor(s) } }.glassButton()
+                                    .disabled(webhookText.trimmingCharacters(in: .whitespaces) == (m.settings.webhook ?? ""))
+                                Button("Send a test") { Task { _ = await model.run { try await model.client!.testWebhook() } } }.glassButton().disabled((m.settings.webhook ?? "").isEmpty)
+                            }
+                            if !m.curl { Text("The server needs curl to send these, and it isn't installed there.").font(.caption).foregroundStyle(.orange) }
+                            Toggle("Plain text (for ntfy) instead of JSON", isOn: Binding(get: { m.settings.webhookText }, set: { v in var s = m.settings; s.webhookText = v; Task { await model.saveMonitor(s) } }))
+                            Toggle("Say when it is fine again", isOn: Binding(get: { m.settings.notifyRecovery }, set: { v in var s = m.settings; s.notifyRecovery = v; Task { await model.saveMonitor(s) } }))
+                        }
+                        if m.alerts.isEmpty { Text("Nothing is wrong right now.").font(.caption).foregroundStyle(.secondary) }
+                        ForEach(m.alerts) { a in Label("\(a.title). \(a.detail)", systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange) }
+                    } else {
+                        Text("Connect to a server to manage alerts.").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .formStyle(.grouped).tabItem { Label("Alerts", systemImage: "bell") }
+
+            Form {
+                BackupsSection()
+            }
+            .formStyle(.grouped).tabItem { Label("Backups", systemImage: "externaldrive") }
+
+            Form {
                 Section("Server") {
                     TextField("Address", text: $model.serverText, prompt: Text("http://127.0.0.1:8787"))
                     DisclosureGroup("Servers on my network") {
@@ -56,7 +137,6 @@ struct SettingsView: View {
                         Task { if let c = model.client { _ = await model.run { try await c.restartServer() }; try? await Task.sleep(nanoseconds: 6_000_000_000); await model.connect() } }
                     }
                 }
-                BackupsSection()
                 Section("Access token") {
                     if let sec = model.security {
                         if sec.locked {
@@ -92,63 +172,6 @@ struct SettingsView: View {
                         Text("Connect to a server to manage its access token.").font(.caption).foregroundStyle(.secondary)
                     }
                 }
-                Section("Time zone") {
-                    if let tz = model.timezone {
-                        LabeledContent("Station time zone", value: tz.zone)
-                        Text(tz.source == "setting" ? "Chosen by you." : tz.source == "environment" ? "From the server's TZ setting." : "Automatic: the server machine's own zone. A server in a container is often on UTC.")
-                            .font(.caption).foregroundStyle(.secondary)
-                        Toggle("Move every channel's schedule into the zone I choose", isOn: $tzApplyAll)
-                        HStack {
-                            if tz.zone != TimeZone.current.identifier {
-                                Button("Use this Mac's: \(TimeZone.current.identifier)") { Task { await model.setTimezone(TimeZone.current.identifier, applyToChannels: tzApplyAll) } }.glassButton(prominent: true)
-                            }
-                            if tz.source == "setting" { Button("Back to automatic") { Task { await model.setTimezone(nil, applyToChannels: tzApplyAll) } }.glassButton() }
-                        }
-                        if !tz.channelsElsewhere.isEmpty {
-                            Label(tz.channelsElsewhere.map { "\($0.name) (\($0.zone))" }.joined(separator: ", ") + " in another zone", systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange)
-                        }
-                    } else { Text("Connect to a server to set its time zone.").font(.caption).foregroundStyle(.secondary) }
-                }
-                Section("Watching and alerts") {
-                    if let m = model.monitor {
-                        Picker("Look for new episodes", selection: Binding(get: { m.settings.watchMinutes }, set: { v in var s = m.settings; s.watchMinutes = v; Task { await model.saveMonitor(s) } })) {
-                            Text("Only when I ask").tag(0)
-                            ForEach([5, 10, 15, 30, 60, 120, 360], id: \.self) { Text($0 >= 60 ? "Every \($0 / 60) hour\($0 > 60 ? "s" : "")" : "Every \($0) minutes").tag($0) }
-                        }
-                        Text("Re-reads every library's folder so files you add or remove show up by themselves. Only what changed is read.")
-                            .font(.caption).foregroundStyle(.secondary)
-                        Button("Re-read every library now") { Task { _ = await model.run { try await model.client!.rescanAllLibraries() }; await model.refreshAll() } }.glassButton()
-                        Toggle("Tell me when something goes wrong", isOn: Binding(get: { m.settings.alerts }, set: { v in var s = m.settings; s.alerts = v; Task { await model.saveMonitor(s) } }))
-                        if m.settings.alerts {
-                            TextField("Also send alerts to a web address", text: $webhookText, prompt: Text("https://ntfy.sh/my-tv-station"))
-                                .font(.body.monospaced())
-                                .onSubmit { var s = m.settings; s.webhook = webhookText.trimmingCharacters(in: .whitespaces); Task { await model.saveMonitor(s) } }
-                                .onAppear { webhookText = m.settings.webhook ?? "" }
-                            HStack {
-                                Button("Save address") { var s = m.settings; s.webhook = webhookText.trimmingCharacters(in: .whitespaces); Task { await model.saveMonitor(s) } }.glassButton()
-                                    .disabled(webhookText.trimmingCharacters(in: .whitespaces) == (m.settings.webhook ?? ""))
-                                Button("Send a test") { Task { _ = await model.run { try await model.client!.testWebhook() } } }.glassButton().disabled((m.settings.webhook ?? "").isEmpty)
-                            }
-                            if !m.curl { Text("The server needs curl to send these, and it isn't installed there.").font(.caption).foregroundStyle(.orange) }
-                            Toggle("Plain text (for ntfy) instead of JSON", isOn: Binding(get: { m.settings.webhookText }, set: { v in var s = m.settings; s.webhookText = v; Task { await model.saveMonitor(s) } }))
-                            Toggle("Say when it is fine again", isOn: Binding(get: { m.settings.notifyRecovery }, set: { v in var s = m.settings; s.notifyRecovery = v; Task { await model.saveMonitor(s) } }))
-                        }
-                        if m.alerts.isEmpty { Text("Nothing is wrong right now.").font(.caption).foregroundStyle(.secondary) }
-                        ForEach(m.alerts) { a in Label("\(a.title). \(a.detail)", systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange) }
-                    } else {
-                        Text("Connect to a server to manage monitoring.").font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                Section("This Mac as a TV") {
-                    Toggle("Let a remote control this Mac's Watch screen", isOn: $model.macIsTV)
-                    Text("Shows up under TVs as “\(Host.current().localizedName ?? "This Mac")” and follows channel changes from your phone or the web admin.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                Section("Links for other apps and devices") {
-                    Text("Playlists, guide, tuner address and a phone-remote QR code live under Share in the sidebar.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Button("Open Share") { model.selection = .share }.glassButton()
-                }
                 Section("Trusted certificates") {
                     let _ = model.pinsChanged
                     let pinned = model.pins.all.sorted { $0.key < $1.key }
@@ -168,7 +191,7 @@ struct SettingsView: View {
                     }
                 }
             }
-            .formStyle(.grouped).tabItem { Label("General", systemImage: "gearshape") }
+            .formStyle(.grouped).tabItem { Label("Server", systemImage: "server.rack") }
 
             Form {
                 Section("Local server") {
@@ -193,11 +216,6 @@ struct SettingsView: View {
                         .frame(height: 220)
                     Button("Refresh log") { Task { log = await model.daemon.logTail() } }.glassButton()
                 }
-            }
-            .formStyle(.grouped).tabItem { Label("Server", systemImage: "server.rack") }
-            .task { log = await model.daemon.logTail() }
-
-            Form {
                 Section("About") {
                     LabeledContent("TVMaster for Mac", value: "0.0.1")
                     if let s = model.system {
@@ -207,9 +225,10 @@ struct SettingsView: View {
                     Button("Open the web admin") { model.openInBrowser("/admin/") }.glassButton()
                 }
             }
-            .formStyle(.grouped).tabItem { Label("About", systemImage: "info.circle") }
+            .formStyle(.grouped).tabItem { Label("This Mac", systemImage: "desktopcomputer") }
+            .task { log = await model.daemon.logTail() }
         }
-        .frame(width: 560, height: 520)
+        .frame(width: 600, height: 560)
     }
 
     private func describe(_ s: DaemonSupervisor.State) -> String {

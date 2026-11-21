@@ -441,45 +441,19 @@ struct PictureSoundForm: View {
                 }
             }
             if !testOnly {
-            Section("Audio") {
-                LanguageList(title: "Preferred languages", empty: "Any (the file's default track)", languages: $ps.audioLanguages)
-                Toggle("Skip commentary tracks", isOn: $ps.avoidCommentary)
-                Toggle("Skip audio description (the narrated-picture tracks)", isOn: $ps.avoidDescription)
-                Picker("Volume levelling", selection: $ps.loudness) { ForEach(PictureSoundSettings.loudnessModes, id: \.value) { Text($0.label).tag($0.value) } }
-                Toggle("Night mode (quieter explosions, clearer speech)", isOn: $ps.nightMode)
-                Toggle("Dialogue boost (surround sources)", isOn: $ps.dialogueBoost)
-                Toggle("Mono, like an old set", isOn: $ps.mono)
-            }
-            Section("Subtitles") {
-                if let ff = sys?.ffmpeg, ff.hasSubtitles == false {
+            Section("The basics") {
+                Text("The three things most people change. Everything else is under More options below.").font(.caption).foregroundStyle(.secondary)
+                Picker("Picture quality", selection: $ps.quality) { ForEach(PictureSoundSettings.qualities, id: \.value) { Text($0.label).tag($0.value) } }
+                Text("Lower sizes suit old TVs, slow networks and small servers. 720p is a good all-round choice.").font(.caption).foregroundStyle(.secondary)
+                if let ff = sys?.ffmpeg, ff.hasSubtitles == false, ps.subtitleMode != "off" {
                     Label("This server's FFmpeg can't draw text subtitles (no libass). Picture subtitles still work.", systemImage: "exclamationmark.triangle.fill")
                         .font(.caption).foregroundStyle(.orange)
                 }
-                Picker("Show them", selection: $ps.subtitleMode) { ForEach(PictureSoundSettings.subtitleModes, id: \.value) { Text($0.label).tag($0.value) } }
-                if ps.subtitleMode != "off" {
-                    LanguageList(title: "Subtitle languages", empty: "Same as audio", languages: $ps.subtitleLanguages)
-                    Picker("Size", selection: $ps.subtitleSize) { Text("Small").tag("small"); Text("Medium").tag("medium"); Text("Large").tag("large") }
-                    Picker("Style", selection: $ps.subtitleStyle) { Text("Outline").tag("outline"); Text("Caption box").tag("box") }
-                }
+                Picker("Subtitles", selection: $ps.subtitleMode) { ForEach(PictureSoundSettings.subtitleModes, id: \.value) { Text($0.label).tag($0.value) } }
+                Picker("Even out loud and quiet", selection: $ps.loudness) { ForEach(PictureSoundSettings.loudnessModes, id: \.value) { Text($0.label).tag($0.value) } }
             }
-            Section("Picture") {
-                Picker("Quality", selection: $ps.quality) { ForEach(PictureSoundSettings.qualities, id: \.value) { Text($0.label).tag($0.value) } }
-                Picker("Screen shape", selection: $ps.aspect) { ForEach(PictureSoundSettings.aspects, id: \.value) { Text($0.label).tag($0.value) } }
-                Picker("Look", selection: $ps.look) { ForEach(PictureSoundSettings.looks, id: \.value) { Text($0.label).tag($0.value) } }
-                TextField("Frame rate (blank = 30)", value: $ps.fps, format: .number.grouping(.never)).frame(maxWidth: 260)
-                TextField("Bitrate in kbit/s (blank = the quality's default)", value: $ps.kbps, format: .number.grouping(.never)).frame(maxWidth: 360)
-            }
-            Section("Look") {
-                Toggle("Follow the station theme", isOn: Binding(get: { ps.theme == nil }, set: { ps.theme = $0 ? nil : ThemeChoice() }))
-                if ps.theme != nil {
-                    let t = Binding(get: { ps.theme ?? ThemeChoice() }, set: { ps.theme = $0 })
-                    ThemeChoiceEditorView(choice: t, autoName: "Per channel", autoAbout: "Colours made from this channel.")
-                    ThemePreviewView(choice: ps.theme ?? ThemeChoice(), what: "card", id: channelID, name: channelName, number: channelNumber)
-                } else {
-                    Text("Cards, break screens, the stand-by screen, alerts and on-screen graphics use the look chosen under Appearance.").font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            Section("On-screen graphics") {
+            Section("On-screen extras") {
+                Text("The little touches that make it feel like a station.").font(.caption).foregroundStyle(.secondary)
                 Toggle("Channel logo in a corner", isOn: $ps.bugEnabled)
                 if ps.bugEnabled {
                     TextField("Logo text", text: $ps.bugText, prompt: Text("Channel number and name"))
@@ -507,8 +481,41 @@ struct PictureSoundForm: View {
                 }
             }
             Section {
+                MoreOptions(summary: "languages, subtitle style, frame rate, screen shape, look, this channel's colours") {
+                    Text("Audio").font(.headline)
+                LanguageList(title: "Preferred languages", empty: "Any (the file's default track)", languages: $ps.audioLanguages)
+                Toggle("Skip commentary tracks", isOn: $ps.avoidCommentary)
+                Toggle("Skip audio description (the narrated-picture tracks)", isOn: $ps.avoidDescription)
+                Toggle("Night mode (quieter explosions, clearer speech)", isOn: $ps.nightMode)
+                Toggle("Dialogue boost (surround sources)", isOn: $ps.dialogueBoost)
+                Toggle("Mono, like an old set", isOn: $ps.mono)
+                    Text("Subtitles").font(.headline)
+                    if ps.subtitleMode == "off" {
+                        Text("Subtitles are off. Choose when to show them under The basics.").font(.caption).foregroundStyle(.secondary)
+                    } else {
+                    LanguageList(title: "Subtitle languages", empty: "Same as audio", languages: $ps.subtitleLanguages)
+                    Picker("Size", selection: $ps.subtitleSize) { Text("Small").tag("small"); Text("Medium").tag("medium"); Text("Large").tag("large") }
+                    Picker("Style", selection: $ps.subtitleStyle) { Text("Outline").tag("outline"); Text("Caption box").tag("box") }
+                    }
+                    Text("Picture").font(.headline)
+                Picker("Screen shape", selection: $ps.aspect) { ForEach(PictureSoundSettings.aspects, id: \.value) { Text($0.label).tag($0.value) } }
+                Picker("Look", selection: $ps.look) { ForEach(PictureSoundSettings.looks, id: \.value) { Text($0.label).tag($0.value) } }
+                TextField("Frame rate (blank = 30)", value: $ps.fps, format: .number.grouping(.never)).frame(maxWidth: 260)
+                TextField("Bitrate in kbit/s (blank = the quality's default)", value: $ps.kbps, format: .number.grouping(.never)).frame(maxWidth: 360)
+                    Text("This channel's colours").font(.headline)
+                Toggle("Follow the station theme", isOn: Binding(get: { ps.theme == nil }, set: { ps.theme = $0 ? nil : ThemeChoice() }))
+                if ps.theme != nil {
+                    let t = Binding(get: { ps.theme ?? ThemeChoice() }, set: { ps.theme = $0 })
+                    ThemeChoiceEditorView(choice: t, autoName: "Per channel", autoAbout: "Colours made from this channel.")
+                    ThemePreviewView(choice: ps.theme ?? ThemeChoice(), what: "card", id: channelID, name: channelName, number: channelNumber)
+                } else {
+                    Text("Cards, break screens, the stand-by screen, alerts and on-screen graphics use the look chosen under Appearance.").font(.caption).foregroundStyle(.secondary)
+                }
+            Section {
                 Text("Audio and subtitle settings for individual shows (anime in Japanese with English subtitles, a show with subtitles already in the picture, …) are on the Shows page of the web admin.")
                     .font(.caption).foregroundStyle(.secondary)
+            }
+                }
             }
             }
         }

@@ -145,7 +145,7 @@ export function ChannelEditor({ id, tab, template }: { id: string; tab: string; 
     ? [['general', 'General'], ['info', 'Pages']]
     : draft.kind === 'test'
     ? [['general', 'General'], ['picture', 'Screen']]
-    : [['general', 'General'], ['programming', 'Programming'], ['picture', 'Sound & picture'], ['ads', 'Breaks']];
+    : [['general', 'General'], ['programming', 'Programming'], ['picture', 'Picture & sound'], ['ads', 'Breaks']];
   const goTab = (t: string) => navigate(isNew ? `channels/new?template=${template ?? 'tv'}${t === 'general' ? '' : `&tab=${t}`}` : `channels/${id}${t === 'general' ? '' : `?tab=${t}`}`);
 
   return (
@@ -237,8 +237,8 @@ export function ChannelEditor({ id, tab, template }: { id: string; tab: string; 
           {draft.kind === 'programming' && !isNew && (
             <Card className="stack">
               <div className="row between wrap">
-                <h2 style={{ margin: 0 }}>Sound &amp; subtitles</h2>
-                <Btn small onClick={() => goTab('picture')}>Audio, subtitles and picture options…</Btn>
+                <h2 style={{ margin: 0 }}>Picture &amp; sound</h2>
+                <Btn small onClick={() => goTab('picture')}>Picture and sound options…</Btn>
               </div>
               <p className="small dim">{soundSummary(draft.options)}</p>
             </Card>

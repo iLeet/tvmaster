@@ -25,7 +25,7 @@ no year is skipped by an era filter. Delete a spot under **Made here**; it leave
   on the server). The Prelinger Archives and the Internet Archive have public-domain commercials and station
   breaks from the 1950s to the 80s; use a file's direct download link.
 - Put a year in the folder name (`Commercials/1986/`) to let channels pick an era.
-- To make anything look like it came off a tape, set the channel's **Look** to VHS or Tube TV under Sound & picture.
+- To make anything look like it came off a tape, set the channel's **Look** to VHS or Tube TV under Picture & sound (More options).
 
 ## API
 

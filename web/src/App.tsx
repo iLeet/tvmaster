@@ -123,7 +123,7 @@ function Shell() {
       page = <Appearance />;
       break;
     case 'settings':
-      page = <Settings />;
+      page = <Settings tab={route.parts[1]} />;
       break;
     default:
       page = <Dashboard />;

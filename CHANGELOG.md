@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.4.0
+
+Picture & sound and Settings, tidied the same way as Programming.
+
+- **Picture & sound opens with the basics:** picture quality, when to show subtitles, and "even out loud and quiet", then the on-screen extras (channel logo, now-playing card, clock, ticker). Audio languages, subtitle style, frame rate, bitrate, screen shape, look, the channel's own colours and per-show settings are under **More options**. The tab was called "Sound & picture".
+- **Settings is five pages instead of one long list:** *Station* (time zone, how often to look for new episodes), *Connect devices* (the addresses for IPTV apps, smart TVs, Plex/Jellyfin, browsers and phones), *Alerts* (problem alerts and the web address to send them to), *Backups*, and *Server* (access token, HTTPS, version and restart). The Mac app's Settings window has the same pages, plus *This Mac* for the server it starts itself and its log.
+- Nothing was removed: every setting is still there, one click from where it was.
+
 ## 1.3.0
 
 A simpler Programming tab, and the title card where you asked for it.

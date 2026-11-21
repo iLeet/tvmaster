@@ -166,7 +166,7 @@ export function Promos() {
         <p className="small dim">
           Bring in real ones from the era: upload files from your own tapes and downloads (Libraries → your commercials library → Upload), or give the server a direct link to a video file and it
           downloads it. The Prelinger Archives and the Internet Archive have public-domain commercials and station breaks from the 1950s to the 80s (use the file's direct download link).
-          To make anything look like it came off a tape, set the channel's Look to VHS or Tube TV under Sound &amp; picture. Put a year in the folder name, such as <span className="mono">Commercials/1986/</span>, to let channels pick an era.
+          To make anything look like it came off a tape, set the channel's Look to VHS or Tube TV under Picture &amp; sound (More options). Put a year in the folder name, such as <span className="mono">Commercials/1986/</span>, to let channels pick an era.
         </p>
         <div className="row wrap" style={{ alignItems: 'flex-end' }}>
           <Field label="Direct link to a video file"><input className="input" style={{ width: 360 }} placeholder="https://…/commercial.mp4" value={url} onChange={(e) => setUrl(e.target.value)} /></Field>

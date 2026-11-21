@@ -91,7 +91,7 @@ A look can also be set per show.
 
 ## Where the settings are
 
-In the web admin: **Sound & picture** tab of each channel (and a summary of it on the General tab), **Shows** page for per-show settings, **Screen** tab on a test channel. In the Mac app: the channel editor's Picture & sound tab (it says so when the server is too old to have these settings; the web admin is served by the server itself, so an old server shows the old pages).
+In the web admin: **Picture & sound** tab of each channel (the basics first: quality, subtitles, volume levelling and the on-screen extras; the rest under More options) (and a summary of it on the General tab), **Shows** page for per-show settings, **Screen** tab on a test channel. In the Mac app: the channel editor's Picture & sound tab (it says so when the server is too old to have these settings; the web admin is served by the server itself, so an old server shows the old pages).
 
 ## Applying changes
 
@@ -107,7 +107,7 @@ Unit tests cover track choice (languages, commentary, defaults, every subtitle m
 
 ## Ticker
 
-A strip of scrolling text across the picture, like a news channel's crawl (Sound & picture → Ticker).
+A strip of scrolling text across the picture, like a news channel's crawl (Picture & sound → On-screen extras → Ticker).
 
 - **Messages**, one per line; **Add what is on next** ("Up next: Cheers at 8:30 PM"); **News feeds** (RSS or Atom
   addresses, up to 5) whose latest headlines are added, refreshed every 15 minutes.

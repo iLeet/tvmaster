@@ -1695,7 +1695,7 @@ dependencies = [
 
 [[package]]
 name = "tvmaster-cli"
-version = "1.3.0"
+version = "1.4.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -1712,7 +1712,7 @@ dependencies = [
 
 [[package]]
 name = "tvmaster-core"
-version = "1.3.0"
+version = "1.4.0"
 dependencies = [
  "chrono",
  "chrono-tz",
@@ -1723,7 +1723,7 @@ dependencies = [
 
 [[package]]
 name = "tvmaster-db"
-version = "1.3.0"
+version = "1.4.0"
 dependencies = [
  "rusqlite",
  "serde",
@@ -1733,7 +1733,7 @@ dependencies = [
 
 [[package]]
 name = "tvmaster-media"
-version = "1.3.0"
+version = "1.4.0"
 dependencies = [
  "anyhow",
  "regex",
@@ -1745,7 +1745,7 @@ dependencies = [
 
 [[package]]
 name = "tvmaster-playout"
-version = "1.3.0"
+version = "1.4.0"
 dependencies = [
  "anyhow",
  "tokio",
@@ -1758,7 +1758,7 @@ dependencies = [
 
 [[package]]
 name = "tvmaster-render"
-version = "1.3.0"
+version = "1.4.0"
 dependencies = [
  "font8x8",
  "fontdue",
@@ -1766,7 +1766,7 @@ dependencies = [
 
 [[package]]
 name = "tvmaster-server"
-version = "1.3.0"
+version = "1.4.0"
 dependencies = [
  "axum",
  "axum-server",
