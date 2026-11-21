@@ -450,7 +450,13 @@ pub enum PipMode {
     Channel,
     /// Cycle through channels, `pip.seconds` each.
     Rotate,
+    /// Only commercials, one after another, from `pip.libraries`: a station-owned channel
+    /// ([`COMMERCIAL_CHANNEL`]) of nothing but ads plays in the window.
+    Commercials,
 }
+
+/// The id of the channel that plays only commercials, made for a guide's "Commercials only" window.
+pub const COMMERCIAL_CHANNEL: &str = "commercial-break";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -506,6 +512,9 @@ pub struct GuidePip {
     /// A name card (channel, what is on and when) beside the window.
     #[serde(default = "yes")]
     pub info: bool,
+    /// For `commercials`: which commercial libraries it plays. Empty = every commercials library.
+    #[serde(default)]
+    pub libraries: Vec<i64>,
 }
 
 fn default_pip_seconds() -> u16 {
@@ -523,6 +532,7 @@ impl Default for GuidePip {
             size: PipSize::Medium,
             audio: PipAudio::Music,
             info: true,
+            libraries: Vec::new(),
         }
     }
 }
@@ -944,6 +954,9 @@ impl GuideConfig {
         let p = &self.pip;
         if !(10..=300).contains(&p.seconds) {
             return Err("guide.pip.seconds must be 10-300".into());
+        }
+        if p.libraries.len() > 50 {
+            return Err("guide.pip.libraries: at most 50 libraries".into());
         }
         if p.channels.len() > 50 || p.channels.iter().any(|c| c.len() > 100) {
             return Err("guide.pip.channels: at most 50 channel ids".into());

@@ -321,6 +321,15 @@ OUT="$(ffmpeg -hide_banner -loglevel error -y -t 5 -i "$H/stream/bulletin/index.
 [[ "$(api "$H/iptv/guide.xml" 2>/dev/null | grep -c 'channel="bulletin"')" -ge 1 ]] && ok "and shows on the XMLTV guide" || bad "info channel in the XMLTV guide"
 api -XDELETE "$H/api/v1/channels/bulletin" >/dev/null
 
+# ---- the guide's commercials-only window ------------------------------------
+section "Guide window: commercials only"
+api -XPOST "$H/api/v1/channels" -d '{"id":"adguide","number":77,"name":"Ad Guide","kind":"guide","guide":{"pip":{"mode":"commercials","info":true}}}' >/dev/null
+[[ "$(api "$H/api/v1/channels/commercial-break" | json "d['strategy']+'/'+str(len(d['library_ids'])>0)")" == "chaos/True" ]] && ok "the station makes a Commercial Break channel from the commercials found" || bad "commercial-break channel"
+[[ "$(api "$H/api/v1/channels/commercial-break/schedule?hours=1" | json "len(d if isinstance(d,list) else d.get('items',d.get('programs',[])))>2")" == "True" ]] && ok "which has a schedule of nothing but commercials" || bad "commercial-break schedule"
+OUT="$(ffmpeg -hide_banner -loglevel error -y -t 8 -i "$H/stream/adguide/index.m3u8?token=$TOKEN" -f null - 2>&1 | grep -v 'non monotonically' | tail -2)"
+[[ -z "$OUT" ]] && ok "the guide streams with commercials playing in its window" || bad "guide with a commercials window" "$OUT"
+api -XDELETE "$H/api/v1/channels/adguide" >/dev/null
+
 # docker stop and systemd send SIGTERM: it must stop cleanly, like Ctrl-C does
 "$BIN" serve --bind "127.0.0.1:$HP2" --data-dir "$W/data3" >"$W/server4.log" 2>&1 &
 PID2=$!

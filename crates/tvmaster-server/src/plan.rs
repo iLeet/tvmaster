@@ -250,8 +250,10 @@ pub fn build_guide_with(
             .iter()
             .filter(|c| matches!(c.kind, ChannelKind::Programming | ChannelKind::Info))
     };
+    // The channel of only commercials is the guide window's, not a listing of its own (unless chosen).
+    let not_ads = |c: &&Channel| c.id != tvmaster_core::COMMERCIAL_CHANNEL;
     let listed: Vec<&Channel> = if cfg.channels.is_empty() {
-        listable().collect()
+        listable().filter(not_ads).collect()
     } else {
         cfg.channels
             .iter()
@@ -357,7 +359,7 @@ pub fn tonight_rows_in(
     let mut rows = Vec::new();
     for ch in channels
         .iter()
-        .filter(|c| c.kind == ChannelKind::Programming)
+        .filter(|c| c.kind == ChannelKind::Programming && c.id != tvmaster_core::COMMERCIAL_CHANNEL)
     {
         let progs = programs(db, &ch.id, now_ms, now_ms + 12 * 3_600_000).unwrap_or_default();
         let (now, next) = now_and_next(&progs, now_ms);

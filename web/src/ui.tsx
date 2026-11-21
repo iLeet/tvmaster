@@ -95,6 +95,43 @@ export function Toggle({ checked, onChange, label, disabled }: { checked: boolea
   );
 }
 
+// ---- basics first: "More options" folds, and one switch that opens them all -------------------------------------------
+
+const SHOW_ALL_KEY = 'tvm.showAll';
+const showAllListeners = new Set<() => void>();
+let showAllValue = (() => { try { return localStorage.getItem(SHOW_ALL_KEY) === '1'; } catch { return false; } })();
+
+/** "Show all options": every "More options" fold open on every page, remembered on this device. */
+export function useShowAll(): [boolean, (v: boolean) => void] {
+  const [, force] = useState(0);
+  useEffect(() => {
+    const f = () => force((n) => n + 1);
+    showAllListeners.add(f);
+    return () => { showAllListeners.delete(f); };
+  }, []);
+  return [showAllValue, (v: boolean) => {
+    showAllValue = v;
+    try { localStorage.setItem(SHOW_ALL_KEY, v ? '1' : '0'); } catch { /* storage unavailable */ }
+    showAllListeners.forEach((f) => f());
+  }];
+}
+
+/** The less common settings of a section, folded away until asked for (or until "Show all options" is on). */
+export function More({ title = 'More options', summary, children }: { title?: string; summary?: ReactNode; children: ReactNode }) {
+  const [all] = useShowAll();
+  const [open, setOpen] = useState(false);
+  const shown = all || open;
+  return (
+    <div className="more">
+      <button type="button" className="btn small" aria-expanded={shown} disabled={all} onClick={() => setOpen(!open)}>
+        {shown ? '▾' : '▸'} {title}
+      </button>
+      {!shown && summary && <span className="small dim" style={{ marginLeft: 10 }}>{summary}</span>}
+      {shown && <div className="stack nest" style={{ marginTop: 10 }}>{children}</div>}
+    </div>
+  );
+}
+
 export function Segmented<T extends string>({ value, options, onChange }: { value: T; options: { value: T; label: string }[]; onChange: (v: T) => void }) {
   return (
     <div className="seg" role="group">

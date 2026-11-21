@@ -34,7 +34,12 @@ const DOWNTIME_MS: i64 = 3 * 60_000;
 const HEARTBEAT_KEY: &str = "autopilot_heartbeat_ms";
 
 pub fn catalog_for(conn: &Connection, channel: &Channel) -> rusqlite::Result<Catalog> {
-    let rows = tvmaster_db::list_media_in_libraries(conn, &channel.library_ids)?;
+    // The commercials-only channel airs commercials; every other channel airs shows.
+    let rows = if channel.id == tvmaster_core::COMMERCIAL_CHANNEL {
+        tvmaster_db::list_media_of_kind(conn, &channel.library_ids, "commercials")?
+    } else {
+        tvmaster_db::list_media_in_libraries(conn, &channel.library_ids)?
+    };
     let refs: Vec<MediaRef> = rows
         .into_iter()
         .map(|m| MediaRef {

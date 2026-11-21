@@ -3,10 +3,11 @@ import { api, unauthorized } from './api';
 import { useQuery } from './live';
 import { href, useRoute } from './router';
 import type { AuthStatus } from './types';
-import { Btn, Card, Field, Icon, Spinner, ToastProvider, useToast } from './ui';
+import { Btn, Card, Field, Icon, Spinner, ToastProvider, Toggle, useShowAll, useToast } from './ui';
 import { Appearance } from './pages/Appearance';
 import { Channels } from './pages/Channels';
 import { NewChannel } from './pages/NewChannel';
+import { ChannelGuide } from './pages/ChannelGuide';
 import { Dayparts } from './pages/Dayparts';
 import { ChannelEditor } from './pages/ChannelEditor';
 import { Dashboard } from './pages/Dashboard';
@@ -20,19 +21,27 @@ import { Settings } from './pages/Settings';
 import { Setup } from './pages/Setup';
 import { Tvs } from './pages/Tvs';
 
-const NAV: { path: string; label: string; icon: string }[] = [
-  { path: 'dashboard', label: 'Home', icon: 'home' },
-  { path: 'live', label: 'Live control', icon: 'live' },
-  { path: 'channels', label: 'Channels', icon: 'channels' },
-  { path: 'schedule', label: 'Schedule', icon: 'calendar' },
-  { path: 'dayparts', label: 'Day parts', icon: 'clock' },
-  { path: 'libraries', label: 'Libraries', icon: 'folder' },
-  { path: 'shows', label: 'Shows', icon: 'tv' },
-  { path: 'promos', label: 'Promos', icon: 'play' },
-  { path: 'tvs', label: 'TVs', icon: 'tv' },
-  { path: 'remote', label: 'Remote', icon: 'remote' },
-  { path: 'appearance', label: 'Appearance', icon: 'palette' },
-  { path: 'settings', label: 'Settings', icon: 'settings' },
+const NAV: { group: string; items: { path: string; label: string; icon: string }[] }[] = [
+  { group: 'Watch', items: [
+    { path: 'dashboard', label: 'Home', icon: 'home' },
+    { path: 'live', label: 'Live control', icon: 'live' },
+    { path: 'tvs', label: 'TVs', icon: 'tv' },
+    { path: 'remote', label: 'Remote', icon: 'remote' },
+  ] },
+  { group: 'Programming', items: [
+    { path: 'channels', label: 'Channels', icon: 'channels' },
+    { path: 'schedule', label: 'Schedule', icon: 'calendar' },
+    { path: 'dayparts', label: 'Day parts', icon: 'clock' },
+  ] },
+  { group: 'Content', items: [
+    { path: 'libraries', label: 'Libraries', icon: 'folder' },
+    { path: 'shows', label: 'Shows', icon: 'tv' },
+    { path: 'promos', label: 'Promos', icon: 'play' },
+  ] },
+  { group: 'Station', items: [
+    { path: 'appearance', label: 'Appearance', icon: 'palette' },
+    { path: 'settings', label: 'Settings', icon: 'settings' },
+  ] },
 ];
 
 function Login({ onDone }: { onDone: () => void }) {
@@ -71,6 +80,7 @@ function Login({ onDone }: { onDone: () => void }) {
 
 function Shell() {
   const route = useRoute();
+  const [showAll, setShowAll] = useShowAll();
   const setup = useQuery(() => api.get<{ needed: boolean }>('/setup'));
   const [dismissed, setDismissed] = useState(false);
   const section = route.parts[0] ?? 'dashboard';
@@ -83,7 +93,7 @@ function Shell() {
       page = <Setup onDone={() => { setDismissed(true); setup.reload(); }} />;
       break;
     case 'channels':
-      page = route.parts[1] === 'new' && !route.query.get('template') ? <NewChannel /> : route.parts[1] ? <ChannelEditor key={`${route.parts[1]}-${route.query.get('template') ?? ''}`} id={route.parts[1]} tab={route.query.get('tab') ?? 'general'} template={route.query.get('template')} /> : <Channels />;
+      page = route.parts[1] === 'new' && !route.query.get('template') ? <NewChannel /> : route.parts[1] === 'new' && route.query.get('template') === 'tv' && !route.query.get('editor') ? <ChannelGuide /> : route.parts[1] ? <ChannelEditor key={`${route.parts[1]}-${route.query.get('template') ?? ''}`} id={route.parts[1]} tab={route.query.get('tab') ?? 'general'} template={route.query.get('template')} /> : <Channels />;
       break;
     case 'schedule':
       page = <Schedule channelId={route.parts[1]} />;
@@ -127,13 +137,19 @@ function Shell() {
         <div className="brand">
           <span className="logo">TV</span> TVMaster
         </div>
-        {NAV.map((n) => (
-          <a key={n.path} href={href(n.path)} className={`nav ${section === n.path ? 'active' : ''}`}>
-            <Icon name={n.icon} />
-            {n.label}
-          </a>
+        {NAV.map((g) => (
+          <div key={g.group} className="nav-group">
+            <div className="nav-head">{g.group}</div>
+            {g.items.map((n) => (
+              <a key={n.path} href={href(n.path)} className={`nav ${section === n.path ? 'active' : ''}`}>
+                <Icon name={n.icon} />
+                {n.label}
+              </a>
+            ))}
+          </div>
         ))}
         <div className="foot small dim">
+          <div style={{ marginBottom: 8 }}><Toggle checked={showAll} onChange={setShowAll} label="Show all options" /></div>
           <a href="/" target="_blank" rel="noreferrer">Open web player</a>
         </div>
       </nav>

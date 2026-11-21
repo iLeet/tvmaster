@@ -51,6 +51,8 @@ public struct GuideSettings: Equatable, Sendable {
     public var pipMode = "off"
     public var pipChannel = ""
     public var pipChannels: [String] = []
+    /// For `commercials`: which commercials libraries (empty = all of them).
+    public var pipLibraries: [Int] = []
     public var pipSeconds = 30
     public var pipPlacement = "side_right"
     public var pipSize = "medium"
@@ -131,6 +133,7 @@ public struct GuideSettings: Equatable, Sendable {
         pipMode = str(["pip", "mode"], "off")
         pipChannel = str(["pip", "channel"], "")
         pipChannels = g?.get(["pip", "channels"])?.stringArray ?? []
+        pipLibraries = (g?.get(["pip", "libraries"])?.arrayValue ?? []).compactMap(\.intValue)
         pipSeconds = int(["pip", "seconds"], 30)
         pipPlacement = str(["pip", "placement"], "side_right")
         pipSize = str(["pip", "size"], "medium")
@@ -197,6 +200,7 @@ public struct GuideSettings: Equatable, Sendable {
         o.set(["pip", "mode"], .string(pipMode))
         o.set(["pip", "channel"], opt(pipChannel))
         o.set(["pip", "channels"], strings(pipChannels))
+        o.set(["pip", "libraries"], .array(pipLibraries.map { .number(Double($0)) }))
         o.set(["pip", "seconds"], .number(Double(pipSeconds)))
         o.set(["pip", "placement"], .string(pipPlacement))
         o.set(["pip", "size"], .string(pipSize))

@@ -16,7 +16,7 @@ export function emptyGuide(): GuideConfig {
     header: { title: true, clock: true, date: true, hour12: true, logo: null },
     ticker_options: { enabled: true, speed: 'normal', now_on: true },
     channels: [],
-    pip: { mode: 'off', channel: null, channels: [], seconds: 30, placement: 'side_right', size: 'medium', audio: 'music', info: true },
+    pip: { mode: 'off', channel: null, channels: [], seconds: 30, placement: 'side_right', size: 'medium', audio: 'music', info: true, libraries: [] },
   };
 }
 

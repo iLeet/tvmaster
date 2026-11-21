@@ -332,6 +332,7 @@ fn pick_window_channel(
     match c.pip.mode {
         PipMode::Off => None,
         PipMode::Channel => c.pip.channel.clone().filter(usable),
+        PipMode::Commercials => Some(tvmaster_core::COMMERCIAL_CHANNEL.to_string()).filter(usable),
         PipMode::Rotate => {
             let all: Vec<String> = if c.pip.channels.is_empty() {
                 rows.iter().map(|r| r.id.clone()).collect()
@@ -428,8 +429,10 @@ pub(crate) async fn produce_guide(
         // nothing to show yet, is cut into runs so it moves on or tries again.
         let secs_to_frames = |s: u64| s * u64::from(GUIDE_FPS);
         let run_frames = match (config.pip.mode, pip.is_some()) {
-            (PipMode::Off, _) | (PipMode::Channel, true) => None,
-            (PipMode::Channel, false) => Some(secs_to_frames(PIP_RETRY.as_secs())),
+            (PipMode::Off, _) | (PipMode::Channel | PipMode::Commercials, true) => None,
+            (PipMode::Channel | PipMode::Commercials, false) => {
+                Some(secs_to_frames(PIP_RETRY.as_secs()))
+            }
             (PipMode::Rotate, true) => Some(secs_to_frames(u64::from(config.pip.seconds))),
             (PipMode::Rotate, false) => Some(secs_to_frames(20)),
         };
@@ -568,6 +571,10 @@ async fn run_once(
     let written = Arc::new(AtomicU64::new(0));
     let (source, id) = (spec.source.clone(), spec.id.clone());
     let look = look.clone();
+    let ad_window = spec
+        .guide
+        .as_ref()
+        .is_some_and(|g| g.config.pip.mode == PipMode::Commercials);
     let (written_w, window_w) = (written.clone(), window.clone());
     let (row_tx, mut row_rx) = mpsc::unbounded_channel::<Vec<tvmaster_render::GuideRow>>();
     let writer = StopOnDrop(tokio::spawn(async move {
@@ -600,6 +607,7 @@ async fn run_once(
                     .as_ref()
                     .and_then(|w| data.rows.iter().position(|r| &r.id == w)),
                 window_live: window_w.is_some(),
+                window_ad: window_w.is_some() && ad_window,
             };
             let (d, l) = (data.clone(), look.clone());
             let chunk = tokio::task::spawn_blocking(move || {

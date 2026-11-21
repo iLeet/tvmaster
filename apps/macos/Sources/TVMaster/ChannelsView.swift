@@ -108,6 +108,8 @@ struct ChannelEditorSheet: View {
     @State private var info = InfoSettings()
     @State private var infoOriginal = InfoSettings()
     @State private var rawInfo: JSONValue?
+    /// A new TV channel is made with the guide unless the full editor is asked for.
+    @State private var fullEditor = false
     @State private var strategy: Strategy = .sequential
     @State private var runOut: RunOut = .keepGoing
     @State private var chaos = 0.0
@@ -119,7 +121,7 @@ struct ChannelEditorSheet: View {
     @State private var confirmProgressReset = false
     @State private var loaded = false
     @State private var tab: Tab = {
-        switch ProcessInfo.processInfo.environment["TVM_EDIT_TAB"] { case "picture": .picture; case "guide": .guide; case "programming": .programming; case "info": .info; default: .general }
+        switch ProcessInfo.processInfo.environment["TVM_EDIT_TAB"] { case "picture": .picture; case "guide": .guide; case "programming": .programming; case "info": .info; case "breaks": .breaks; default: .general }
     }()
     /// The channel's picture and sound settings, read from the server's raw JSON.
     @State private var ps = PictureSoundSettings()
@@ -149,6 +151,9 @@ struct ChannelEditorSheet: View {
                 HStack { Spacer(); Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction) }.padding(16)
             }
             .frame(width: 600, height: 680)
+        } else if isNew, template?.id == "tv", !fullEditor {
+            ChannelGuideView(onFullEditor: { fullEditor = true }, onOtherKind: { template = nil })
+                .frame(width: 640, height: 700)
         } else {
             editor
         }

@@ -145,7 +145,7 @@ export interface ThemeCatalogue {
 }
 export interface AdPreset { id: string; name: string; about: string; commercials: boolean; pod_seconds: number; max_breaks: number; minutes_per_hour: number; mid_breaks: boolean }
 export interface AdOptions { presets: AdPreset[]; cards: { id: 'brb' | 'back_to' | 'up_next' | 'later_today' | 'station_id'; name: string; about: string }[] }
-export type PipMode = 'off' | 'channel' | 'rotate';
+export type PipMode = 'off' | 'channel' | 'rotate' | 'commercials';
 export type PipPlacement = 'top_left' | 'top_right' | 'side_left' | 'side_right';
 
 export interface GuideConfig {
@@ -189,6 +189,8 @@ export interface GuideConfig {
     size: 'small' | 'medium' | 'large';
     audio: 'music' | 'channel';
     info: boolean;
+    /** For commercials only: which commercials libraries (empty = all of them). */
+    libraries: number[];
   };
 }
 

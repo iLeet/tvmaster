@@ -305,4 +305,85 @@ mod tests {
         let first_id = v["templates"][1]["suggested"]["id"].as_str().unwrap();
         assert_ne!(first_id, "guide", "the guide already exists");
     }
+
+    #[tokio::test]
+    async fn a_commercials_only_window_makes_its_own_channel_and_keeps_it_out_of_the_listing() {
+        let state = AppState::in_memory();
+        let app = router(state.clone());
+        let guide = |libs: &str| {
+            format!(
+                r#"{{"id":"guide","number":2,"name":"Guide","kind":"guide","guide":{{"pip":{{"mode":"commercials","libraries":{libs}}}}}}}"#
+            )
+        };
+        // No commercials library yet: refused, with the way out.
+        let (st, r) = call(&app, "POST", "/api/v1/channels", &guide("[]")).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST);
+        assert!(
+            r["error"].as_str().unwrap().contains("commercials library"),
+            "{r}"
+        );
+        let lib = {
+            let db = state.db();
+            let lib = tvmaster_db::add_library(&db, "/media/ads", "commercials").unwrap();
+            tvmaster_db::upsert_media(
+                &db,
+                &tvmaster_db::NewMedia {
+                    library_id: lib.id,
+                    path: "/media/ads/spot.mp4".into(),
+                    duration_ms: 30_000,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            lib
+        };
+        // A shows library is not a commercials library.
+        let shows = tvmaster_db::add_library(&state.db(), "/media/tv", "shows").unwrap();
+        let (st, _) = call(
+            &app,
+            "POST",
+            "/api/v1/channels",
+            &guide(&format!("[{}]", shows.id)),
+        )
+        .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST);
+        let (st, r) = call(&app, "POST", "/api/v1/channels", &guide("[]")).await;
+        assert_eq!(st, StatusCode::CREATED, "{r}");
+        assert_eq!(r["guide"]["pip"]["mode"], "commercials");
+        let (_, ch) = call(&app, "GET", "/api/v1/channels/commercial-break", "").await;
+        assert_eq!(ch["strategy"], "chaos");
+        assert_eq!(ch["library_ids"], serde_json::json!([lib.id]));
+        // It plays the commercials, and the guide does not list it as a channel of its own.
+        let catalog = {
+            let db = state.db();
+            let ch = tvmaster_db::get_channel(&db, "commercial-break")
+                .unwrap()
+                .unwrap();
+            crate::autopilot::catalog_for(&db, &ch).unwrap()
+        };
+        assert_eq!(catalog.episode_count(), 1);
+        let data = {
+            let db = state.db();
+            crate::plan::build_guide(&db, "guide", crate::plan::now_ms()).unwrap()
+        };
+        assert!(data.rows.iter().all(|r| r.id != "commercial-break"));
+        // Choosing a library again points the channel at it, without making another.
+        let (st, _) = call(
+            &app,
+            "POST",
+            "/api/v1/channels",
+            &guide(&format!("[{}]", lib.id)),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "saving an existing guide updates it");
+        let (_, all) = call(&app, "GET", "/api/v1/channels", "").await;
+        assert_eq!(
+            all.as_array()
+                .unwrap()
+                .iter()
+                .filter(|c| c["id"] == "commercial-break")
+                .count(),
+            1
+        );
+    }
 }

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { emptyGuide, GUIDE_PRESETS, PIP_PLACEMENTS, toggleId } from '../guide';
 import { ThemePicker } from '../ThemePicker';
 import { PictureField } from '../PictureField';
+import { href } from '../router';
 import type { ChannelView, GuideConfig, Library } from '../types';
 import { Card, Chips, ConfirmBtn, Field, Segmented, Toggle } from '../ui';
 
@@ -70,6 +71,7 @@ export function GuideEditor({
   const info = channels.filter((c) => c.kind === 'info').sort((a, b) => a.number - b.number);
   const showable = channels.filter((c) => c.kind !== 'guide').sort((a, b) => a.number - b.number);
   const musicLibs = libs.filter((l) => l.kind === 'music');
+  const commercialLibs = libs.filter((l) => l.kind === 'commercials');
 
   return (
     <div className="stack gap-lg">
@@ -232,7 +234,7 @@ export function GuideEditor({
         <Field label="Show">
           <Segmented
             value={g.pip.mode}
-            options={[{ value: 'off', label: 'Nothing' }, { value: 'channel', label: 'One channel' }, { value: 'rotate', label: 'Flip through channels' }]}
+            options={[{ value: 'off', label: 'Nothing' }, { value: 'channel', label: 'One channel' }, { value: 'rotate', label: 'Flip through channels' }, { value: 'commercials', label: 'Commercials only' }]}
             onChange={(mode) => pip({ mode })}
           />
         </Field>
@@ -243,6 +245,18 @@ export function GuideEditor({
               {showable.map((c) => <option key={c.id} value={c.id}>{channelLabel(c)}</option>)}
             </select>
           </Field>
+        )}
+        {g.pip.mode === 'commercials' && (
+          <div className="stack nest">
+            <p className="small dim">The window plays commercials one after another, in random order, while the guide runs: no channel is watched, so it costs little. The card beside it says “Ad break”. It uses a channel called Commercial Break that the station makes for it (you can rename or restyle it under Channels).</p>
+            {commercialLibs.length === 0 ? (
+              <div className="err-banner">There are no commercials yet. <a href={href('libraries')}>Add a commercials library</a>, or make or download some under <a href={href('promos')}>Promos</a>.</div>
+            ) : (
+              <Field label="Which commercials" hint={g.pip.libraries.length ? 'Only these libraries.' : 'Every commercials library.'}>
+                <Chips options={commercialLibs.map((l) => ({ value: l.id, label: `${l.path.split(/[\\/]/).filter(Boolean).pop() ?? l.path} (${l.items})` }))} value={g.pip.libraries} onToggle={(lid) => pip({ libraries: g.pip.libraries.includes(lid) ? g.pip.libraries.filter((x) => x !== lid) : [...g.pip.libraries, lid] })} />
+              </Field>
+            )}
+          </div>
         )}
         {g.pip.mode === 'rotate' && (
           <>

@@ -152,6 +152,71 @@ fn valid_id(id: &str) -> bool {
         && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
 }
 
+/// The commercials libraries a window plays: the ones chosen (each must be a commercials library), or all of them.
+fn commercial_libraries(db: &rusqlite::Connection, chosen: &[i64]) -> ApiResult<Vec<i64>> {
+    let all = tvmaster_db::list_libraries(db)?;
+    let kind = |l: &tvmaster_db::Library| l.kind == "commercials" && l.enabled;
+    if chosen.is_empty() {
+        return Ok(all.iter().filter(|l| kind(l)).map(|l| l.id).collect());
+    }
+    for id in chosen {
+        if !all.iter().any(|l| l.id == *id && kind(l)) {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                format!("library {id} is not a commercials library"),
+            ));
+        }
+    }
+    Ok(chosen.to_vec())
+}
+
+/// The channel that plays only commercials, for a guide's "Commercials only" window: made when it is
+/// first needed, and pointed at the libraries the guide chose each time. Anything else about it (its
+/// name, number, look) is the station's to change.
+pub(crate) fn ensure_commercial_channel(s: &AppState, chosen: &[i64]) -> ApiResult<()> {
+    let db = s.db();
+    let libs = commercial_libraries(&db, chosen)?;
+    let channel = match tvmaster_db::get_channel(&db, tvmaster_core::COMMERCIAL_CHANNEL)? {
+        Some(mut c) => {
+            if c.library_ids == libs {
+                return Ok(());
+            }
+            c.library_ids = libs;
+            c
+        }
+        None => {
+            let taken: Vec<u32> = tvmaster_db::list_channels(&db)?
+                .iter()
+                .map(|c| c.number)
+                .collect();
+            Channel {
+                id: tvmaster_core::COMMERCIAL_CHANNEL.to_string(),
+                number: (1..).find(|n| !taken.contains(n)).unwrap_or(1),
+                name: "Commercial Break".to_string(),
+                strategy: Strategy::Chaos,
+                run_out: RunOutPolicy::ChaosFill,
+                autopilot: true,
+                chaos: 0,
+                seed: now_ms() as u64,
+                epoch_ms: now_ms(),
+                always_on: false,
+                library_ids: libs,
+                lineup: with_timezone(Lineup::default(), &crate::station::effective_timezone(&db)),
+                kind: ChannelKind::Programming,
+                group: Some("Station".to_string()),
+                guide: Default::default(),
+                info: Default::default(),
+                options: Default::default(),
+            }
+        }
+    };
+    tvmaster_db::upsert_channel(&db, &channel)?;
+    drop(db);
+    // A schedule of nothing but ads, planned fresh.
+    apply_programming_change(s, &channel, true)?;
+    Ok(())
+}
+
 /// Whether `path` is a picture file the station can draw.
 fn picture_ok(path: &str) -> bool {
     let p = std::path::Path::new(path);
@@ -317,6 +382,15 @@ pub async fn upsert(
                 }
             }
         }
+        if g.pip.mode == tvmaster_core::PipMode::Commercials {
+            let libs = commercial_libraries(&s.db(), &g.pip.libraries)?;
+            if libs.is_empty() {
+                return Err(ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    "a commercials-only window needs a commercials library: add one under Libraries (kind Commercials), or make or download some under Promos",
+                ));
+            }
+        }
         for id in &g.music_library_ids {
             match tvmaster_db::get_library(&s.db(), *id)? {
                 Some(l) if l.kind == "music" => {}
@@ -449,6 +523,11 @@ pub async fn upsert(
         (channel, existing)
     };
 
+    if channel.kind == ChannelKind::Guide
+        && channel.guide.pip.mode == tvmaster_core::PipMode::Commercials
+    {
+        ensure_commercial_channel(&s, &channel.guide.pip.libraries)?;
+    }
     let changed = existing
         .as_ref()
         .map(|e| programming_differs(e, &channel))

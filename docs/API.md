@@ -210,6 +210,7 @@ The daemon also runs an autopilot loop (every minute) that tops up every channel
 
 - Themes: see `docs/THEMES.md` (`/theme`, `/theme/preview`).
 - Day parts: see `docs/DAYPARTS.md` (`/dayparts`).
+- Guide video window: `guide.pip.mode` also takes `commercials` (with `guide.pip.libraries`); see `docs/GUIDE.md`.
 - Info channels and the channel creator: see `docs/INFO-CHANNELS.md` (`kind: "info"`, `/channel-templates`, `/info/preview`).
 - Show names, grouping and details: see `docs/SHOWS.md` (`/shows/...`, `/media/station-folder`).
 - Breaks: `GET /api/v1/ads/options` (presets and station cards), `POST /api/v1/ads/explain`

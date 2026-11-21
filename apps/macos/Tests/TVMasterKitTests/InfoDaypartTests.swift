@@ -121,3 +121,64 @@ final class InfoDaypartTests: XCTestCase {
         XCTAssertEqual(c.infoSummary, "Local news · 2 pages")
     }
 }
+
+final class ChannelGuideTests: XCTestCase {
+    private func world() -> ChannelGuideAnswers.World {
+        let classic = AdPreset(id: "classic", name: "Classic TV", about: "", commercials: true, podSeconds: 120, maxBreaks: 4, minutesPerHour: 8, midBreaks: true)
+        let none = AdPreset(id: "none", name: "None", about: "", commercials: false, podSeconds: 60, maxBreaks: 0, minutesPerHour: 0, midBreaks: false)
+        return .init(timezone: "America/Toronto", showLibraryIds: [1], commercialLibraryIds: [2], presets: [none, classic])
+    }
+
+    func testEverythingShuffledWithNoBreaksIsTheSimplestChannel() {
+        var a = ChannelGuideAnswers(); a.name = "Cartoons"; a.id = "cartoons"; a.number = 5
+        let b = a.body(world())
+        XCTAssertEqual(b["strategy"]?.stringValue, "shuffle")
+        XCTAssertEqual(b["kind"]?.stringValue, "programming")
+        XCTAssertEqual(b["library_ids"]?.arrayValue?.compactMap(\.intValue), [1])
+        XCTAssertEqual(b["lineup"]?.get(["timezone"])?.stringValue, "America/Toronto")
+        XCTAssertEqual(b["lineup"]?.get(["fill"]), .null)
+        XCTAssertEqual(b["lineup"]?.get(["ads"]), .null)
+        XCTAssertNil(b["options"], "following the station writes no look")
+    }
+
+    func testPickedShowsBecomeAPoolInTheOrderAskedAndBreaksUseTheCommercialsFound() {
+        var a = ChannelGuideAnswers(); a.name = "Kids"; a.id = "kids"; a.shows = ["Clifford", "Franklin"]; a.style = .inOrder; a.breaks = "classic"
+        let b = a.body(world())
+        XCTAssertEqual(b["strategy"]?.stringValue, "sequential")
+        XCTAssertEqual(b["lineup"]?.get(["fill", "type"])?.stringValue, "pool")
+        XCTAssertEqual(b["lineup"]?.get(["fill", "order"])?.stringValue, "sequential")
+        XCTAssertEqual(b["lineup"]?.get(["fill", "shows"])?.stringArray, ["Clifford", "Franklin"])
+        XCTAssertEqual(b["lineup"]?.get(["ads", "pod_seconds"])?.intValue, 120)
+        XCTAssertEqual(b["lineup"]?.get(["ads", "library_ids"])?.arrayValue?.compactMap(\.intValue), [2])
+    }
+
+    func testAWeeklyScheduleStartsEmptyOnAHalfHourGrid() {
+        var a = ChannelGuideAnswers(); a.name = "Week"; a.id = "week"; a.style = .weekly; a.shows = ["A"]; a.chaos = 40
+        let b = a.body(world())
+        XCTAssertEqual(b["strategy"]?.stringValue, "block_grid")
+        XCTAssertEqual(b["chaos"]?.intValue, 0)
+        XCTAssertEqual(b["lineup"]?.get(["grid_minutes"])?.intValue, 30)
+        XCTAssertEqual(b["lineup"]?.get(["fill"]), .null)
+    }
+
+    func testTheKidsLookIsWrittenOnlyWhenAsked() {
+        var a = ChannelGuideAnswers(); a.name = "Kids"; a.id = "kids"; a.look = .kids
+        let b = a.body(world())
+        XCTAssertEqual(b["options"]?.get(["theme", "theme"])?.stringValue, "kids")
+        XCTAssertEqual(b["options"]?.get(["theme", "gentle"])?.boolValue, true)
+    }
+
+    func testTheFirstStepSaysWhatIsWrongAndTheSummaryIsPlain() {
+        var a = ChannelGuideAnswers(); a.number = 5
+        XCTAssertTrue(a.problem(step: 0, takenNumbers: [])?.contains("name") == true)
+        a.name = "X"; a.id = "x"
+        XCTAssertTrue(a.problem(step: 0, takenNumbers: [5])?.contains("already used") == true)
+        XCTAssertNil(a.problem(step: 0, takenNumbers: [1]))
+        XCTAssertNil(a.problem(step: 3, takenNumbers: [5]))
+        a.shows = ["A", "B", "C", "D", "E"]; a.breaks = "classic"; a.alwaysOn = true
+        let text = a.summary(world(), totalShows: 19).joined(separator: " ")
+        XCTAssertTrue(text.contains("Plays 5 shows: A, B, C, D and 1 more"))
+        XCTAssertTrue(text.contains("Breaks: Classic TV"))
+        XCTAssertTrue(text.contains("Always on"))
+    }
+}

@@ -124,6 +124,7 @@ fn main() {
     let live = GuideView {
         window_row: Some(1),
         window_live: false,
+        window_ad: false,
     };
     for (n, pl, sz) in [
         ("side_right", Placement::SideRight, WindowSize::Medium),

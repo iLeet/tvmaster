@@ -4,8 +4,18 @@ import Observation
 import TVMasterKit
 
 enum SidebarItem: String, CaseIterable, Identifiable, Hashable {
-    case home, watch, live, channels, schedule, dayparts, libraries, shows, promos, tvs, appearance, share
+    case home, watch, live, tvs, channels, schedule, dayparts, libraries, shows, promos, appearance, share
     var id: String { rawValue }
+    /// The heading it sits under in the sidebar.
+    var group: String {
+        switch self {
+        case .home, .watch, .live, .tvs: "Watch"
+        case .channels, .schedule, .dayparts: "Programming"
+        case .libraries, .shows, .promos: "Content"
+        case .appearance, .share: "Station"
+        }
+    }
+    static let groups = ["Watch", "Programming", "Content", "Station"]
     var title: String {
         switch self {
         case .home: "Home"

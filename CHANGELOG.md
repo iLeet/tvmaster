@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.0
+
+Easier to set up, with every option still there.
+
+- **New TV channel guide:** "New channel → TV channel" is now six plain steps (name and number, what it plays, how it plays, commercials, look, ready) with a summary at the end and a button straight to the schedule. The full editor is one click away ("Use the full editor instead"). Same steps in the web admin and the Mac app.
+- **Commercials made simple:** the Breaks tab starts with one question, "How much advertising?" (No breaks, Station cards only, Light, Classic TV, Heavy, After the show), the sentence saying what that means for a 30-minute slot, and where the commercials come from (every commercials library by default, with buttons to add some or make some). Timing numbers, years, station cards and your own clips are under **More options**.
+- **More options everywhere it matters:** a fold for the less common settings, and a **Show all options** switch (bottom of the sidebar) that opens every fold at once, remembered on each device.
+- **Sidebar in groups:** Watch, Programming, Content and Station.
+- **Guide video window: Commercials only.** The window plays commercials one after another, in random order, from the commercials libraries you choose, and the card beside it says "Ad break". No channel has to be watched for it, so it is light on the server. The station makes a channel called Commercial Break for it, which stays out of the guide listing. See `docs/GUIDE.md`.
+
 ## 1.1.1
 
 - **Fixed:** a show whose season folders are named `S01`, `S2` and so on was listed under the folder name ("S01") instead of the show's name. Season folders written that way, and in French, German and Spanish ("Saison 2", "Staffel 1", "Temporada 3"), are now recognised. If a library already has such a show, rescan it (or set a name under Shows).

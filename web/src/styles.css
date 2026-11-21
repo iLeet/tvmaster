@@ -209,3 +209,9 @@ html.native-glass.mac .main { padding-top: 34px; }
 .wg-shadow { position: absolute; left: 0; right: 0; pointer-events: none; z-index: 1;
   background: repeating-linear-gradient(135deg, rgba(0,0,0,.45) 0 5px, transparent 5px 10px); border-top: 1px dashed var(--warn); border-bottom: 1px dashed var(--warn); }
 .callout { margin: 0; padding: 10px 12px; border-radius: 8px; background: var(--surface-2, rgba(127,127,127,.12)); border-left: 3px solid var(--accent); }
+
+/* grouped sidebar and the "More options" fold */
+.nav-group { display: grid; gap: 2px; margin-top: 10px; }
+.nav-head { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--dim, #8a93a6); padding: 4px 14px 2px; }
+.side .foot .toggle { font-size: 12px; margin-bottom: 8px; }
+.more { display: block; }

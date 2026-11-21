@@ -153,11 +153,27 @@ struct GuideForm: View {
         Section("Video window") {
             Text("A live picture-in-picture of one of your channels inside the guide, with a card saying what is on. The guide starts that channel while it is showing it.")
                 .font(.caption).foregroundStyle(.secondary)
-            Picker("Show", selection: $gs.pipMode) { Text("Nothing").tag("off"); Text("One channel").tag("channel"); Text("Flip through channels").tag("rotate") }.pickerStyle(.segmented)
+            Picker("Show", selection: $gs.pipMode) { Text("Nothing").tag("off"); Text("One channel").tag("channel"); Text("Flip through channels").tag("rotate"); Text("Commercials only").tag("commercials") }.pickerStyle(.segmented)
             if gs.pipMode == "channel" {
                 Picker("Channel", selection: $gs.pipChannel) {
                     Text("Choose…").tag("")
                     ForEach(showable) { Text("\($0.number) \($0.name)").tag($0.id) }
+                }
+            }
+            if gs.pipMode == "commercials" {
+                let ads = model.libraries.filter { $0.kind == .commercials }
+                Text("The window plays commercials one after another, in random order, while the guide runs: no channel is watched, so it costs little. The card beside it says “Ad break”. It uses a channel called Commercial Break that the station makes for it.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if ads.isEmpty {
+                    Label("There are no commercials yet. Add a commercials library under Libraries, or make or download some under Promos.", systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange)
+                } else {
+                    DisclosureGroup("Which commercials (\(gs.pipLibraries.isEmpty ? "every library" : "\(gs.pipLibraries.count) chosen"))") {
+                        ForEach(ads) { lib in
+                            Toggle("\(lib.name) (\(lib.items) files)", isOn: Binding(get: { gs.pipLibraries.contains(lib.id) }, set: { on in
+                                if on { gs.pipLibraries.append(lib.id) } else { gs.pipLibraries.removeAll { $0 == lib.id } }
+                            }))
+                        }
+                    }
                 }
             }
             if gs.pipMode == "rotate" {

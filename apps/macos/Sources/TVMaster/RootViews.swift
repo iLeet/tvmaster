@@ -149,19 +149,30 @@ struct MainView: View {
     @Environment(AppModel.self) private var model
     /// A new station is walked through setting up before anything else.
     @State private var setupNeeded = false
+    @AppStorage("showAllOptions") private var showAllOptions = false
 
     var body: some View {
         @Bindable var model = model
         NavigationSplitView {
-            List(SidebarItem.allCases, selection: Binding(get: { model.selection }, set: { model.selection = $0 ?? .home })) { item in
-                Label(item.title, systemImage: item.symbol).tag(item)
+            List(selection: Binding(get: { model.selection }, set: { model.selection = $0 ?? .home })) {
+                ForEach(SidebarItem.groups, id: \.self) { group in
+                    Section(group) {
+                        ForEach(SidebarItem.allCases.filter { $0.group == group }) { item in
+                            Label(item.title, systemImage: item.symbol).tag(item)
+                        }
+                    }
+                }
             }
             .navigationSplitViewColumnWidth(min: 170, ideal: 200, max: 260)
             .safeAreaInset(edge: .bottom) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle("Show all options", isOn: $showAllOptions).toggleStyle(.switch).controlSize(.small).font(.caption)
+                        .help("Open every “More options” section on every page")
                 HStack(spacing: 8) {
                     StatusDot(on: model.live)
                     Text(model.live ? "Live" : "Reconnecting…").font(.caption).foregroundStyle(.secondary)
                     Spacer()
+                }
                 }
                 .padding(12)
             }

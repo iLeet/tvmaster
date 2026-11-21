@@ -490,6 +490,8 @@ pub struct GuideView {
     pub window_row: Option<usize>,
     /// The video is flowing (otherwise the window says NO SIGNAL).
     pub window_live: bool,
+    /// The window is playing commercials only: the card says so instead of naming a channel.
+    pub window_ad: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1205,10 +1207,42 @@ fn now_next_row(
 }
 
 /// The card beside the video window: the channel and what is on it.
-fn panel(c: &mut Gfx, look: &GuideLook, r: Rect, data: &GuideData, row: Option<&GuideRow>) {
+fn panel(
+    c: &mut Gfx,
+    look: &GuideLook,
+    r: Rect,
+    data: &GuideData,
+    row: Option<&GuideRow>,
+    ad: bool,
+) {
     let p = &look.palette;
     c.rrect(r.x, r.y, r.w, r.h, p.panel);
     c.rect(r.x + c.radius, r.y, r.w - 2 * c.radius, 2, p.accent);
+    if ad {
+        // A window of commercials: no channel to name, so say what it is.
+        let ts = look.text_scale;
+        let inner = r.w - 12;
+        c.text_shadow(r.x + 6, r.y + 10, "AD BREAK", 3.0, p.label_num, true);
+        let line = c.truncate("Commercials, one after another", inner, ts, false);
+        c.text(
+            r.x + 6,
+            r.y + 10 + c.lh(3.0) + 6,
+            &line,
+            ts,
+            p.text_now,
+            false,
+        );
+        let line = c.truncate("Back to your show in a moment", inner, ts, false);
+        c.text(
+            r.x + 6,
+            r.y + 10 + c.lh(3.0) + 6 + c.lh(ts) + 2,
+            &line,
+            ts,
+            p.accent,
+            false,
+        );
+        return;
+    }
     let Some(row) = row else { return };
     let wide = r.w > 300;
     let ts = look.text_scale;
@@ -1395,6 +1429,7 @@ pub fn render_guide(data: &GuideData, look: &GuideLook, view: &GuideView, t: f32
             r,
             data,
             view.window_row.and_then(|i| data.rows.get(i)),
+            view.window_ad,
         );
     }
 
@@ -1629,6 +1664,7 @@ mod tests {
                     let view = GuideView {
                         window_row: (n > 0).then_some(n / 2),
                         window_live: t > 5.0,
+                        window_ad: false,
                     };
                     let c = render_guide(&data(n), l, &view, t);
                     assert_eq!((c.w, c.h), (w, h));
@@ -2045,6 +2081,7 @@ mod tests {
                 &GuideView {
                     window_row: Some(1),
                     window_live: true,
+                    window_ad: false,
                 },
                 2.0,
             );
@@ -2054,6 +2091,7 @@ mod tests {
                 &GuideView {
                     window_row: Some(3),
                     window_live: true,
+                    window_ad: false,
                 },
                 2.0,
             );
@@ -2064,6 +2102,7 @@ mod tests {
                 &GuideView {
                     window_row: Some(1),
                     window_live: false,
+                    window_ad: false,
                 },
                 2.0,
             );
@@ -2083,6 +2122,7 @@ mod tests {
             let v = GuideView {
                 window_row: Some(0),
                 window_live: false,
+                window_ad: false,
             };
             let mut d = data(3);
             d.window_ms = 0;
@@ -2098,6 +2138,7 @@ mod tests {
                 &GuideView {
                     window_row: Some(9),
                     window_live: true,
+                    window_ad: false,
                 },
                 5.0,
             );

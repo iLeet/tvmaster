@@ -52,7 +52,8 @@ A live picture-in-picture of another channel inside the guide:
          "placement": "side_right", "size": "medium", "audio": "music", "info": true }
 ```
 
-- `mode`: `off`, `channel` (always `pip.channel`) or `rotate` (flip through `pip.channels`, or every channel in the guide when that is empty, `seconds` each, 10-300).
+- `mode`: `off`, `channel` (always `pip.channel`), `commercials` (only commercials, see below) or `rotate` (flip through `pip.channels`, or every channel in the guide when that is empty, `seconds` each, 10-300).
+- **Commercials only** (`mode: "commercials"`, `pip.libraries`: which commercials libraries, empty = all of them): the window plays commercials one after another in random order and the card says "Ad break". The station makes (and keeps pointed at those libraries) a normal channel called **Commercial Break** (id `commercial-break`, shuffled commercials, on demand) and the window shows it, so nothing else has to be watched. It is left out of the guide's own listing unless you pick it, and you can rename, restyle or delete it under Channels. Saving the guide is refused with a way out if there is no commercials library yet.
 - `placement`: `side_right`, `side_left` (docked beside the listing, which narrows) or `top_left`, `top_right` (a band across the top with the video and a card; the listing gets fewer rows). `size`: `small`, `medium`, `large`. The window is 16:9; a channel in another shape is fitted with bars.
 - `audio`: `music` keeps the guide's music playing; `channel` plays the channel in the window instead.
 - `info`: a card beside the window with the channel's number and name and what is on and next.

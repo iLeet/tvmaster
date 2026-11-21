@@ -3,7 +3,8 @@ import { api } from '../api';
 import { defaultAds } from '../lib';
 import { ThemePreview, emptyChoice, useThemeCatalogue } from '../ThemePicker';
 import type { AdConfig, AdOptions, AdPreset, Library, ThemeChoice } from '../types';
-import { Card, Chips, Field, Segmented, Toggle } from '../ui';
+import { href } from '../router';
+import { Card, Chips, Field, More, Segmented, Toggle } from '../ui';
 
 const name = (l: Library) => l.path.split(/[\\/]/).filter(Boolean).pop() ?? l.path;
 
@@ -30,7 +31,6 @@ export function AdsEditor({ ads, onChange, libraries, theme }: { ads: AdConfig |
   const toggleId = (list: number[], id: number) => (list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
   const [opts, setOpts] = useState<AdOptions | null>(null);
   const [slot, setSlot] = useState(30);
-  const [more, setMore] = useState(false);
   const station = useThemeCatalogue()?.station;
   const look = theme ?? station ?? emptyChoice();
   useEffect(() => { api.get<AdOptions>('/ads/options').then(setOpts).catch(() => undefined); }, []);
@@ -39,7 +39,6 @@ export function AdsEditor({ ads, onChange, libraries, theme }: { ads: AdConfig |
 
   const presets = opts?.presets ?? [];
   const current = !ads ? 'custom' : !ads.commercials ? 'none' : presets.find((p) => p.commercials && p.pod_seconds === ads.pod_seconds && p.max_breaks === ads.max_breaks && p.minutes_per_hour === ads.minutes_per_hour && p.mid_breaks === ads.mid_breaks)?.id ?? 'custom';
-  const apply = (p: AdPreset) => set({ commercials: p.commercials, pod_seconds: p.pod_seconds, max_breaks: p.max_breaks, minutes_per_hour: p.minutes_per_hour, mid_breaks: p.mid_breaks });
   const cardOn = (id: string) => (ads ? { brb: ads.bumpers.brb, back_to: ads.bumpers.back_to, up_next: ads.bumpers.up_next, station_id: ads.bumpers.station_id, later_today: ads.bumpers.later_today_every > 0 }[id] : false);
   const setCard = (id: string, on: boolean) => {
     if (!ads) return;
@@ -47,45 +46,63 @@ export function AdsEditor({ ads, onChange, libraries, theme }: { ads: AdConfig |
     else set({ bumpers: { ...ads.bumpers, [id]: on } });
   };
 
+  const allCommercial = commercial.map((l) => l.id);
+  // Commercials come from every commercials library until you choose some.
+  useEffect(() => {
+    if (ads && ads.commercials && ads.library_ids.length === 0 && allCommercial.length > 0) onChange({ ...ads, library_ids: allCommercial });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ads?.commercials, ads?.library_ids.length, allCommercial.length]);
+  const choice = ads === null ? 'clean' : current;
+  const choose = (id: string) => {
+    if (id === 'clean') { onChange(null); return; }
+    const p = presets.find((x) => x.id === id);
+    if (!p) return;
+    const base = ads ?? { ...defaultAds(), library_ids: allCommercial };
+    onChange({ ...base, commercials: p.commercials, pod_seconds: p.pod_seconds, max_breaks: p.max_breaks, minutes_per_hour: p.minutes_per_hour, mid_breaks: p.mid_breaks, library_ids: base.library_ids.length ? base.library_ids : allCommercial });
+  };
+  const label = (p: AdPreset) => (p.id === 'none' ? 'Station cards only' : p.name);
+  const cardsOn = (opts?.cards ?? []).filter((c) => cardOn(c.id)).length;
+
   return (
     <div className="stack gap-lg">
-      <Card className="flat">
-        <Toggle checked={ads !== null} onChange={(on) => onChange(on ? defaultAds() : null)} label={<strong>Breaks between and inside shows</strong>} />
-        <p className="small dim" style={{ marginTop: 6 }}>
-          Each show is cut at natural points and the time left in its slot is filled to the exact second with commercials and station cards. Off = shows run clean.
-        </p>
+      <Card className="flat stack">
+        <h2>How much advertising?</h2>
+        <Segmented value={choice} options={[{ value: 'clean', label: 'No breaks' }, ...presets.map((p) => ({ value: p.id, label: label(p) })), ...(choice === 'custom' ? [{ value: 'custom', label: 'Custom' }] : [])]} onChange={choose} />
+        {!ads && <p className="small dim">Shows run clean: no commercials and no station cards, only the padding to the next time slot.</p>}
+        {ads && <p className="small dim">{presets.find((p) => p.id === current)?.about ?? 'Your own numbers (under More options).'}</p>}
+        {ads && words && <p className="callout">{words}</p>}
+        {ads && ads.commercials && (
+          commercial.length === 0 ? (
+            <div className="callout stack" style={{ gap: 8 }}>
+              <strong>There are no commercials yet.</strong>
+              <span className="small">Breaks need some. Add a folder of them, or make your own.</span>
+              <span className="row"><a className="btn small" href={href('libraries')}>Add a commercials folder</a><a className="btn small" href={href('promos')}>Make or download commercials</a></span>
+            </div>
+          ) : (
+            <Field label="Commercials come from" hint={commercial.length > 1 ? 'Every commercials library unless you pick some.' : undefined}>
+              <Chips options={commercial.map((l) => ({ value: l.id, label: `${name(l)} (${l.items})` }))} value={ads.library_ids} onToggle={(id) => set({ library_ids: toggleId(ads.library_ids, id) })} />
+            </Field>
+          )
+        )}
       </Card>
 
       {ads && (
-        <>
-          <Card className="flat stack">
-            <h2>How much advertising</h2>
-            <Segmented value={current} options={[...presets.map((p) => ({ value: p.id, label: p.name })), ...(current === 'custom' ? [{ value: 'custom', label: 'Custom' }] : [])]} onChange={(id) => { const p = presets.find((x) => x.id === id); if (p) apply(p); }} />
-            <p className="small dim">{presets.find((p) => p.id === current)?.about ?? 'Your own numbers (below).'}</p>
+        <Card className="flat stack">
+          <More summary={`${ads.pod_seconds}-second breaks · ${cardsOn} station card${cardsOn === 1 ? '' : 's'}${ads.years ? ` · ${ads.years[0]}-${ads.years[1]}` : ''}`}>
+            <h3 style={{ margin: 0 }}>Break timing</h3>
             <div className="row wrap" style={{ alignItems: 'flex-end' }}>
               <Field label="Try it on a slot of"><Segmented value={String(slot)} options={[{ value: '30', label: '30 min' }, { value: '60', label: '60 min' }, { value: '120', label: '2 hours' }]} onChange={(v) => setSlot(Number(v))} /></Field>
             </div>
-            {words && <p className="callout">{words}</p>}
-            <button type="button" className="btn small" onClick={() => setMore(!more)} aria-expanded={more}>{more ? 'Hide the details' : 'Fine-tune…'}</button>
-            {more && (
-              <div className="stack nest">
-                <div className="row wrap" style={{ alignItems: 'flex-start' }}>
-                  <Field label="About how long is each break (seconds)" hint="The time left in a slot is split into breaks about this long."><input className="input num" type="number" min={20} max={900} value={ads.pod_seconds} onChange={(e) => set({ pod_seconds: Number(e.target.value) })} /></Field>
-                  <Field label="At most this many breaks inside one show" hint="The break after the show is extra."><input className="input num" type="number" min={0} max={8} value={ads.max_breaks} onChange={(e) => set({ max_breaks: Number(e.target.value) })} /></Field>
-                  <Field label="Don't repeat a commercial for" hint="this many commercials"><input className="input num" type="number" min={1} max={200} value={ads.no_repeat} onChange={(e) => set({ no_repeat: Number(e.target.value) })} /></Field>
-                  <Field label="Minutes of ads per hour" hint="Only for a channel with no weekly lineup (no time slots); with a lineup the ads fill whatever is left of each slot."><input className="input num" type="number" min={0} max={30} value={ads.minutes_per_hour} onChange={(e) => set({ minutes_per_hour: Number(e.target.value) })} /></Field>
-                </div>
-                <Toggle checked={ads.mid_breaks} onChange={(v) => set({ mid_breaks: v })} label="Breaks inside shows (off = all the ads after the show)" />
-              </div>
-            )}
-          </Card>
+            <div className="row wrap" style={{ alignItems: 'flex-start' }}>
+              <Field label="About how long is each break (seconds)" hint="The time left in a slot is split into breaks about this long."><input className="input num" type="number" min={20} max={900} value={ads.pod_seconds} onChange={(e) => set({ pod_seconds: Number(e.target.value) })} /></Field>
+              <Field label="At most this many breaks inside one show" hint="The break after the show is extra."><input className="input num" type="number" min={0} max={8} value={ads.max_breaks} onChange={(e) => set({ max_breaks: Number(e.target.value) })} /></Field>
+              <Field label="Don't repeat a commercial for" hint="this many commercials"><input className="input num" type="number" min={1} max={200} value={ads.no_repeat} onChange={(e) => set({ no_repeat: Number(e.target.value) })} /></Field>
+              <Field label="Minutes of ads per hour" hint="Only for a channel with no weekly lineup (no time slots); with a lineup the ads fill whatever is left of each slot."><input className="input num" type="number" min={0} max={30} value={ads.minutes_per_hour} onChange={(e) => set({ minutes_per_hour: Number(e.target.value) })} /></Field>
+            </div>
+            <Toggle checked={ads.mid_breaks} onChange={(v) => set({ mid_breaks: v })} label="Breaks inside shows (off = all the ads after the show)" />
 
-          <Card className="flat stack">
-            <h2>Where commercials come from</h2>
+            <h3 style={{ margin: '8px 0 0' }}>Commercials</h3>
             <Toggle checked={ads.commercials} onChange={(v) => set({ commercials: v })} label="Air commercials (off = only station cards fill the breaks)" />
-            <Field label="Commercial libraries" hint={commercial.length ? undefined : 'Add a library of kind “Commercials” first (Libraries page), or upload some there.'}>
-              <Chips options={commercial.map((l) => ({ value: l.id, label: `${name(l)} (${l.items})` }))} value={ads.library_ids} onToggle={(id) => set({ library_ids: toggleId(ads.library_ids, id) })} />
-            </Field>
             <Field label="Only from these years" hint="The year comes from folder or file names. Handy for a channel set in 1987.">
               <div className="row">
                 <Toggle checked={ads.years !== null} onChange={(on) => set({ years: on ? [1980, 1989] : null })} />
@@ -98,10 +115,8 @@ export function AdsEditor({ ads, onChange, libraries, theme }: { ads: AdConfig |
                 )}
               </div>
             </Field>
-          </Card>
 
-          <Card className="flat stack">
-            <h2>Station cards</h2>
+            <h3 style={{ margin: '8px 0 0' }}>Station cards</h3>
             <p className="small dim">Short graphics in the station's look (change it under Appearance) that tell viewers what is happening. Turn off the ones you don't want.</p>
             <div className="grid cols-3">
               {(opts?.cards ?? []).map((c) => (
@@ -119,8 +134,8 @@ export function AdsEditor({ ads, onChange, libraries, theme }: { ads: AdConfig |
             <Field label="Your own station clips" hint={clips.length ? 'Short videos of your own (idents, "we\'ll be right back" animations). One is used to open a break, in place of the generated card, when it fits.' : 'Add a library of kind “Bumper clips” (or upload some on the Libraries page) to use your own videos.'}>
               <Chips options={clips.map((l) => ({ value: l.id, label: `${name(l)} (${l.items})` }))} value={ads.bumper_library_ids} onToggle={(id) => set({ bumper_library_ids: toggleId(ads.bumper_library_ids, id) })} />
             </Field>
-          </Card>
-        </>
+          </More>
+        </Card>
       )}
     </div>
   );

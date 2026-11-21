@@ -54,8 +54,11 @@ pub(crate) async fn render_png(
         };
         // A window shows its card for the first channel, with no video behind it.
         let view = GuideView {
-            window_row: (guide.pip.mode != PipMode::Off && !data.rows.is_empty()).then_some(0),
+            window_row: (!matches!(guide.pip.mode, PipMode::Off | PipMode::Commercials)
+                && !data.rows.is_empty())
+            .then_some(0),
             window_live: false,
+            window_ad: guide.pip.mode == PipMode::Commercials,
         };
         let c = tvmaster_render::render_guide(&data, &look, &view, t.clamp(0.0, 3600.0));
         let mut rgba = Vec::with_capacity(c.w * c.h * 4);

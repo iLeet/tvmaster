@@ -32,7 +32,7 @@ pub use model::{
     GuideBackground, GuideColors, GuideConfig, GuideCorners, GuideHeader, GuideLayout, GuidePip,
     GuideScroll, GuideStyle, GuideTextSize, GuideTheme, GuideTicker, GuideTypeface, HeaderStyle,
     InfoConfig, InfoSlide, PipAudio, PipMode, PipPlacement, PipSize, RunOutPolicy, SlideKind,
-    Strategy, ThemeChoice, TickerPosition, TickerSpeed, Tv,
+    Strategy, ThemeChoice, TickerPosition, TickerSpeed, Tv, COMMERCIAL_CHANNEL,
 };
 pub use options::{
     Aspect, AudioPrefs, BugOptions, ChannelOptions, ClockOptions, Corner, Deinterlace, Effective,
