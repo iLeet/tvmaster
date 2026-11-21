@@ -38,7 +38,7 @@ fn re_year() -> &'static Regex {
 
 fn re_season_dir() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| Regex::new(r"(?i)^(season|series|specials?)\b[\s._-]*\d*$").unwrap())
+    R.get_or_init(|| Regex::new(r"(?i)^(?:(?:season|series|saison|staffel|temporada)[\s._-]*\d*|specials?|s[\s._-]?\d{1,2})$").unwrap())
 }
 
 fn clean(s: &str) -> String {
@@ -177,7 +177,7 @@ pub fn parse_name(root: &Path, file: &Path) -> ParsedName {
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_default();
 
-    // Nearest ancestor folder under the library root that is not "Season N".
+    // Nearest ancestor folder under the library root that is not a season folder ("Season 2", "S02", "Specials").
     let folder_show = file
         .parent()
         .into_iter()
@@ -296,6 +296,26 @@ mod tests {
             "not a year inside a longer number"
         );
         assert_eq!(y("/ads/1080p/Clip.mp4"), None);
+    }
+
+    #[test]
+    fn season_folders_written_s01_are_not_the_show() {
+        for folder in ["S01", "s1", "S 02", "Season 3", "season03", "Specials"] {
+            let n = p(
+                "/tv",
+                &format!(
+                    "/tv/Max and Ruby/{folder}/Max and Ruby_S01E13+S01E14_Max's Halloween.mp4"
+                ),
+            );
+            assert_eq!(n.show.as_deref(), Some("Max and Ruby"), "{folder}");
+        }
+        // A show that merely starts with an S is still a show.
+        let n = p("/tv", "/tv/Sesame St/S01/Sesame St - S01E01.mp4");
+        assert_eq!(n.show.as_deref(), Some("Sesame St"));
+        let n = p("/tv", "/tv/S Club 7/Episode - S01E01.mp4");
+        assert_eq!(n.show.as_deref(), Some("S Club 7"));
+        let n = p("/tv", "/tv/SG1/SG1 - S01E01.mp4");
+        assert_eq!(n.show.as_deref(), Some("SG1"));
     }
 
     #[test]

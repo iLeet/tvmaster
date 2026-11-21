@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.1
+
+- **Fixed:** a show whose season folders are named `S01`, `S2` and so on was listed under the folder name ("S01") instead of the show's name. Season folders written that way, and in French, German and Spanish ("Saison 2", "Staffel 1", "Temporada 3"), are now recognised. If a library already has such a show, rescan it (or set a name under Shows).
+
 ## 1.1.0
 
 - **Smooth streaming on small servers.** The background scan that looks for ad-break points in new files used to run two full-speed FFmpeg jobs at normal priority, which could starve a live channel of processor time and make the picture play for a few seconds, stop, and repeat. It now runs one file at a time, on one thread, at the lowest priority, so a channel that is being watched always comes first.
