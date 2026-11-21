@@ -18,6 +18,7 @@ export type Source =
   | { type: 'show'; show: string }
   | { type: 'pool'; shows: string[]; order: Order }
   | { type: 'chaos' }
+  | { type: 'off_air' }
   | { type: 'rotation'; items: Source[]; advance: Advance };
 
 export interface Block {

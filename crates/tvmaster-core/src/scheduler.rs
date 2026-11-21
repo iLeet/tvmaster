@@ -273,6 +273,7 @@ impl Gen<'_> {
             Source::Show { show } => self.pick_show(show, scope),
             Source::Pool { shows, order } => self.pick_pool(shows, *order, scope),
             Source::Chaos => self.pick_pool(&[], Order::Shuffle, Some("chaos")),
+            Source::OffAir => None,
             Source::Rotation { items, advance } => {
                 let idx = match advance {
                     Advance::Weeks(n) => {
@@ -318,6 +319,10 @@ impl Gen<'_> {
             if let Some(p) = self.pick(fill, None, t_ms) {
                 return Some(p);
             }
+        }
+        if *fill == Source::OffAir {
+            // You asked for the screen when nothing is on: never random programmes instead.
+            return None;
         }
         self.pick(&Source::Chaos, None, t_ms)
     }
@@ -428,10 +433,13 @@ pub fn generate(
         } else {
             (src, scope, label)
         };
-        let leave_empty = (active.is_none() || spent)
-            && cfg.run_out == RunOutPolicy::OffAir
-            && cfg.lineup.fill.is_none()
-            && !cfg.lineup.blocks.is_empty();
+        // The screen airs when the slot is "off air" itself, or (older channels) when the policy is
+        // the test screen and nothing else was chosen for unscheduled time.
+        let leave_empty = *src == Source::OffAir
+            || ((active.is_none() || spent)
+                && cfg.run_out == RunOutPolicy::OffAir
+                && cfg.lineup.fill.is_none()
+                && !cfg.lineup.blocks.is_empty());
         if leave_empty {
             // nothing to pick: falls through to the filler below
         } else if scope.is_none() && cfg.chaos > 0 {
@@ -907,6 +915,68 @@ mod tests {
     }
 
     #[test]
+    fn off_air_for_unscheduled_time_does_not_stop_shows_repeating() {
+        // Treehouse: a weekly schedule, shows that start over when they run out, and the title card
+        // (not more programmes) for every hour the schedule does not cover.
+        let l = lineup(
+            r#"{"blocks":[{"start":"13:00","end":"13:30","source":{"type":"show","show":"Alpha"}}],"fill":{"type":"off_air"}}"#,
+        );
+        let mut s = Setup::new(catalog(&[("Alpha", 2), ("Beta", 20)]), l);
+        s.run_out = RunOutPolicy::NextInRotation;
+        let items = s.gen(
+            &mut Cursors::new(),
+            at("UTC", "2026-11-16 00:00"),
+            at("UTC", "2026-11-19 00:00"),
+        );
+        let aired = shows(&items);
+        // three days, one slot a day, only Alpha, and it wrapped (two episodes, three showings)
+        assert_eq!(
+            aired.len(),
+            3,
+            "{:?}",
+            aired.iter().map(|i| i.start_ms).collect::<Vec<_>>()
+        );
+        assert!(aired.iter().all(|i| i.media_id.unwrap() < 100));
+        assert!(aired
+            .iter()
+            .all(|i| (i.start_ms - at("UTC", "2026-11-16 13:00")) % DAY == 0));
+        assert!(items
+            .iter()
+            .filter(|i| i.kind != ItemKind::Show)
+            .all(|i| i.media_id.is_none()));
+        let covered: i64 = items.iter().map(|i| i.end_ms - i.start_ms).sum();
+        assert_eq!(
+            covered,
+            3 * DAY,
+            "every minute is either a show or the card"
+        );
+    }
+
+    #[test]
+    fn an_off_air_block_shows_the_screen_in_its_hours() {
+        let l = lineup(
+            r#"{"blocks":[
+                {"start":"13:00","end":"14:00","source":{"type":"off_air"}},
+                {"start":"14:00","end":"15:00","source":{"type":"show","show":"Alpha"}}
+            ]}"#,
+        );
+        let mut s = Setup::new(catalog(&[("Alpha", 20), ("Beta", 20)]), l);
+        s.run_out = RunOutPolicy::KeepGoing;
+        let items = s.gen(
+            &mut Cursors::new(),
+            at("UTC", "2026-11-16 13:00"),
+            at("UTC", "2026-11-16 15:00"),
+        );
+        let first = shows(&items);
+        assert!(first
+            .iter()
+            .all(|i| i.start_ms >= at("UTC", "2026-11-16 14:00")));
+        assert!(items
+            .iter()
+            .any(|i| i.kind == ItemKind::Filler && i.start_ms == at("UTC", "2026-11-16 13:00")));
+    }
+
+    #[test]
     fn a_fill_you_set_yourself_still_airs_under_the_test_screen_policy() {
         let l = lineup(
             r#"{"blocks":[{"start":"20:00","end":"21:00","source":{"type":"show","show":"Alpha"}}],"fill":{"type":"show","show":"Beta"}}"#,
@@ -1312,6 +1382,55 @@ mod tests {
         };
         assert_eq!(episodes(&rebuilt), episodes(&first));
         assert_contiguous(&rebuilt);
+    }
+
+    #[test]
+    fn a_chaos_channel_can_have_a_small_break_between_shows() {
+        // No grid, no blocks: shows back to back at random, and with the "short" preset one small
+        // break after each, never inside a show.
+        let mut ads = crate::ads::AdConfig::default();
+        ads.apply_preset(
+            crate::ads::AD_PRESETS
+                .iter()
+                .find(|p| p.id == "short")
+                .unwrap(),
+        );
+        let l = Lineup {
+            ads: Some(ads),
+            ..Lineup::default()
+        };
+        let mut s = Setup::new(catalog(&[("A", 20), ("B", 20)]), l);
+        s.strategy = Strategy::Chaos;
+        s.ads = Some(ad_pool(40));
+        let t0 = at("UTC", "2026-11-16 00:00");
+        let items = s.gen(&mut Cursors::new(), t0, t0 + 6 * HOUR);
+        let n_shows = items.iter().filter(|i| i.kind == ItemKind::Show).count();
+        assert!(n_shows >= 10, "{n_shows}");
+        // each show is whole (one act) and followed by commercials before the next show
+        let mut i = 0;
+        let mut after_show = 0;
+        while i + 1 < items.len() {
+            if items[i].kind == ItemKind::Show {
+                assert_eq!(
+                    items[i].end_ms - items[i].start_ms,
+                    EP as i64,
+                    "no break inside"
+                );
+                if items[i + 1].kind == ItemKind::Commercial {
+                    after_show += 1;
+                }
+            }
+            i += 1;
+        }
+        assert!(after_show >= n_shows - 1, "{after_show} of {n_shows}");
+        // and the whole break is small: about a minute, not minutes
+        let ad_ms: i64 = items
+            .iter()
+            .filter(|i| i.kind == ItemKind::Commercial)
+            .map(|i| i.end_ms - i.start_ms)
+            .sum();
+        let per_show = ad_ms / n_shows as i64;
+        assert!(per_show > 30_000 && per_show < 120_000, "{per_show}");
     }
 
     #[test]

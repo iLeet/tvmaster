@@ -203,6 +203,7 @@ struct WeekGridView: View {
         case .show: s.show.isEmpty ? "A show" : s.show
         case .pool: s.shows.isEmpty ? "Every show" : s.shows.count == 1 ? s.shows[0] : "\(s.shows.count) shows"
         case .chaos: "Anything"
+        case .offAir: "Off air"
         case .rotation: "A rotation"
         case .other: "Special"
         }

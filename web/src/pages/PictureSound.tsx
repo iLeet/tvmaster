@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { SCREENS, emptyOptions, setShowOption, showOverride } from '../options';
-import type { ChannelOptions, Corner, Lineup, ShowSummary, SignOff, System } from '../types';
+import { emptyOptions, setShowOption, showOverride } from '../options';
+import type { ChannelOptions, Corner, ShowSummary, System } from '../types';
 import { Badge, Card, ConfirmBtn, Field, Segmented, Toggle } from '../ui';
+import { OffAirEditor } from './OffAir';
 import { PictureField } from '../PictureField';
 import { ThemePreview, emptyChoice, useThemeCatalogue } from '../ThemePicker';
 import { ASPECTS, LanguageList, LOOKS, ShowSettingsRow, SUB_MODES } from './ShowSettings';
@@ -20,12 +21,10 @@ function TickerPreview({ options }: { options: ChannelOptions }) {
 }
 
 export function PictureSound({
-  options, onChange, lineup, onLineup, shows, sys, testOnly = false,
+  options, onChange, shows, sys, testOnly = false,
 }: {
   options: ChannelOptions;
   onChange: (o: ChannelOptions) => void;
-  lineup: Lineup;
-  onLineup: (l: Lineup) => void;
   shows: ShowSummary[];
   sys: System | undefined;
   /** A test-pattern channel only has an off-air screen to choose. */
@@ -36,36 +35,16 @@ export function PictureSound({
   const ff = sys?.ffmpeg;
   const noLibass = ff && !ff.has_subtitles;
   const noDrawtext = ff && !ff.has_drawtext;
-  const signoff: SignOff | null = lineup.signoff;
-  const setSignoff = (s: SignOff | null) => onLineup({ ...lineup, signoff: s });
   const [showFilter, setShowFilter] = useState('');
   const shownShows = shows.filter((s) => s.name.toLowerCase().includes(showFilter.toLowerCase()));
   const staleLibraries = shows.some((s) => s.files_with_tracks < s.episodes);
 
-  const offAir = (
-    <Card className="stack">
-      <div><h2>When nothing is on air</h2><p className="small dim">What fills the screen when there is nothing to show: an empty schedule, a gap between programmes, a file that cannot be played. Choose the classic test pattern, snow, black, a station card with your own words, or a picture of your own.</p></div>
-      <Field label="Screen" hint={SCREENS.find((x) => x.value === o.off_air.screen)?.help}>
-        <Segmented value={o.off_air.screen} options={SCREENS} onChange={(screen) => patch('off_air', { screen })} />
-      </Field>
-      {o.off_air.screen === 'card' && (
-        <Field label="Message" hint="Blank = PLEASE STAND BY."><input className="input" style={{ maxWidth: 360 }} maxLength={60} placeholder="PLEASE STAND BY" value={o.off_air.message} onChange={(e) => patch('off_air', { message: e.target.value })} /></Field>
-      )}
-      {o.off_air.screen === 'image' && (
-        <Field label="Picture" hint="A png, jpg, gif or webp, fitted to the screen. It is uploaded to the server, so it keeps working if you move files around.">
-          <PictureField value={o.off_air.image} onChange={(image) => patch('off_air', { image })} />
-        </Field>
-      )}
-      <Toggle checked={o.off_air.tone} onChange={(tone) => patch('off_air', { tone })} label={<span>Test tone <span className="dim small">{o.off_air.screen === 'static' ? 'hiss with the snow' : 'a steady 1 kHz tone, like a real test pattern'}</span></span>} />
-      <p className="small dim">For a channel that is nothing but a test pattern, make a <strong>Test pattern</strong> channel (Channels, New channel).</p>
-    </Card>
-  );
-  if (testOnly) return <div className="stack gap-lg">{offAir}</div>;
+  if (testOnly) return <div className="stack gap-lg"><OffAirEditor options={o} onChange={onChange} intro="What this channel shows, all the time. For a station card, add your own words; or use a picture of your own. (To make an ordinary channel go off the air at night, use its Programming tab.)" /></div>;
 
   return (
     <div className="stack gap-lg">
       <div className="row"><span className="small dim grow">Everything on this tab applies to this channel; per-show settings override it.</span>
-        <ConfirmBtn small label="Reset to defaults" confirm="Audio, subtitles, picture, graphics and the off-air screen go back to their defaults. Per-show settings and sign-off hours are kept." onConfirm={() => onChange({ ...emptyOptions(), shows: o.shows })} /></div>
+        <ConfirmBtn small label="Reset to defaults" confirm="Audio, subtitles, picture and graphics go back to their defaults. Per-show settings are kept." onConfirm={() => onChange({ ...emptyOptions(), shows: o.shows })} /></div>
       <Card className="stack">
         <div><h2>Audio</h2><p className="small dim">Many files carry several audio tracks (original and dubbed languages, commentary). The channel picks one for every programme.</p></div>
         <Field label="Preferred languages" hint="In order. The first one a file has is used; if none match, the file's own default track plays. Commentary and audio-description tracks are skipped unless they are all there is.">
@@ -178,21 +157,6 @@ export function PictureSound({
             </div>
           );
         })()}
-      </Card>
-
-      {offAir}
-
-      <Card className="stack">
-        <div><h2>Sign-off</h2><p className="small dim">Like a station of old, go off the air for the night. During these hours the channel airs bars and a tone (or snow) instead of programmes, and no episodes are used up.</p></div>
-        <Toggle checked={signoff !== null} onChange={(on) => setSignoff(on ? { from: '02:00', to: '05:00', style: 'bars' } : null)} label="Sign off overnight" />
-        {signoff && (
-          <div className="row wrap nest" style={{ alignItems: 'flex-end' }}>
-            <Field label="Off the air at"><input className="input" type="time" value={signoff.from} onChange={(e) => setSignoff({ ...signoff, from: e.target.value })} /></Field>
-            <Field label="Back on at"><input className="input" type="time" value={signoff.to} onChange={(e) => setSignoff({ ...signoff, to: e.target.value })} /></Field>
-            <Field label="Shows"><Segmented value={signoff.style} options={SCREENS} onChange={(style) => setSignoff({ ...signoff, style })} /></Field>
-          </div>
-        )}
-        {signoff && <p className="small dim">Times are in the channel's time zone ({lineup.timezone || 'the server\'s'}). Save the channel and the schedule updates.</p>}
       </Card>
 
       <Card className="stack">

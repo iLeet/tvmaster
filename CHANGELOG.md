@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.3.0
+
+A simpler Programming tab, and the title card where you asked for it.
+
+- **Fixed: empty time on a weekly schedule filled with episodes.** A channel with a weekly schedule and nothing chosen for the gaps carried on playing shows between slots. There is now one plain question for it, **When nothing is scheduled**: *Show the off-air screen*, *Keep playing shows*, *Play something random* or *Play these shows*. A new weekly channel starts on the title card. (A slot can also be set to the off-air screen itself.)
+- **A short break between shows, on any channel.** A new ready-made choice on the Breaks tab, *Short break between shows*: no breaks inside the show, about a minute of commercials after each one. It works on chaos and shuffle channels, which have no time grid.
+- **One Programming tab.** *How it plays* (in order, shuffle, chaos, weekly schedule), then *Your week*, then *When nothing is scheduled*, *When a show runs out of episodes*, *The off-air screen* and a line for the commercial breaks, with the General tab showing a one-line summary. Surprises, start times, sign-off, *Seasonal changes* (the API's "seasons"), *Holidays and specials* ("events") and the lineup JSON are under **More options**. The off-air screen and sign-off hours moved here from Sound & picture, so each has one home. Same in the web admin and the Mac app.
+- **Plainer words.** The run-out choices are *Start over*, *Move to the next show*, *Play something random* and *Show the off-air screen*; the old names are in the tooltips and in the API, which is unchanged.
+- `Source` gains `{"type":"off_air"}`, usable as the lineup's `fill` or as a slot's source.
+
 ## 1.2.0
 
 Easier to set up, with every option still there.

@@ -59,7 +59,10 @@ public struct ChannelGuideAnswers: Equatable, Sendable {
         var ls = LineupSettings()
         ls.ads = ads(world)
         if style == .weekly { ls.gridMinutes = 30 }
-        if style != .weekly, !shows.isEmpty {
+        if style == .weekly {
+            // Time nobody scheduled shows the title card, not more programmes.
+            var f = SourceChoice(); f.kind = .offAir; ls.fill = f
+        } else if !shows.isEmpty {
             var f = SourceChoice()
             f.kind = .pool
             f.shows = shows
@@ -91,7 +94,7 @@ public struct ChannelGuideAnswers: Equatable, Sendable {
         var out = ["Channel \(number), \(name.trimmingCharacters(in: .whitespaces).isEmpty ? "unnamed" : name.trimmingCharacters(in: .whitespaces))."]
         out.append(shows.isEmpty ? "Plays everything in your libraries (\(totalShows) show\(totalShows == 1 ? "" : "s"))."
                    : "Plays \(shows.count) show\(shows.count == 1 ? "" : "s"): \(shows.prefix(4).joined(separator: ", "))\(shows.count > 4 ? " and \(shows.count - 4) more" : "").")
-        out.append(style.title + (style == .weekly ? ": you lay out the week next." : "."))
+        out.append(style.title + (style == .weekly ? ": you lay out the week next, and time you leave empty shows the off-air screen." : "."))
         if let p = world.presets.first(where: { $0.id == breaks }), breaks != "clean" {
             out.append("Breaks: \(p.id == "none" ? "station cards only" : p.name).")
         } else { out.append("No commercial breaks.") }

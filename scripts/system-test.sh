@@ -330,6 +330,27 @@ OUT="$(ffmpeg -hide_banner -loglevel error -y -t 8 -i "$H/stream/adguide/index.m
 [[ -z "$OUT" ]] && ok "the guide streams with commercials playing in its window" || bad "guide with a commercials window" "$OUT"
 api -XDELETE "$H/api/v1/channels/adguide" >/dev/null
 
+# ---- unscheduled time shows the title card; chaos channels can have a small break ----------
+section "Gaps, run-out and the short break"
+[[ "$(api "$H/api/v1/ads/options" | json "any(p['id']=='short' for p in d['presets'])")" == "True" ]] && ok "a short break between shows is a ready-made choice" || bad "short break preset"
+LATER="$(python3 -c "
+import datetime as d
+t=d.datetime.now(d.timezone.utc)+d.timedelta(hours=12)
+u=t+d.timedelta(minutes=30)
+print(t.strftime('%H:%M'), u.strftime('%H:%M'))")"
+FROM="${LATER% *}"; TO="${LATER#* }"
+api -XPOST "$H/api/v1/channels" -d "{\"id\":\"gaps\",\"number\":66,\"name\":\"Gaps\",\"kind\":\"programming\",\"strategy\":\"block_grid\",\"run_out\":\"next_in_rotation\",\"library_ids\":[1],\"lineup\":{\"timezone\":\"UTC\",\"blocks\":[{\"name\":\"Later\",\"days\":[],\"start\":\"$FROM\",\"end\":\"$TO\",\"source\":{\"type\":\"show\",\"show\":\"Alpha\"}}],\"fill\":{\"type\":\"off_air\"}}}" >/dev/null
+sleep 1
+GAPS="$(api "$H/api/v1/channels/gaps/schedule?hours=6&detail=items" | python3 -c "
+import json,sys
+items=json.load(sys.stdin)
+print(sum(1 for i in items if i['kind']=='filler'), sum(1 for i in items if i['kind']!='filler'))")"
+[[ "$GAPS" == *" 0" && "${GAPS%% *}" -ge 1 ]] && ok "with the title card chosen, empty time is off air and airs no programmes (filler/other: $GAPS)" || bad "off-air fill" "$GAPS"
+api -XPOST "$H/api/v1/channels" -d '{"id":"gaps","number":66,"name":"Gaps","kind":"programming","strategy":"chaos","library_ids":[1],"lineup":{"timezone":"UTC","ads":{"commercials":true,"library_ids":[2],"minutes_per_hour":4,"pod_seconds":60,"max_breaks":0,"mid_breaks":false}}}' >/dev/null
+# (the 12-second test episodes are too short to leave room for a break, so the break itself is covered by a unit test)
+[[ "$(api "$H/api/v1/channels/gaps" | json "str(d['lineup']['ads']['mid_breaks'])+'/'+d['strategy']")" == "False/chaos" ]] && ok "a chaos channel keeps the short-break settings (nothing inside shows)" || bad "short break saved on a chaos channel"
+api -XDELETE "$H/api/v1/channels/gaps" >/dev/null
+
 # docker stop and systemd send SIGTERM: it must stop cleanly, like Ctrl-C does
 "$BIN" serve --bind "127.0.0.1:$HP2" --data-dir "$W/data3" >"$W/server4.log" 2>&1 &
 PID2=$!

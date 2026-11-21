@@ -420,7 +420,12 @@ mod ads_tests {
         let app = router(AppState::in_memory());
         let (st, v) = call(&app, "GET", "/api/v1/ads/options", "").await;
         assert_eq!(st, StatusCode::OK);
-        assert_eq!(v["presets"].as_array().unwrap().len(), 5);
+        assert_eq!(v["presets"].as_array().unwrap().len(), 6);
+        assert!(v["presets"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["id"] == "short" && p["mid_breaks"] == false));
         assert_eq!(v["cards"].as_array().unwrap().len(), 5);
         let (st, v) = call(
             &app,

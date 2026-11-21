@@ -36,7 +36,8 @@ describe('the new channel guide', () => {
     expect(b.strategy).toBe('block_grid');
     expect(b.chaos).toBe(0);
     expect(b.lineup.grid_minutes).toBe(30);
-    expect(b.lineup.fill).toBeNull();
+    // time nobody scheduled shows the title card, not more programmes
+    expect(b.lineup.fill).toEqual({ type: 'off_air' });
   });
 
   it('turns a break choice into the numbers behind it, drawing from the commercials found', () => {

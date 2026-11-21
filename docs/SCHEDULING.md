@@ -37,7 +37,7 @@ A lineup has these parts. Everything is optional.
 
 - **timezone**: IANA name. All times below are local to it, so 8pm stays 8pm across daylight saving. If you leave it blank the server's own time zone is used.
 - **grid_minutes**: 5, 10, 15, 20, 30 or 60. Every show starts on the grid. A 22-minute episode in a 30-minute grid is followed by 8 minutes of filler (the station slate today; commercials and bumpers from M4). With no blocks and no grid, items simply play back to back.
-- **fill**: what airs when no block covers the time. Defaults to the strategy's own behaviour.
+- **fill**: what airs when no block covers the time. Unset, it follows the strategy (keeps playing shows). Set it to `{ "type": "off_air" }` for the channel's off-air screen (title card, bars, snow or your picture) instead of any programme, `{ "type": "chaos" }` for random programmes, or a show, pool or rotation. The same `off_air` source can be the source of a block, to hold the screen for those hours. The editors call this **When nothing is scheduled**; a new weekly channel starts on the off-air screen.
 
 ### Sources: where a slot's programming comes from
 
@@ -155,6 +155,6 @@ Add an `ads` section to the lineup and each slot's spare time becomes breaks, co
 
 ## One episode per time slot
 
-A time slot normally fills its hours: when an episode ends, the next one starts, until the slot's end time. Turn on **One episode only** for a slot (`"once": true` in the lineup) to air a single episode at the start time and leave the rest of the slot to the gap policy: with **When a show runs out → Test screen** that is the channel's off-air screen (colour bars and tone, if you chose them). The guide shows the show for its own time and "Off air" after it.
+A time slot normally fills its hours: when an episode ends, the next one starts, until the slot's end time. Turn on **One episode only** for a slot (`"once": true` in the lineup) to air a single episode at the start time and leave the rest of the slot to the gap policy: with the off-air screen chosen for **When nothing is scheduled** (or the older **When a show runs out → Test screen** policy) that is the channel's off-air screen (colour bars and tone, if you chose them). The guide shows the show for its own time and "Off air" after it.
 
 The short "please stand by" between back-to-back episodes is the padding that brings each episode up to its half-hour (or hour) slot, not the end of the show; commercials and bumpers fill it when the channel has them.

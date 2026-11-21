@@ -185,7 +185,7 @@ pub struct AdPreset {
 }
 
 /// The presets, from none to heavy.
-pub const AD_PRESETS: [AdPreset; 5] = [
+pub const AD_PRESETS: [AdPreset; 6] = [
     AdPreset {
         id: "none",
         name: "No commercials",
@@ -225,6 +225,16 @@ pub const AD_PRESETS: [AdPreset; 5] = [
         max_breaks: 6,
         minutes_per_hour: 12,
         mid_breaks: true,
+    },
+    AdPreset {
+        id: "short",
+        name: "Short break between shows",
+        about: "No breaks inside shows; a small break of about a minute after each one. Works on any channel, chaos and shuffle included.",
+        commercials: true,
+        pod_seconds: 60,
+        max_breaks: 0,
+        minutes_per_hour: 4,
+        mid_breaks: false,
     },
     AdPreset {
         id: "after",
@@ -1125,11 +1135,16 @@ mod tests {
         );
         assert!(AdConfig::default().describe(30, 30).contains("no room"));
         let mut after = AdConfig::default();
-        after.apply_preset(&AD_PRESETS[4]);
+        after.apply_preset(&AD_PRESETS[5]);
         assert!(after.describe(60, 44).contains("one break after the show"));
         let mut none = AdConfig::default();
         none.apply_preset(&AD_PRESETS[0]);
         assert!(none.describe(30, 22).contains("station cards"));
+        let mut short = AdConfig::default();
+        short.apply_preset(&AD_PRESETS[4]);
+        assert_eq!(short.preset_id(), "short");
+        assert!(!short.mid_breaks);
+        assert!(short.describe(30, 22).contains("after the show"));
     }
 
     #[test]

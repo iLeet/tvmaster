@@ -48,6 +48,9 @@ pub enum Source {
     },
     /// Anything, random.
     Chaos,
+    /// Nothing: the channel's off-air screen (a title card, bars, snow or a picture). As the fill it
+    /// means time no slot covers shows the screen instead of more programmes.
+    OffAir,
 }
 
 impl Source {
@@ -81,7 +84,7 @@ impl Source {
                     changed |= i.map_shows(f);
                 }
             }
-            Source::Chaos => {}
+            Source::Chaos | Source::OffAir => {}
         }
         changed
     }
@@ -374,7 +377,7 @@ fn check_source(s: &Source, depth: u32) -> Result<(), String> {
     }
     match s {
         Source::Show { show } if show.trim().is_empty() => Err("a show source needs a name".into()),
-        Source::Show { .. } | Source::Chaos | Source::Pool { .. } => Ok(()),
+        Source::Show { .. } | Source::Chaos | Source::OffAir | Source::Pool { .. } => Ok(()),
         Source::Rotation { items, advance } => {
             if items.is_empty() || items.len() > 50 {
                 return Err("a rotation needs 1-50 items".into());

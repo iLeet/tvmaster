@@ -137,6 +137,7 @@ struct ChannelEditorSheet: View {
     @State private var ls = LineupSettings()
     @State private var lsOriginal = LineupSettings()
     @State private var showNames: [String] = []
+    @State private var adPresets: [AdPreset] = []
     private enum Tab: String, CaseIterable { case general = "General", programming = "Programming", picture = "Picture & sound", breaks = "Breaks", guide = "Guide", info = "Pages" }
     private var tabs: [Tab] { isGuide ? [.general, .guide] : isInfo ? [.general, .info] : (isNew || isTest) ? [.general] : [.general, .programming, .picture, .breaks] }
 
@@ -183,7 +184,8 @@ struct ChannelEditorSheet: View {
                 if rawLineup == nil && !loadingRaw {
                     Text("This server did not send the channel's lineup. Update the TVMaster server.").foregroundStyle(.secondary).padding(30)
                 } else {
-                    ProgrammingForm(ls: $ls, shows: showNames, libraries: model.libraries)
+                    ProgrammingForm(ls: $ls, strategy: $strategy, runOut: $runOut, chaos: $chaos, ps: $ps, shows: showNames, libraries: model.libraries,
+                                    breaksSummary: (ls.ads?.breaksLabel(in: adPresets) ?? "No commercial breaks"), onBreaks: { tab = .breaks })
                 }
             } else if tab == .breaks && !isGuide && !isNew && !isTest && !isInfo {
                 BreaksForm(ls: $ls, libraries: model.libraries, theme: ps.theme)
@@ -245,12 +247,19 @@ struct ChannelEditorSheet: View {
                         ForEach(shows) { lib in
                             Toggle("\(lib.name) (\(lib.items) files)", isOn: Binding(get: { libraryIDs.contains(lib.id) }, set: { on in if on { libraryIDs.insert(lib.id) } else { libraryIDs.remove(lib.id) } }))
                         }
-                        Picker("Strategy", selection: $strategy) { ForEach(Strategy.allCases) { Text($0.label).tag($0) } }
-                        if strategy != .chaos {
-                            LabeledContent("Surprises \(Int(chaos))%") { Slider(value: $chaos, in: 0...100, step: 1) }
-                            Text("Swaps this share of picks for something random, so an orderly channel now and then airs something unexpected. 0 = never.").font(.caption).foregroundStyle(.secondary)
+                        if isNew {
+                            Picker("Style", selection: $strategy) { ForEach(Strategy.allCases) { Text($0.label).tag($0) } }
+                        } else {
+                            HStack(alignment: .top) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("How it plays").font(.headline)
+                                    Text(ls.summary(strategy: strategy, runOut: runOut, breaks: (ls.ads?.breaksLabel(in: adPresets) ?? "No commercial breaks")))
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Button("Programming…") { tab = .programming }.glassButton()
+                            }
                         }
-                        Picker("When a show runs out of episodes", selection: $runOut) { ForEach(RunOut.allCases) { Text($0.label).tag($0) } }
                     }
                 }
                 if !isGuide && !isTest && !isNew && !isInfo {
@@ -268,12 +277,6 @@ struct ChannelEditorSheet: View {
                                 Button("Start over", role: .destructive) { Task { _ = await model.run { try await model.client!.reset(channel: id, what: "progress") } } }
                             } message: { Text("Every show on this channel starts again at its first episode, and the schedule is re-planned from now.") }
                     }
-                    Section("When nothing is scheduled") {
-                        Picker("Screen", selection: $ps.offAirScreen) { ForEach(PictureSoundSettings.screens, id: \.value) { Text($0.label).tag($0.value) } }
-                        Toggle("Test tone", isOn: $ps.offAirTone)
-                        Text("What shows in the gaps between your time slots, when a show has run out, or when its files are not available. Colour bars with a tone is the classic test pattern.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
                 }
                 Section("Running it") {
                     if !isInfo { Toggle("Autopilot (edits re-roll the future automatically)", isOn: $autopilot) }
@@ -281,8 +284,7 @@ struct ChannelEditorSheet: View {
                 }
                 if let channel, !isGuide, !isInfo {
                     Section("More") {
-                        Button("Edit time slots, specials and ads (Programming tab)") { tab = .programming }
-                        Button("Seasons and rotations in the web admin…") { model.openInBrowser("/admin/#/channels/\(channel.id)?tab=programming") }
+                        Button("Programming: the week, gaps, specials and sign-off") { tab = .programming }
                         Button("Re-roll the schedule now") {
                             Task { if let c = model.client { _ = await model.run { try await c.reroll(channel: channel.id) } } }
                         }
@@ -331,6 +333,7 @@ struct ChannelEditorSheet: View {
                         ls = LineupSettings(lineup: rawLineup)
                         lsOriginal = ls
                         showNames = ((try? await client.shows()) ?? []).map(\.name).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+                        adPresets = (try? await client.adOptions().presets) ?? []
                     }
                 }
                 loadingRaw = false
@@ -383,8 +386,6 @@ struct ChannelEditorSheet: View {
         if !isGuide, !isTest, !isNew, !isInfo, ls != lsOriginal, rawLineup != nil {
             if let p = ls.problem { model.lastError = p; saving = false; return }
             f["lineup"] = ls.apply(to: f["lineup"] ?? rawLineup)
-            // A channel with time slots is a TV-schedule channel.
-            if !ls.slots.isEmpty { f["strategy"] = .string(Strategy.blockGrid.rawValue) }
         }
         let ok = await model.run { try await client.saveChannel(f) } != nil
         saving = false
@@ -421,14 +422,23 @@ struct PictureSoundForm: View {
                 }
             }
             Section {
-                Button("Reset picture and sound to defaults", role: .destructive) { ps = PictureSoundSettings() }.glassButton()
-                Text("Audio, subtitles, picture, graphics and the off-air screen go back to their defaults when you save. Per-show settings are kept.").font(.caption).foregroundStyle(.secondary)
+                Button("Reset picture and sound to defaults", role: .destructive) {
+                    // The off-air screen and sign-off hours live on the Programming tab: keep them.
+                    var n = PictureSoundSettings()
+                    n.offAirScreen = ps.offAirScreen; n.offAirMessage = ps.offAirMessage; n.offAirImage = ps.offAirImage; n.offAirTone = ps.offAirTone
+                    n.signOffEnabled = ps.signOffEnabled; n.signOffFrom = ps.signOffFrom; n.signOffTo = ps.signOffTo; n.signOffStyle = ps.signOffStyle
+                    ps = n
+                }.glassButton()
+                Text("Audio, subtitles, picture and graphics go back to their defaults when you save. Per-show settings are kept.").font(.caption).foregroundStyle(.secondary)
             }
-            Section("When nothing is on air") {
-                Picker("Screen", selection: $ps.offAirScreen) { ForEach(PictureSoundSettings.screens, id: \.value) { Text($0.label).tag($0.value) } }
-                if ps.offAirScreen == "card" { TextField("Message", text: $ps.offAirMessage, prompt: Text("PLEASE STAND BY")) }
-                if ps.offAirScreen == "image" { PictureChooser(title: "Picture", path: $ps.offAirImage) }
-                Toggle("Test tone (hiss with snow)", isOn: $ps.offAirTone)
+            if testOnly {
+                Section("What this channel shows") {
+                    Text("A test pattern channel airs only its screen, all the time. (To make an ordinary channel go off the air at night, use its Programming tab.)").font(.caption).foregroundStyle(.secondary)
+                    Picker("Screen", selection: $ps.offAirScreen) { ForEach(PictureSoundSettings.screens, id: \.value) { Text($0.label).tag($0.value) } }
+                    if ps.offAirScreen == "card" { TextField("Message", text: $ps.offAirMessage, prompt: Text("PLEASE STAND BY")) }
+                    if ps.offAirScreen == "image" { PictureChooser(title: "Picture", path: $ps.offAirImage) }
+                    Toggle("Test tone (hiss with snow)", isOn: $ps.offAirTone)
+                }
             }
             if !testOnly {
             Section("Audio") {
@@ -494,17 +504,6 @@ struct PictureSoundForm: View {
                     Picker("Speed", selection: $ps.tickerSpeed) { Text("Slow").tag("slow"); Text("Normal").tag("normal"); Text("Fast").tag("fast") }.pickerStyle(.segmented)
                     Stepper(ps.tickerEvery == 0 ? "On all the time" : "Appears every \(ps.tickerEvery) minutes", value: $ps.tickerEvery, in: 0...60, step: 5)
                     ThemePreviewView(choice: ps.theme ?? ThemeChoice(), what: "ticker", text: ([ps.tickerLines.joined(separator: "   •   ")] + (ps.tickerUpNext ? ["Up next: Cheers at 8:30 PM"] : [])).filter { !$0.isEmpty }.joined(separator: "   •   "), label: ps.tickerLabel, top: ps.tickerPosition == "top")
-                }
-            }
-            Section("Sign-off") {
-                Toggle("Go off the air overnight", isOn: $ps.signOffEnabled)
-                if ps.signOffEnabled {
-                    HStack {
-                        TextField("Off at", text: $ps.signOffFrom).frame(width: 90)
-                        TextField("Back at", text: $ps.signOffTo).frame(width: 90)
-                        Picker("", selection: $ps.signOffStyle) { ForEach(PictureSoundSettings.screens, id: \.value) { Text($0.label).tag($0.value) } }.labelsHidden()
-                    }
-                    Text("24-hour times like 02:00, in the channel's time zone.").font(.caption).foregroundStyle(.secondary)
                 }
             }
             Section {

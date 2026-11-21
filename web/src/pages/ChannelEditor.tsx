@@ -1,17 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, errorMessage } from '../api';
-import { emptyLineup, lineupSummary, nextFreeNumber, slugify, validateId } from '../lib';
+import { emptyLineup, nextFreeNumber, slugify, validateId } from '../lib';
 import { useQuery } from '../live';
 import { emptyGuide, guideProblem, withGuideDefaults } from '../guide';
-import { SCREENS, emptyOptions, langName, withDefaults } from '../options';
+import { emptyOptions, langName, withDefaults } from '../options';
 import { href, navigate } from '../router';
-import type { Channel, ChannelOptions, ChannelTemplates, ChannelView, GuideConfig, InfoConfig, Library, RunOut, ShowSummary, Strategy, System } from '../types';
-import { Badge, Btn, Card, Chips, ConfirmBtn, Field, Segmented, Spinner, Toggle, useToast } from '../ui';
+import type { AdPreset, Channel, ChannelOptions, ChannelTemplates, ChannelView, GuideConfig, InfoConfig, Library, RunOut, ShowSummary, Strategy, System } from '../types';
+import { Badge, Btn, Card, Chips, ConfirmBtn, Field, Spinner, Toggle, useToast } from '../ui';
 import { AdsEditor } from './AdsEditor';
 import { GuideEditor } from './GuideEditor';
 import { InfoEditor } from './InfoEditor';
 import { infoProblem, withInfoDefaults } from '../info';
 import { LineupEditor } from './LineupEditor';
+import { breaksLabel, programmingSummary } from '../programming';
 import { PictureSound } from './PictureSound';
 import { ThemeChoiceEditor, ThemePreview, emptyChoice, useThemeCatalogue } from '../ThemePicker';
 
@@ -33,13 +34,6 @@ interface Draft {
   options: ChannelOptions;
 }
 
-const STRATEGIES: { value: Strategy; label: string; help: string }[] = [
-  { value: 'sequential', label: 'In order', help: 'Episodes in order, shows interleaved, forever.' },
-  { value: 'shuffle', label: 'Shuffle', help: 'Every episode once per pass, in random order.' },
-  { value: 'chaos', label: 'Chaos', help: 'Anything, at random.' },
-  { value: 'block_grid', label: 'Weekly lineup', help: 'A real TV schedule: time slots by day and time, seasons and events (set them on the Programming tab).' },
-];
-
 function soundSummary(o: ChannelOptions): string {
   const langs = o.audio.languages.length ? o.audio.languages.map(langName).join(', then ') : "the file's own default track";
   const subs = { off: 'no subtitles', always: 'subtitles always', forced: 'forced subtitles only', foreign: 'subtitles when the audio is foreign', sdh: 'subtitles for the hard of hearing' }[o.subtitles.mode];
@@ -47,14 +41,6 @@ function soundSummary(o: ChannelOptions): string {
   const extras = [o.audio.loudness !== 'off' ? 'volume levelling' : '', o.video.look !== 'none' ? `${o.video.look.replace('_', ' ')} look` : '', n ? `${n} show override${n === 1 ? '' : 's'}` : ''].filter(Boolean);
   return `Audio: ${langs}. ${subs[0].toUpperCase()}${subs.slice(1)}.${extras.length ? ` ${extras.join(', ')}.` : ''}`;
 }
-
-const RUN_OUT: { value: RunOut; label: string; help: string }[] = [
-  { value: 'keep_going', label: 'Keep going', help: 'After the last episode, wrap to the first and carry on.' },
-  { value: 'next_in_rotation', label: 'Next in rotation', help: 'Rotations hand over to the next show at each finale.' },
-  { value: 'chaos_fill', label: 'Chaos fill', help: 'When a show is finished, air random content in its slot.' },
-  { value: 'off_air', label: 'Test screen', help: 'Each episode airs once. When a show has run out its slot shows the channel’s off-air screen (colour bars and a tone, if you chose that under “When nothing is scheduled”).' },
-  { value: 'hybrid', label: 'Hybrid', help: 'Chaos fill, and unscheduled time airs chaos too.' },
-];
 
 const fromChannel = (c: Channel): Draft => ({
   id: c.id, number: c.number, name: c.name, group: c.group ?? '', kind: c.kind, strategy: c.strategy, run_out: c.run_out,
@@ -71,6 +57,7 @@ export function ChannelEditor({ id, tab, template }: { id: string; tab: string; 
   const shows = useQuery(() => api.get<ShowSummary[]>('/shows'));
   const sys = useQuery(() => api.get<System>('/system'));
   const templates = useQuery(() => api.get<ChannelTemplates>('/channel-templates'));
+  const adOptions = useQuery(() => api.get<{ presets: AdPreset[] }>('/ads/options'));
   const tpl = isNew ? templates.data?.templates.find((t) => t.id === (template ?? 'tv')) ?? null : null;
 
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -236,20 +223,13 @@ export function ChannelEditor({ id, tab, template }: { id: string; tab: string; 
                 <Field label="Libraries" hint={showLibs.length ? 'The shows this channel draws from.' : 'Add a TV shows library first.'}>
                   <Chips options={showLibs.map((l) => ({ value: l.id, label: `${l.path.split(/[\\/]/).filter(Boolean).pop() ?? l.path} (${l.items})` }))} value={draft.library_ids} onToggle={(lid) => set({ library_ids: draft.library_ids.includes(lid) ? draft.library_ids.filter((x) => x !== lid) : [...draft.library_ids, lid] })} />
                 </Field>
-                <Field label="Strategy" hint={STRATEGIES.find((s) => s.value === draft.strategy)?.help}>
-                  <Segmented value={draft.strategy} options={STRATEGIES} onChange={(strategy) => set({ strategy })} />
-                </Field>
-                {draft.strategy !== 'chaos' && (
-                  <Field label={`Surprises: ${draft.chaos}%`} hint="Swaps this share of picks for something random, so an orderly channel now and then airs something unexpected. 0 = never.">
-                    <input type="range" min={0} max={100} value={draft.chaos} onChange={(e) => set({ chaos: Number(e.target.value) })} />
-                  </Field>
-                )}
-                <Field label="When a show runs out of episodes" hint={RUN_OUT.find((r) => r.value === draft.run_out)?.help}>
-                  <Segmented value={draft.run_out} options={RUN_OUT} onChange={(run_out) => set({ run_out })} />
-                </Field>
-                {draft.strategy !== 'block_grid' && draft.lineup.blocks.length > 0 && (
-                  <p className="small dim">This channel has a lineup ({lineupSummary(draft.lineup)}) that applies on top of the strategy.</p>
-                )}
+                <div className="row between wrap">
+                  <div>
+                    <strong>How it plays</strong>
+                    <p className="small dim" style={{ margin: 0 }}>{programmingSummary(draft.strategy, draft.run_out, draft.lineup, breaksLabel(draft.lineup.ads, adOptions.data?.presets ?? []))}</p>
+                  </div>
+                  <Btn onClick={() => goTab('programming')}>Programming…</Btn>
+                </div>
               </Card>
             </>
           )}
@@ -294,26 +274,26 @@ export function ChannelEditor({ id, tab, template }: { id: string; tab: string; 
       )}
 
       {shownTab === 'programming' && draft.kind === 'programming' && (
-        <>
-          <LineupEditor lineup={draft.lineup} shows={shownShows} onChange={(lineup) => set({ lineup, ...(draft.strategy !== 'block_grid' && lineup.blocks.length > 0 ? { strategy: 'block_grid' as Strategy } : {}) })} />
-          <Card className="stack">
-            <h2>When nothing is scheduled</h2>
-            <p className="small dim">What the channel shows in the gaps between your time slots, when a show has run out, or when its files are not available (a drive that is unplugged).</p>
-            <Field label="Screen" hint={SCREENS.find((x) => x.value === draft.options.off_air.screen)?.help}>
-              <Segmented value={draft.options.off_air.screen} options={SCREENS} onChange={(screen) => set({ options: { ...draft.options, off_air: { ...draft.options.off_air, screen, tone: screen === 'bars' ? true : draft.options.off_air.tone } } })} />
-            </Field>
-            <Toggle checked={draft.options.off_air.tone} onChange={(tone) => set({ options: { ...draft.options, off_air: { ...draft.options.off_air, tone } } })} label={<span>Test tone <span className="dim small">a steady 1 kHz tone, like a real test pattern</span></span>} />
-            <p className="small dim">The station card message, your own picture and the rest are on the Sound & picture tab.</p>
-          </Card>
-        </>
+        <LineupEditor
+          value={{ strategy: draft.strategy, run_out: draft.run_out, chaos: draft.chaos, lineup: draft.lineup, options: draft.options }}
+          shows={shownShows}
+          breaksSummary={breaksLabel(draft.lineup.ads, adOptions.data?.presets ?? [])}
+          onBreaks={() => goTab('ads')}
+          onChange={(p) => {
+            const next = { ...draft, ...p };
+            // Putting slots on the grid makes it a weekly schedule.
+            if (p.lineup && next.strategy !== 'block_grid' && p.lineup.blocks.length > draft.lineup.blocks.length) next.strategy = 'block_grid';
+            setDraft(next);
+          }}
+        />
       )}
 
       {shownTab === 'picture' && draft.kind === 'test' && (
-        <PictureSound options={draft.options} onChange={(options) => set({ options })} lineup={draft.lineup} onLineup={(lineup) => set({ lineup })} shows={[]} sys={sys.data ?? undefined} testOnly />
+        <PictureSound options={draft.options} onChange={(options) => set({ options })} shows={[]} sys={sys.data ?? undefined} testOnly />
       )}
 
       {shownTab === 'picture' && draft.kind === 'programming' && (
-        <PictureSound options={draft.options} onChange={(options) => set({ options })} lineup={draft.lineup} onLineup={(lineup) => set({ lineup })} shows={shownShows} sys={sys.data ?? undefined} />
+        <PictureSound options={draft.options} onChange={(options) => set({ options })} shows={shownShows} sys={sys.data ?? undefined} />
       )}
 
       {shownTab === 'ads' && draft.kind === 'programming' && (

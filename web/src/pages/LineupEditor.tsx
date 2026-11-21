@@ -1,7 +1,9 @@
 import { useState } from 'react';
-import { blockMinutes, DAY_NAMES, daysLabel, defaultBlock, formatDuration, sourceLabel, timeZones, toggleDay } from '../lib';
-import type { Block, EventDef, Lineup, Season, ShowSummary, Source } from '../types';
-import { Btn, Card, Chips, Field, Segmented, Toggle } from '../ui';
+import { blockMinutes, DAY_NAMES, daysLabel, defaultBlock, formatDuration, timeZones, toggleDay } from '../lib';
+import { GAPS, gapChoice, gapFill, hasSchedule, RUN_OUTS, runOutChoice, STRATEGIES } from '../programming';
+import type { Block, ChannelOptions, EventDef, Lineup, RunOut, Season, ShowSummary, Source, Strategy } from '../types';
+import { Btn, Card, Chips, Field, More, Segmented, Toggle } from '../ui';
+import { OffAirEditor, SignOffEditor } from './OffAir';
 import { WeekGrid } from './WeekGrid';
 
 // ---------- show picker ----------
@@ -45,26 +47,37 @@ export function SourceEditor({
   onChange,
   shows,
   onlyShows = false,
+  playOnly = false,
 }: {
   value: Source;
   onChange: (s: Source) => void;
   shows: ShowSummary[];
   /** A "finale" rotation can only contain single shows. */
   onlyShows?: boolean;
+  /** Shows only (no chaos, no off-air screen): what "play these shows" chooses. */
+  playOnly?: boolean;
 }) {
   const types = onlyShows
     ? [{ value: 'show', label: 'One show' }]
+    : playOnly
+    ? [
+        { value: 'show', label: 'One show' },
+        { value: 'pool', label: 'Several shows' },
+        { value: 'rotation', label: 'Rotation' },
+      ]
     : [
         { value: 'show', label: 'One show' },
         { value: 'pool', label: 'Several shows' },
         { value: 'rotation', label: 'Rotation' },
-        { value: 'chaos', label: 'Chaos' },
+        { value: 'chaos', label: 'Anything' },
+        { value: 'off_air', label: 'Off-air screen' },
       ];
   const set = (type: string) => {
     if (type === value.type) return;
     if (type === 'show') onChange({ type: 'show', show: '' });
     else if (type === 'pool') onChange({ type: 'pool', shows: [], order: 'sequential' });
     else if (type === 'chaos') onChange({ type: 'chaos' });
+    else if (type === 'off_air') onChange({ type: 'off_air' });
     else onChange({ type: 'rotation', advance: { weeks: 4 }, items: [{ type: 'show', show: '' }, { type: 'show', show: '' }] });
   };
   return (
@@ -80,6 +93,7 @@ export function SourceEditor({
         </>
       )}
       {value.type === 'chaos' && <p className="small dim">Anything from the library, at random.</p>}
+      {value.type === 'off_air' && <p className="small dim">The channel's off-air screen: title card, bars, snow or your picture. No programme plays.</p>}
       {value.type === 'rotation' && (
         <div className="nest stack" style={{ gap: 8 }}>
           <div className="row wrap">
@@ -139,7 +153,7 @@ export function BlockEditor({ block, onChange, onRemove, shows }: { block: Block
         <span className="small dim" style={{ alignSelf: 'flex-end', paddingBottom: 9 }}>{mins ? formatDuration(mins * 60_000) : 'Start and end must differ'}</span>
       </div>
       <Field label="Airs"><SourceEditor value={block.source} onChange={(s) => onChange({ ...block, source: s })} shows={shows} /></Field>
-      <Toggle checked={!!block.once} onChange={(once) => onChange({ ...block, once })} label={<span>One episode only <span className="dim small">air one at the start time, then the rest of the slot is a gap (the test screen, if that is your run-out choice) instead of more episodes</span></span>} />
+      <Toggle checked={!!block.once} onChange={(once) => onChange({ ...block, once })} label={<span>One episode only <span className="dim small">air one at the start time, then the rest of the slot counts as unscheduled time (what you chose for “When nothing is scheduled”)</span></span>} />
     </div>
   );
 }
@@ -191,86 +205,166 @@ function BlocksPanel({ blocks, onChange, shows, step }: { blocks: Block[]; onCha
   );
 }
 
-// ---------- the editor ----------
+// ---------- the programming tab ----------
 
-export function LineupEditor({ lineup, onChange, shows }: { lineup: Lineup; onChange: (l: Lineup) => void; shows: ShowSummary[] }) {
+export interface Programming {
+  strategy: Strategy;
+  run_out: RunOut;
+  chaos: number;
+  lineup: Lineup;
+  options: ChannelOptions;
+}
+
+/**
+ * Everything about what plays when, in the order a person asks: how it plays, the week, what
+ * happens in gaps, what happens when a show runs out, then the rarely-touched rest.
+ */
+export function LineupEditor({ value, onChange, shows, breaksSummary, onBreaks }: {
+  value: Programming;
+  onChange: (p: Partial<Programming>) => void;
+  shows: ShowSummary[];
+  breaksSummary: string;
+  onBreaks: () => void;
+}) {
   const [json, setJson] = useState<string | null>(null);
   const [jsonErr, setJsonErr] = useState<string | null>(null);
   const zones = timeZones();
-  const patch = (p: Partial<Lineup>) => onChange({ ...lineup, ...p });
-  const hasBlocks = lineup.blocks.length > 0 || lineup.seasons.some((s) => s.blocks.length > 0);
+  const { strategy, run_out: runOut, lineup, options } = value;
+  const patch = (p: Partial<Lineup>) => onChange({ lineup: { ...lineup, ...p } });
+  const weekly = hasSchedule(strategy, lineup);
+  const gap = gapChoice(lineup, runOut);
+  const seasonal = lineup.seasons.length;
+  const specials = lineup.events.length;
+  const setStrategy = (s: Strategy) => {
+    // Choosing a weekly schedule means unscheduled time is a real gap: the off-air screen, unless a choice was made.
+    const needsFill = s === 'block_grid' && lineup.fill === null && runOut !== 'off_air';
+    onChange({ strategy: s, ...(needsFill ? { lineup: { ...lineup, fill: { type: 'off_air' as const } } } : {}) });
+  };
 
   return (
     <div className="stack gap-lg">
       <datalist id="show-list">{shows.map((s) => <option key={s.name} value={s.name}>{`${s.episodes} episodes`}</option>)}</datalist>
       <datalist id="zone-list">{zones.map((z) => <option key={z} value={z} />)}</datalist>
 
-      <Card className="flat stack">
-        <h2>Basics</h2>
+      <Card className="stack">
+        <h2>How it plays</h2>
+        <Field label="Style" hint={STRATEGIES.find((s) => s.value === strategy)?.help}>
+          <Segmented value={strategy} options={STRATEGIES} onChange={setStrategy} />
+        </Field>
+        {strategy !== 'block_grid' && weekly && <p className="small dim">This channel also has timed slots, which take priority at their times.</p>}
+      </Card>
+
+      {weekly && (
+        <Card className="stack">
+          <div>
+            <h2>Your week</h2>
+            <p className="small dim">Drag on the grid to place shows: “Weeknights at 8: sitcoms”, “Saturday morning cartoons”. Click a slot to choose what airs.</p>
+          </div>
+          <BlocksPanel blocks={lineup.blocks} shows={shows} step={lineup.grid_minutes ?? 30} onChange={(blocks) => patch({ blocks })} />
+        </Card>
+      )}
+
+      {weekly && (
+        <Card className="stack">
+          <div>
+            <h2>When nothing is scheduled</h2>
+            <p className="small dim">Time between your slots, and slots whose show has no episodes left.</p>
+          </div>
+          <Field label="Then the channel will" hint={GAPS.find((g) => g.value === gap)?.help}>
+            <Segmented value={gap} options={GAPS} onChange={(c) => patch({ fill: gapFill(c, strategy, runOut, lineup.fill) })} />
+          </Field>
+          {gap === 'these' && lineup.fill && <SourceEditor value={lineup.fill} shows={shows} playOnly onChange={(f) => patch({ fill: f })} />}
+          {gap === 'screen' && <p className="small dim">Set what the screen looks like under “The off-air screen” below.</p>}
+        </Card>
+      )}
+
+      <Card className="stack">
+        <div>
+          <h2>When a show runs out of episodes</h2>
+          <p className="small dim">After its last unaired episode.</p>
+        </div>
+        <Field label="Then the channel will" hint={RUN_OUTS.find((r) => r.value === runOutChoice(runOut))?.help}>
+          <Segmented value={runOutChoice(runOut)} options={RUN_OUTS} onChange={(r) => onChange({ run_out: r })} />
+        </Field>
+        {runOut === 'hybrid' && <p className="small dim">This channel was set to “hybrid”: something random for finished shows, and random shows in unscheduled time. Pick any choice above to replace that.</p>}
+      </Card>
+
+      <OffAirEditor options={options} onChange={(o) => onChange({ options: o })} />
+
+      <Card className="row between wrap">
+        <div>
+          <strong>Commercial breaks</strong>
+          <p className="small dim" style={{ margin: 0 }}>{breaksSummary}</p>
+        </div>
+        <Btn onClick={onBreaks}>Set up breaks…</Btn>
+      </Card>
+
+      <More
+        summary={[
+          strategy !== 'chaos' ? `${value.chaos}% surprises` : '',
+          lineup.signoff ? 'signs off overnight' : '',
+          seasonal ? `${seasonal} seasonal change${seasonal === 1 ? '' : 's'}` : '',
+          specials ? `${specials} special${specials === 1 ? '' : 's'}` : '',
+        ].filter(Boolean).join(' · ') || 'surprises, sign-off, seasons, holidays, time zone'}
+      >
+        {strategy !== 'chaos' && (
+          <Field label={`Surprises: ${value.chaos}%`} hint="Swaps this share of picks for something random, so an orderly channel now and then airs something unexpected. 0 = never.">
+            <input type="range" min={0} max={100} value={value.chaos} onChange={(e) => onChange({ chaos: Number(e.target.value) })} />
+          </Field>
+        )}
         <div className="row wrap" style={{ alignItems: 'flex-start' }}>
-          <Field label="Time zone" hint="All times below are local to this zone.">
+          <Field label="Time zone" hint="Every time on this channel is local to this zone.">
             <input className="input" list="zone-list" style={{ width: 240 }} value={lineup.timezone} placeholder="Server's time zone" onChange={(e) => patch({ timezone: e.target.value })} />
           </Field>
-          <Field label="Time grid" hint={hasBlocks ? 'Shows start on this grid; spare time fills with breaks.' : 'Without blocks, shows play back to back.'}>
+          <Field label="Start times" hint={weekly ? 'Shows start on this grid; spare time fills with breaks.' : 'Without a schedule, shows play back to back.'}>
             <select className="select" style={{ width: 200 }} value={lineup.grid_minutes ?? ''} onChange={(e) => patch({ grid_minutes: e.target.value ? Number(e.target.value) : null })}>
-              <option value="">{hasBlocks ? 'Automatic (30 minutes)' : 'None (back to back)'}</option>
-              {[5, 10, 15, 20, 30, 60].map((m) => <option key={m} value={m}>{m} minutes</option>)}
+              <option value="">{weekly ? 'Automatic (every 30 minutes)' : 'Back to back'}</option>
+              {[5, 10, 15, 20, 30, 60].map((m) => <option key={m} value={m}>Every {m} minutes</option>)}
             </select>
           </Field>
-          <Field label="After downtime" hint={lineup.catch_up === 'resume' ? 'Carry on from the last episode that really aired.' : 'Act as if the channel kept airing.'}>
-            <Segmented value={lineup.catch_up} options={[{ value: 'resume', label: 'Resume' }, { value: 'advance', label: 'Advance' }]} onChange={(c) => patch({ catch_up: c })} />
+          <Field label="After the server was off" hint={lineup.catch_up === 'resume' ? 'Carry on from the last episode that really aired.' : 'Act as if the channel kept airing.'}>
+            <Segmented value={lineup.catch_up} options={[{ value: 'resume', label: 'Carry on' }, { value: 'advance', label: 'Skip ahead' }]} onChange={(c) => patch({ catch_up: c })} />
           </Field>
         </div>
-        <Field label="When nothing is scheduled" hint="Programming for time no block covers. Off = follow the channel's strategy.">
-          <Toggle checked={lineup.fill !== null} onChange={(on) => patch({ fill: on ? { type: 'chaos' } : null })} label="Custom fill programming" />
-          {lineup.fill && <SourceEditor value={lineup.fill} shows={shows} onChange={(f) => patch({ fill: f })} />}
-        </Field>
-      </Card>
 
-      <Card className="flat stack">
-        <div>
-          <h2>Weekly blocks</h2>
-          <p className="small dim">Dayparts and time slots: "Weeknights 8pm: a rotation of sitcoms", "Saturday morning cartoons". Drag on the grid to lay out your week.</p>
-        </div>
-        <BlocksPanel blocks={lineup.blocks} shows={shows} step={lineup.grid_minutes ?? 30} onChange={(blocks) => patch({ blocks })} />
-      </Card>
+        <SignOffEditor lineup={lineup} onLineup={(l) => onChange({ lineup: l })} />
 
-      <Card className="flat stack">
-        <div>
-          <h2>Seasons</h2>
-          <p className="small dim">Date ranges whose blocks replace the weekly ones: a fall lineup, summer reruns, a midseason premiere.</p>
+        <div className="stack">
+          <div>
+            <strong>Seasonal changes</strong>
+            <p className="small dim">Date ranges whose slots replace the weekly ones: a fall lineup, summer reruns, a midseason premiere. (Called “seasons” in the API.)</p>
+          </div>
+          {lineup.seasons.map((s, i) => (
+            <SeasonEditor key={i} season={s} shows={shows} step={lineup.grid_minutes ?? 30} onChange={(ns) => patch({ seasons: lineup.seasons.map((x, j) => (j === i ? ns : x)) })} onRemove={() => patch({ seasons: lineup.seasons.filter((_, j) => j !== i) })} />
+          ))}
+          <div><Btn icon="plus" onClick={() => patch({ seasons: [...lineup.seasons, { name: 'Fall lineup', from: '09-01', to: '05-31', blocks: [] }] })}>Add a seasonal change</Btn></div>
         </div>
-        {lineup.seasons.map((s, i) => (
-          <SeasonEditor key={i} season={s} shows={shows} step={lineup.grid_minutes ?? 30} onChange={(ns) => patch({ seasons: lineup.seasons.map((x, j) => (j === i ? ns : x)) })} onRemove={() => patch({ seasons: lineup.seasons.filter((_, j) => j !== i) })} />
-        ))}
-        <div><Btn icon="plus" onClick={() => patch({ seasons: [...lineup.seasons, { name: 'Fall lineup', from: '09-01', to: '05-31', blocks: [] }] })}>Add season</Btn></div>
-      </Card>
 
-      <Card className="flat stack">
-        <div>
-          <h2>Events</h2>
-          <p className="small dim">Marathons, theme nights and yearly holiday specials. They override everything while they run, and keep their own episode counters.</p>
+        <div className="stack">
+          <div>
+            <strong>Holidays and specials</strong>
+            <p className="small dim">Marathons, theme nights and yearly holiday specials. They override everything while they run, and keep their own episode counters. (Called “events” in the API.)</p>
+          </div>
+          {lineup.events.map((e, i) => (
+            <EventEditor key={i} event={e} shows={shows} onChange={(ne) => patch({ events: lineup.events.map((x, j) => (j === i ? ne : x)) })} onRemove={() => patch({ events: lineup.events.filter((_, j) => j !== i) })} />
+          ))}
+          <div><Btn icon="plus" onClick={() => patch({ events: [...lineup.events, { name: 'Marathon', start: nextHour(), end: nextHour(6), yearly: false, source: { type: 'show', show: '' } }] })}>Add a special</Btn></div>
         </div>
-        {lineup.events.map((e, i) => (
-          <EventEditor key={i} event={e} shows={shows} onChange={(ne) => patch({ events: lineup.events.map((x, j) => (j === i ? ne : x)) })} onRemove={() => patch({ events: lineup.events.filter((_, j) => j !== i) })} />
-        ))}
-        <div><Btn icon="plus" onClick={() => patch({ events: [...lineup.events, { name: 'Marathon', start: nextHour(), end: nextHour(6), yearly: false, source: { type: 'show', show: '' } }] })}>Add event</Btn></div>
-      </Card>
 
-      <Card className="flat stack">
-        <div className="row between">
-          <h2 style={{ margin: 0 }}>Advanced: lineup JSON</h2>
-          <Btn small onClick={() => { setJson(json === null ? JSON.stringify(lineup, null, 2) : null); setJsonErr(null); }}>{json === null ? 'Show' : 'Hide'}</Btn>
+        <div className="stack">
+          <div className="row between">
+            <strong>Advanced: the lineup as JSON</strong>
+            <Btn small onClick={() => { setJson(json === null ? JSON.stringify(lineup, null, 2) : null); setJsonErr(null); }}>{json === null ? 'Show' : 'Hide'}</Btn>
+          </div>
+          {json !== null && (
+            <>
+              <textarea className="input mono" style={{ minHeight: 260 }} value={json} onChange={(e) => setJson(e.target.value)} spellCheck={false} />
+              {jsonErr && <div className="err-banner">{jsonErr}</div>}
+              <div><Btn onClick={() => { try { const v = JSON.parse(json) as Lineup; onChange({ lineup: { ...lineup, ...v } }); setJsonErr(null); } catch (e) { setJsonErr(`Not valid JSON: ${(e as Error).message}`); } }}>Apply JSON</Btn></div>
+            </>
+          )}
         </div>
-        {json !== null && (
-          <>
-            <textarea className="input mono" style={{ minHeight: 260 }} value={json} onChange={(e) => setJson(e.target.value)} spellCheck={false} />
-            {jsonErr && <div className="err-banner">{jsonErr}</div>}
-            <div><Btn onClick={() => { try { const v = JSON.parse(json) as Lineup; onChange({ ...lineup, ...v }); setJsonErr(null); } catch (e) { setJsonErr(`Not valid JSON: ${(e as Error).message}`); } }}>Apply JSON</Btn></div>
-          </>
-        )}
-      </Card>
-      <p className="small dim">Summary: {lineup.blocks.length} blocks. First block: {lineup.blocks[0] ? sourceLabel(lineup.blocks[0].source) : 'none'}.</p>
+      </More>
     </div>
   );
 }

@@ -158,7 +158,8 @@ final class ChannelGuideTests: XCTestCase {
         XCTAssertEqual(b["strategy"]?.stringValue, "block_grid")
         XCTAssertEqual(b["chaos"]?.intValue, 0)
         XCTAssertEqual(b["lineup"]?.get(["grid_minutes"])?.intValue, 30)
-        XCTAssertEqual(b["lineup"]?.get(["fill"]), .null)
+        // time nobody scheduled shows the title card, not more programmes
+        XCTAssertEqual(b["lineup"]?.get(["fill", "type"])?.stringValue, "off_air")
     }
 
     func testTheKidsLookIsWrittenOnlyWhenAsked() {
@@ -180,5 +181,64 @@ final class ChannelGuideTests: XCTestCase {
         XCTAssertTrue(text.contains("Plays 5 shows: A, B, C, D and 1 more"))
         XCTAssertTrue(text.contains("Breaks: Classic TV"))
         XCTAssertTrue(text.contains("Always on"))
+    }
+}
+
+final class ProgrammingWordsTests: XCTestCase {
+    private func slot() -> TimeSlot { var t = TimeSlot(); t.source.kind = .show; t.source.show = "A"; return t }
+
+    func testAnUnsetFillKeepsPlayingUnlessTheOldTestScreenPolicyApplies() {
+        var ls = LineupSettings(); ls.slots = [slot()]
+        XCTAssertEqual(ls.gapChoice(runOut: .nextInRotation), .keep)
+        XCTAssertEqual(ls.gapChoice(runOut: .offAir), .screen)
+        XCTAssertEqual(LineupSettings().gapChoice(runOut: .offAir), .keep)
+    }
+
+    func testEveryChoiceRoundTripsThroughTheFill() {
+        for c in GapChoice.allCases {
+            var ls = LineupSettings(); ls.slots = [slot()]
+            ls.setGap(c, strategy: .blockGrid, runOut: .keepGoing)
+            XCTAssertEqual(ls.gapChoice(runOut: .keepGoing), c)
+            // and through the JSON the server stores
+            let back = LineupSettings(lineup: ls.apply(to: nil))
+            XCTAssertEqual(back.gapChoice(runOut: .keepGoing), c)
+        }
+    }
+
+    func testTheOffAirScreenIsAFillTheServerUnderstands() {
+        var ls = LineupSettings()
+        ls.setGap(.screen, strategy: .blockGrid, runOut: .keepGoing)
+        XCTAssertEqual(ls.apply(to: nil).get(["fill", "type"])?.stringValue, "off_air")
+    }
+
+    func testKeepPlayingIsSaidOutrightUnderTheOldTestScreenPolicy() {
+        var ls = LineupSettings(); ls.slots = [slot()]
+        ls.setGap(.keep, strategy: .shuffle, runOut: .offAir)
+        XCTAssertEqual(ls.fill?.kind, .pool)
+        XCTAssertEqual(ls.fill?.order, "shuffle")
+        XCTAssertEqual(ls.gapChoice(runOut: .offAir), .these)
+    }
+
+    func testChoosingTheseShowsKeepsShowsAlreadyChosen() {
+        var ls = LineupSettings()
+        var f = SourceChoice(); f.kind = .show; f.show = "B"; ls.fill = f
+        ls.setGap(.these, strategy: .blockGrid, runOut: .keepGoing)
+        XCTAssertEqual(ls.fill?.show, "B")
+    }
+
+    func testHybridIsShownAsSomethingRandomAndSummariesAreOneLine() {
+        XCTAssertEqual(RunOut.hybrid.choice, .chaosFill)
+        var ls = LineupSettings(); ls.slots = [slot(), slot()]
+        ls.setGap(.screen, strategy: .blockGrid, runOut: .nextInRotation)
+        XCTAssertEqual(ls.summary(strategy: .blockGrid, runOut: .nextInRotation, breaks: "commercial breaks: short break between shows"),
+                       "Weekly schedule · 2 slots · nothing scheduled: show the off-air screen · when a show runs out: move to the next show · commercial breaks: short break between shows")
+    }
+
+    func testBreaksAreNamedAfterThePresetInForce() {
+        let short = try! JSONDecoder.snake.decode(AdPreset.self, from: Data(#"{"id":"short","name":"Short break between shows","about":"","commercials":true,"pod_seconds":60,"max_breaks":0,"minutes_per_hour":4,"mid_breaks":false}"#.utf8))
+        var a = AdSettings(); a.apply(short)
+        XCTAssertEqual(a.breaksLabel(in: [short]), "commercial breaks: short break between shows")
+        a.podSeconds = 77
+        XCTAssertEqual(a.breaksLabel(in: [short]), "commercial breaks: custom")
     }
 }

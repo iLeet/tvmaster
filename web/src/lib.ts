@@ -110,6 +110,8 @@ export function sourceLabel(s: Source | null | undefined): string {
       return s.show || '(pick a show)';
     case 'chaos':
       return 'Anything (chaos)';
+    case 'off_air':
+      return 'Off-air screen';
     case 'pool':
       return `${s.shows.length ? s.shows.join(', ') : 'All shows'} (${s.order})`;
     case 'rotation': {

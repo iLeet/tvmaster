@@ -57,7 +57,8 @@ export function adsFor(breaks: string, world: GuideWorld): AdConfig | null {
 /** The body for `POST /channels`. */
 export function buildChannelBody(a: GuideAnswers, world: GuideWorld): Record<string, unknown> {
   const order = a.style === 'shuffle' ? 'shuffle' : 'sequential';
-  const fill: Source | null = a.style !== 'weekly' && a.shows.length > 0 ? { type: 'pool', shows: a.shows, order } : null;
+  // A weekly schedule has real gaps, and what goes in them is the title card; the other styles just keep playing.
+  const fill: Source | null = a.style === 'weekly' ? { type: 'off_air' } : a.shows.length > 0 ? { type: 'pool', shows: a.shows, order } : null;
   const lineup: Channel['lineup'] = { ...emptyLineup(world.timezone), fill, ads: adsFor(a.breaks, world) };
   if (a.style === 'weekly') lineup.grid_minutes = 30;
   const options: ChannelOptions = { ...emptyOptions(), theme: a.look };
@@ -83,7 +84,7 @@ export function summarize(a: GuideAnswers, world: GuideWorld, totalShows: number
   const out: string[] = [];
   out.push(`Channel ${a.number}, ${a.name.trim() || 'unnamed'}.`);
   out.push(a.shows.length === 0 ? `Plays everything in your libraries (${totalShows} show${totalShows === 1 ? '' : 's'}).` : `Plays ${a.shows.length} show${a.shows.length === 1 ? '' : 's'}: ${a.shows.slice(0, 4).join(', ')}${a.shows.length > 4 ? ` and ${a.shows.length - 4} more` : ''}.`);
-  out.push(PLAY_STYLES.find((s) => s.value === a.style)!.title + (a.style === 'weekly' ? ': you lay out the week next.' : '.'));
+  out.push(PLAY_STYLES.find((s) => s.value === a.style)!.title + (a.style === 'weekly' ? ': you lay out the week next, and time you leave empty shows the off-air screen.' : '.'));
   const p = world.presets.find((x) => x.id === a.breaks);
   out.push(a.breaks === 'clean' ? 'No commercial breaks.' : p ? `Breaks: ${p.id === 'none' ? 'station cards only' : p.name}.` : 'No commercial breaks.');
   out.push(a.look ? `Its own look (${a.look.theme}${a.look.gentle || a.look.theme === 'kids' ? ', gentle alerts' : ''}).` : 'Follows the station look.');

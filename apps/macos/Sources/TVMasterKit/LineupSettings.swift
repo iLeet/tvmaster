@@ -4,10 +4,10 @@ import Foundation
 /// or something this editor leaves alone (a rotation), which is kept exactly as it was.
 public struct SourceChoice: Equatable, Sendable {
     public enum Kind: String, CaseIterable, Identifiable, Sendable {
-        case show, pool, chaos, rotation, other
+        case show, pool, chaos, offAir, rotation, other
         public var id: String { rawValue }
         public var label: String {
-            switch self { case .show: "One show"; case .pool: "Several shows"; case .chaos: "Anything"; case .rotation: "A rotation"; case .other: "Other" }
+            switch self { case .show: "One show"; case .pool: "Several shows"; case .chaos: "Anything"; case .offAir: "Off-air screen"; case .rotation: "A rotation"; case .other: "Other" }
         }
     }
     public var kind: Kind = .chaos
@@ -29,6 +29,7 @@ public struct SourceChoice: Equatable, Sendable {
         case "show": kind = .show; show = json.get(["show"])?.stringValue ?? ""
         case "pool": kind = .pool; shows = json.get(["shows"])?.stringArray ?? []; order = json.get(["order"])?.stringValue ?? "sequential"
         case "chaos": kind = .chaos
+        case "off_air": kind = .offAir
         case "rotation":
             kind = .rotation
             items = (json.get(["items"])?.arrayValue ?? []).map { SourceChoice(json: $0) }
@@ -43,6 +44,7 @@ public struct SourceChoice: Equatable, Sendable {
         case .show: .object(["type": .string("show"), "show": .string(show)])
         case .pool: .object(["type": .string("pool"), "shows": .array(shows.map { .string($0) }), "order": .string(order)])
         case .chaos: .object(["type": .string("chaos")])
+        case .offAir: .object(["type": .string("off_air")])
         case .rotation:
             .object(["type": .string("rotation"), "items": .array(items.map(\.json)),
                      "advance": advance == "finale" ? .string("finale") : .object(["weeks": .number(Double(max(1, weeks)))])])
@@ -55,6 +57,7 @@ public struct SourceChoice: Equatable, Sendable {
         case .show: show.isEmpty ? "No show chosen" : show
         case .pool: shows.isEmpty ? "Every show" : shows.count == 1 ? shows[0] : "\(shows.count) shows"
         case .chaos: "Anything"
+        case .offAir: "The off-air screen"
         case .rotation: "\(items.count) taking turns"
         case .other: "Something this editor does not know (kept as it is)"
         }

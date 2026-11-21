@@ -102,7 +102,7 @@ public enum Strategy: String, Codable, Sendable, CaseIterable, Identifiable {
         case .sequential: "In order"
         case .shuffle: "Shuffle"
         case .chaos: "Chaos"
-        case .blockGrid: "Weekly lineup"
+        case .blockGrid: "Weekly schedule"
         }
     }
 }
@@ -116,13 +116,25 @@ public enum RunOut: String, Codable, Sendable, CaseIterable, Identifiable {
     public var id: String { rawValue }
     public var label: String {
         switch self {
-        case .keepGoing: "Keep going"
-        case .nextInRotation: "Next in rotation"
-        case .chaosFill: "Chaos fill"
-        case .hybrid: "Hybrid"
-        case .offAir: "Test screen"
+        case .keepGoing: "Start over"
+        case .nextInRotation: "Move to the next show"
+        case .chaosFill, .hybrid: "Play something random"
+        case .offAir: "Show the off-air screen"
         }
     }
+    /// What it does, with the old name for anyone who knows it from the API.
+    public var help: String {
+        switch self {
+        case .keepGoing: "After the last episode, go back to the first and carry on. (keep_going)"
+        case .nextInRotation: "A rotation hands over to its next show at each finale. (next_in_rotation)"
+        case .chaosFill: "A finished show's slot airs random content instead. (chaos_fill)"
+        case .hybrid: "Random content for finished shows and for unscheduled time. (hybrid)"
+        case .offAir: "Each episode airs once; when a show has run out, its slot shows the off-air screen instead. (off_air)"
+        }
+    }
+    /// The four plain choices ("hybrid" is shown as the random one).
+    public static let choices: [RunOut] = [.keepGoing, .nextInRotation, .chaosFill, .offAir]
+    public var choice: RunOut { self == .hybrid ? .chaosFill : self }
 }
 
 public struct GuideConfig: Codable, Sendable, Hashable {
