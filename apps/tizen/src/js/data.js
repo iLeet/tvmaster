@@ -77,6 +77,8 @@ const Store = (() => {
       if (c) { c.now = m.now || null; c.next = m.next || null; emit('nownext'); }
     } else if (type === 'schedule.changed') {
       loadGuide(true);
+    } else if (type === 'tv.state' && m.tv && m.tv.id === Cfg.get('tvId')) {
+      emit('tv', m.tv);
     }
   }
 

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.0
+
+- **Smooth streaming on small servers.** The background scan that looks for ad-break points in new files used to run two full-speed FFmpeg jobs at normal priority, which could starve a live channel of processor time and make the picture play for a few seconds, stop, and repeat. It now runs one file at a time, on one thread, at the lowest priority, so a channel that is being watched always comes first.
+- Every build now carries its own version number (this one is 1.1.0); the Mac app, the server and the installers agree.
+
 ## 1.0.0
 
 The first stable release.

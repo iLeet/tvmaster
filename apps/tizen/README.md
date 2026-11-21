@@ -36,6 +36,7 @@ TV is remembered, but only for the build it was typed into: reinstalling with a 
 | What | Updates |
 |---|---|
 | What is on now / next (banner, guide) | pushed by the server over a WebSocket the moment a programme changes |
+| This TV under TVs | the app registers itself as `samsung-tv` ("Samsung TV") when it connects, shows online while it runs, reports what it is watching, and follows channel changes made from the TVMaster remote or admin (volume and power from the remote are not applied: use the TV's own remote) |
 | Channel list (new, removed or renamed channels) | every 30 s (every 5 s while the server is unreachable) |
 | The schedule (the guide grid) | the whole lineup, about 24 h, in one request to `/iptv/guide.xml`; refreshed after 10 min, and at once when the server re-rolls a schedule |
 | Open guide | redraws itself when any of the above change; the selection stays on the same channel |

@@ -46,6 +46,11 @@ const Api = (() => {
     return out;
   }
 
+  let lastReport = null;
+  function report(n) {
+    lastReport = n;
+    if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'tv', id: Cfg.get('tvId'), channel: n, power: true }));
+  }
   let ws = null;
   let wsTimer = 0;
   let wsHandler = null;
@@ -56,6 +61,15 @@ const Api = (() => {
     try {
       ws = new WebSocket(withToken(base().replace(/^http/, 'ws') + '/api/v1/ws'));
     } catch (e) { wsTimer = setTimeout(() => connectWs(), 5000); return; }
+    ws.onopen = () => {
+      // Show up under TVs in TVMaster: register (or rename) this TV, then say this socket is its player.
+      const id = Cfg.get('tvId');
+      fetch(withToken(base() + '/api/v1/tvs'), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, name: Cfg.get('tvName') }) })
+        .catch(() => { /* the hello below creates it anyway */ })
+        .then(() => {
+          if (ws && ws.readyState === 1) { ws.send(JSON.stringify({ type: 'hello', tv: id })); if (lastReport !== null) report(lastReport); }
+        });
+    };
     ws.onmessage = (m) => {
       try { const j = JSON.parse(m.data); if (wsHandler) wsHandler(j.type || j.event, j); } catch (e) { Log.e('ws', e); }
     };
@@ -91,5 +105,7 @@ const Api = (() => {
     guide,
     streamUrl: (id) => withToken(base() + '/stream/' + encodeURIComponent(id) + '/index.m3u8'),
     connectWs,
+    // Tell the server what this TV is watching, so TVs and the remote show it.
+    report,
   };
 })();

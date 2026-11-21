@@ -610,7 +610,9 @@ pub(crate) fn start_analysis(s: &AppState, library_id: i64) -> usize {
     tokio::task::spawn_blocking(move || {
         let next = AtomicUsize::new(0);
         std::thread::scope(|scope| {
-            for _ in 0..2 {
+            // One file at a time, at the lowest priority: this is background work and must not
+            // take the processor from a channel that is being watched.
+            for _ in 0..1 {
                 scope.spawn(|| loop {
                     let i = next.fetch_add(1, Ordering::Relaxed);
                     let Some(row) = rows.get(i) else { break };

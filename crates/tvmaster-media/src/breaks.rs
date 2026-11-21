@@ -86,11 +86,29 @@ pub fn from_black(intervals: &[(f64, f64)], duration_ms: u64) -> BreakInfo {
     }
 }
 
+/// A command that runs at the lowest priority (`nice -n 19`, where there is a `nice`), so work done
+/// in the background never takes the processor from a channel that is being watched.
+pub fn background_command(program: &Path) -> Command {
+    #[cfg(unix)]
+    {
+        let has_nice = ["/usr/bin/nice", "/bin/nice"]
+            .iter()
+            .any(|p| Path::new(p).exists());
+        if has_nice {
+            let mut c = Command::new("nice");
+            c.args(["-n", "19"]).arg(program);
+            return c;
+        }
+    }
+    Command::new(program)
+}
+
 /// Scan a file for black frames. Decodes the whole file at low resolution, so
 /// it takes a fraction of the running time; do not call it on the request path.
 pub fn detect_black(ffmpeg: &Path, file: &Path) -> Result<Vec<(f64, f64)>> {
-    let out = Command::new(ffmpeg)
-        .args(["-hide_banner", "-nostats", "-i"])
+    let out = background_command(ffmpeg)
+        // One decoder thread: this is background work, and a live stream always comes first.
+        .args(["-hide_banner", "-nostats", "-threads", "1", "-i"])
         .arg(file)
         .args([
             "-an",
@@ -219,5 +237,28 @@ mod tests {
         };
         assert_eq!(BreakInfo::from_json(&info.to_json()), Some(info));
         assert_eq!(BreakInfo::from_json("garbage"), None);
+    }
+}
+
+#[cfg(all(test, unix))]
+mod priority_tests {
+    use super::*;
+
+    #[test]
+    fn background_work_runs_under_nice() {
+        let c = background_command(Path::new("/usr/bin/ffmpeg"));
+        if ["/usr/bin/nice", "/bin/nice"]
+            .iter()
+            .any(|p| Path::new(p).exists())
+        {
+            assert_eq!(c.get_program(), "nice");
+            let args: Vec<_> = c
+                .get_args()
+                .map(|a| a.to_string_lossy().to_string())
+                .collect();
+            assert_eq!(args, ["-n", "19", "/usr/bin/ffmpeg"]);
+        } else {
+            assert_eq!(c.get_program(), "/usr/bin/ffmpeg");
+        }
     }
 }

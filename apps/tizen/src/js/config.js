@@ -5,7 +5,8 @@
 // if the app is rebuilt with a different built-in address, the built-in address wins again.
 const Cfg = (() => {
   const DEFAULT_SERVER = 'http://10.0.0.251:8787'; /*SERVER*/
-  const v = { server: DEFAULT_SERVER, token: '', theme: 'classic', demo: false, lastChannel: null, showGuideChannels: true };
+  // tvId/tvName: how this TV shows up under TVs in TVMaster (and on the remote). The id is a-z, 0-9, - and _.
+  const v = { server: DEFAULT_SERVER, token: '', theme: 'classic', demo: false, lastChannel: null, showGuideChannels: true, tvId: 'samsung-tv', tvName: 'Samsung TV' };
   let override = null; // { url, token, base }
   try {
     const o = JSON.parse(localStorage.getItem('tvg.cfg') || '{}');

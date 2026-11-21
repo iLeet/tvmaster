@@ -5,6 +5,7 @@ const App = (() => {
   let playing = null; // channel id actually on the player
   let prev = null;    // the channel before this one (for the Left key)
   let tuneTimer = 0;
+  let reported = null; // the channel number last told to the server (and so what its echo will say)
   const SURF_DELAY = 300; // ms to wait while CH+/CH- is pressed repeatedly, so we do not tune every channel passed
 
   function tune(ch, immediate) {
@@ -18,6 +19,8 @@ const App = (() => {
       if (playing === ch.id) return;
       playing = ch.id;
       Player.tune(ch);
+      reported = ch.number;
+      Api.report(ch.number); // shows under TVs in TVMaster, and on the remote
     };
     if (immediate) go(); else tuneTimer = setTimeout(go, SURF_DELAY);
   }
@@ -98,11 +101,23 @@ const App = (() => {
     else Status.hide();
   }
 
-  function onStore(ev) {
+  // Someone changed this TV's channel from the remote (or the web admin): follow. What we reported
+  // ourselves comes back as an echo and is ignored.
+  function onRemote(tv) {
+    if (!tv || tv.channel == null || tv.channel === reported) return;
+    const ch = Store.byNumber(tv.channel);
+    if (!ch) return;
+    Log.d('remote: channel ' + tv.channel);
+    Guide.close();
+    tune(ch, true);
+  }
+
+  function onStore(ev, arg) {
     if (ev === 'offline') {
       Status.show('Cannot reach TVMaster', Cfg.get('server') + '\nCheck that the server is running. Retrying...\n\nPress Red to change the server address.');
       return;
     }
+    if (ev === 'tv') { onRemote(arg); return; }
     if (ev !== 'channels') { Banner.refresh(); return; }
     const list = Store.channels();
     if (!list.length) {
