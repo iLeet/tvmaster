@@ -44,9 +44,10 @@ percent.
 ## Cost
 
 A designed screen is drawn live, frame by frame, only while a channel is airing it, like an info
-channel. On a small server a moving stand-by costs a processor core while someone is watching the
-channel; the classic card is a still picture and costs almost nothing. Pick **Keep it still after it
-arrives** for a design whose motion you do not need.
+channel. Measured on the 4-thread (Core i3) server with software encoding: a channel showing the classic
+card used about 1.9 cores in total, and the same channel showing the animated "Liquid glass" stand-by
+about 2.3, so a moving design costs roughly another 0.4 of a core while someone is watching. Pick **Keep
+it still after it arrives** for a design whose motion you do not need.
 
 ## API
 
