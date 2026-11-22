@@ -123,7 +123,9 @@ pub async fn stats(State(s): State<AppState>) -> Json<Value> {
         ff.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         let ff_cores: f64 = ff.iter().map(|f| f.1.max(0.0) as f64 / 100.0).sum();
         let ff_mem: u64 = ff.iter().map(|f| f.2).sum();
-        let used_cores = (cpu_pct as f64 / 100.0) * cores as f64;
+        // What is being used: the busier of the processor right now and the recent load (a machine
+        // that has been queueing work for minutes is not as free as this instant's reading says).
+        let used_cores = ((cpu_pct as f64 / 100.0) * cores as f64).max(load.one.min(cores as f64 * 1.5));
 
         let disks = Disks::new_with_refreshed_list();
         let mut shown: Vec<Value> = Vec::new();

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.7.2
+
+- **Fixed:** the capacity guess on the Server page looked only at the processor's reading at that instant, so a machine that had been struggling for minutes (load above its thread count) could still be told it had room for four more channels. It now counts the recent load too.
+
 ## 1.7.1
 
 - **Fixed:** the Server page counted every thread of an encoder as another FFmpeg (it said 100 running); each encoder is now counted once. The guide window's internal commercials stream is no longer listed as a channel on air.
