@@ -8,3 +8,7 @@ publish.workspace = true
 [dependencies]
 font8x8.workspace = true
 fontdue.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

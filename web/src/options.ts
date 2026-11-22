@@ -62,6 +62,8 @@ export function withDefaults(o: Partial<ChannelOptions> | null | undefined): Cha
     },
     shows: { ...o?.shows },
     theme: o?.theme ?? null,
+    // screens this channel designs for itself are kept as the server sent them
+    ...(o?.screens ? { screens: o.screens } : {}),
   };
 }
 

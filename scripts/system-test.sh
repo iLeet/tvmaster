@@ -351,6 +351,18 @@ api -XPOST "$H/api/v1/channels" -d '{"id":"gaps","number":66,"name":"Gaps","kind
 [[ "$(api "$H/api/v1/channels/gaps" | json "str(d['lineup']['ads']['mid_breaks'])+'/'+d['strategy']")" == "False/chaos" ]] && ok "a chaos channel keeps the short-break settings (nothing inside shows)" || bad "short break saved on a chaos channel"
 api -XDELETE "$H/api/v1/channels/gaps" >/dev/null
 
+# ---- designed screens ---------------------------------------------------------
+section "Designed screens"
+[[ "$(api "$H/api/v1/screens" | json "len(d['kinds'])==7 and all(len(k['presets'])>=2 for k in d['kinds'])")" == "True" ]] && ok "seven screens, each with a gallery of designs" || bad "screens gallery"
+curl -s -o "$W/screen.png" -XPOST "${auth[@]}" -H 'content-type: application/json' -d '{"kind":"up_next","design":{"backdrop":{"type":"aurora","colors":[]},"layers":[{"type":"shape","w":600,"h":300,"glass":true,"radius":40},{"type":"text","text":"{title} at {time}","size":60}]},"t":2}' "$H/api/v1/screens/preview"
+[[ "$(head -c 4 "$W/screen.png" | tail -c 3)" == "PNG" ]] && ok "a design is drawn for the preview" || bad "screen preview"
+api -XPUT "$H/api/v1/screens/standby" -d '{"preset":"glass"}' >/dev/null
+api -XPOST "$H/api/v1/channels" -d '{"id":"standby","number":55,"name":"Stand By","kind":"test","options":{"off_air":{"screen":"card","message":"BACK SOON"}}}' >/dev/null
+OUT="$(ffmpeg -hide_banner -loglevel error -y -t 6 -i "$H/stream/standby/index.m3u8?token=$TOKEN" -f null - 2>&1 | grep -v 'non monotonically' | tail -2)"
+[[ -z "$OUT" ]] && ok "a channel airs the designed stand-by screen" || bad "designed stand-by" "$OUT"
+api -XDELETE "$H/api/v1/channels/standby" >/dev/null
+api -XDELETE "$H/api/v1/screens/standby" >/dev/null
+
 # docker stop and systemd send SIGTERM: it must stop cleanly, like Ctrl-C does
 "$BIN" serve --bind "127.0.0.1:$HP2" --data-dir "$W/data3" >"$W/server4.log" 2>&1 &
 PID2=$!

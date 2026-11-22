@@ -15,6 +15,7 @@ STRUCTS = {
     "crates/tvmaster-core/src/lineup.rs": ["Block", "Season", "Event", "Lineup", "SignOff"],
     "crates/tvmaster-core/src/model.rs": ["ThemeChoice", "GuideColors", "GuideBackground", "GuideAppearance", "GuideLayout", "GuideHeader", "GuideTicker", "GuidePip", "GuideConfig", "Channel", "InfoSlide", "InfoConfig"],
     "crates/tvmaster-core/src/daypart.rs": ["Daypart"],
+    "crates/tvmaster-render/src/design.rs": ["Anim", "Layer", "Design"],
 }
 IGNORE = {
     # stored by the server or set by the app itself, not a setting

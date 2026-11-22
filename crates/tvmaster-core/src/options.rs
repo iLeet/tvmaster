@@ -399,6 +399,10 @@ pub struct ChannelOptions {
     /// This channel's own theme. Blank = the station theme.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub theme: Option<crate::ThemeChoice>,
+    /// Screens this channel designs for itself (kind -> design); the station's apply to the rest.
+    /// The server checks the designs; the core only carries them.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub screens: BTreeMap<String, serde_json::Value>,
 }
 
 /// The settings that apply while one particular show airs.

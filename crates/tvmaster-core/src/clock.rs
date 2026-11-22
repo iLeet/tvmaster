@@ -42,6 +42,12 @@ impl Zone {
         format!("{h12}:{m:02} {ampm}")
     }
 
+    /// Seconds since local midnight at `ms`.
+    pub fn secs_of_day(&self, ms: i64) -> u32 {
+        use chrono::Timelike;
+        self.local(ms).time().num_seconds_from_midnight()
+    }
+
     /// The date at `ms` as the guide writes it: "SUN NOV 15".
     pub fn date_text(&self, ms: i64) -> String {
         self.local(ms)

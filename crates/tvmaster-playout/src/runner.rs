@@ -302,7 +302,8 @@ async fn produce(
                     spec.signoff,
                     tvmaster_core::Screen::Bars | tvmaster_core::Screen::Static
                 );
-                off_air_screen(
+                off_air_screen_as(
+                    "signoff",
                     &cfg,
                     &spec,
                     spec.signoff,
@@ -319,6 +320,25 @@ async fn produce(
             PlayKind::Bumper(kind) => {
                 let scene = bumper_scene(&spec, kind, &item).await;
                 let theme = crate::spec_theme_at(&spec, item.start_ms);
+                // The owner's own design for this screen, if there is one.
+                let (scene, theme) = if spec.options.screens.is_empty() {
+                    (scene, theme)
+                } else {
+                    let (ff, sp, sc, th, at) = (
+                        cfg.ffmpeg.clone(),
+                        spec.clone(),
+                        scene.clone(),
+                        theme,
+                        item.start_ms,
+                    );
+                    tokio::task::spawn_blocking(move || {
+                        crate::screens::designed_scene(&ff, &sp, &sc, &th, at)
+                    })
+                    .await
+                    .ok()
+                    .flatten()
+                    .unwrap_or((scene, theme))
+                };
                 let outcome = run_rendered(
                     &cfg,
                     scene,
@@ -759,7 +779,59 @@ async fn off_air_screen(
     tx: &mpsc::Sender<Vec<u8>>,
     fixer: &mut ContinuityFixer,
 ) -> Result<()> {
+    off_air_screen_as(
+        "standby",
+        cfg,
+        spec,
+        screen,
+        tone,
+        duration_ms,
+        ts_offset_ms,
+        tx,
+        fixer,
+    )
+    .await
+}
+
+/// The same, for the sign-off hours (`kind` = "signoff") or for stand-by: where the owner has
+/// designed that screen and the screen chosen is the station card, the design airs instead.
+#[allow(clippy::too_many_arguments)]
+async fn off_air_screen_as(
+    kind: &str,
+    cfg: &EngineConfig,
+    spec: &ChannelSpec,
+    screen: tvmaster_core::Screen,
+    tone: bool,
+    duration_ms: u64,
+    ts_offset_ms: u64,
+    tx: &mpsc::Sender<Vec<u8>>,
+    fixer: &mut ContinuityFixer,
+) -> Result<()> {
     use tvmaster_core::Screen;
+    if screen == Screen::Card && !spec.options.screens.is_empty() {
+        let design = crate::screens::design_for(spec, kind)
+            .or_else(|| crate::screens::design_for(spec, "standby"));
+        if let Some(design) = design {
+            let (ff, d) = (cfg.ffmpeg.clone(), design.clone());
+            let images =
+                tokio::task::spawn_blocking(move || crate::screens::load_pictures(&ff, &d))
+                    .await
+                    .unwrap_or_default();
+            let mut theme = crate::spec_theme_at(spec, now_ms());
+            theme.modern = true;
+            let scene = Scene::Design {
+                design,
+                vars: crate::screens::channel_vars(spec, now_ms()),
+                images: Arc::new(images),
+            };
+            let outcome =
+                run_rendered(cfg, scene, theme, 0, duration_ms, ts_offset_ms, tx, fixer).await?;
+            if outcome.ok && outcome.bytes > 0 {
+                return Ok(());
+            }
+            tracing::warn!(channel = %spec.id, kind, "designed screen failed to render, using the plain card");
+        }
+    }
     let picture = match screen {
         Screen::Image => spec
             .options

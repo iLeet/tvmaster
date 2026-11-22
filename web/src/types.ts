@@ -120,6 +120,8 @@ export interface ChannelOptions {
     ticker: TickerOptions;
   };
   shows: Record<string, ShowOptions>;
+  /** Screens this channel designs for itself (kept as the server sent them). */
+  screens?: Record<string, unknown>;
   /** This channel's own theme; absent = the station theme. */
   theme?: ThemeChoice | null;
 }

@@ -7,6 +7,7 @@
 //! each channel looks like its own station.
 
 pub mod alert;
+pub mod design;
 pub mod guide;
 pub mod info;
 pub mod modern;
@@ -327,6 +328,12 @@ pub enum Scene {
         event: String,
         text: String,
     },
+    /// A screen the owner designed: a backdrop and layers with their own motion.
+    Design {
+        design: std::sync::Arc<design::Design>,
+        vars: design::Vars,
+        images: std::sync::Arc<design::Images>,
+    },
 }
 
 const WHITE: Rgb = [255, 255, 255];
@@ -599,6 +606,14 @@ fn promo_retro(
 
 /// Render one frame of a bumper `dur` seconds long, `t` seconds in.
 pub fn render(scene: &Scene, th: &Theme, t: f32, dur: f32) -> Canvas {
+    if let Scene::Design {
+        design,
+        vars,
+        images,
+    } = scene
+    {
+        return design::render(design, vars, images, th, t, dur);
+    }
     if th.modern && !matches!(scene, Scene::Alert { .. }) {
         return modern::render(scene, th, t, dur);
     }
@@ -683,7 +698,7 @@ pub fn render(scene: &Scene, th: &Theme, t: f32, dur: f32) -> Canvas {
             }
         }
         Scene::Promo { spec, photo } => promo_retro(&mut c, th, spec, photo.as_ref(), t, dur),
-        Scene::Alert { .. } => {}
+        Scene::Alert { .. } | Scene::Design { .. } => {}
     }
     c.scanlines(0.16);
     // Fade in from black and out to black.

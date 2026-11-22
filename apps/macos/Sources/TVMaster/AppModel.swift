@@ -4,7 +4,7 @@ import Observation
 import TVMasterKit
 
 enum SidebarItem: String, CaseIterable, Identifiable, Hashable {
-    case home, watch, live, tvs, channels, schedule, dayparts, libraries, shows, promos, appearance, share
+    case home, watch, live, tvs, channels, schedule, dayparts, libraries, shows, promos, appearance, screens, share
     var id: String { rawValue }
     /// The heading it sits under in the sidebar.
     var group: String {
@@ -12,7 +12,7 @@ enum SidebarItem: String, CaseIterable, Identifiable, Hashable {
         case .home, .watch, .live, .tvs: "Watch"
         case .channels, .schedule, .dayparts: "Programming"
         case .libraries, .shows, .promos: "Content"
-        case .appearance, .share: "Station"
+        case .appearance, .screens, .share: "Station"
         }
     }
     static let groups = ["Watch", "Programming", "Content", "Station"]
@@ -29,6 +29,7 @@ enum SidebarItem: String, CaseIterable, Identifiable, Hashable {
         case .promos: "Promos"
         case .tvs: "TVs"
         case .appearance: "Appearance"
+        case .screens: "Screens"
         case .share: "Share"
         }
     }
@@ -45,6 +46,7 @@ enum SidebarItem: String, CaseIterable, Identifiable, Hashable {
         case .promos: "sparkles.tv"
         case .tvs: "tv"
         case .appearance: "paintpalette"
+        case .screens: "rectangle.on.rectangle.angled"
         case .share: "square.and.arrow.up"
         }
     }

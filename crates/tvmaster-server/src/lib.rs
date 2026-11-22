@@ -19,6 +19,7 @@ mod monitor;
 mod pip;
 mod plan;
 mod promos;
+mod screens;
 mod setup;
 mod shownames;
 #[cfg(test)]
@@ -319,6 +320,8 @@ impl AppState {
     /// What playout needs to put a channel on air.
     pub(crate) fn channel_spec(&self, channel: &Channel) -> ChannelSpec {
         let choice = theme::effective(&self.db(), &channel.options);
+        // (read before the struct below: its temporaries hold the database lock until it is built)
+        let designs = screens::effective(&self.db(), &channel.options);
         let guide = (channel.kind == ChannelKind::Guide).then(|| GuideSpec {
             music: tvmaster_db::list_media_of_kind(
                 &self.db(),
@@ -362,6 +365,8 @@ impl AppState {
             options: {
                 let mut o = channel.options.clone();
                 o.theme = Some(choice.clone());
+                // The designs in force: this channel's own, else the station's.
+                o.screens = designs;
                 o
             },
             can_burn_text: self.ffmpeg.as_ref().is_some_and(|f| f.has_subtitles),
@@ -620,6 +625,12 @@ fn build_router(state: AppState, https: bool) -> Router {
         .route("/api/v1/info/preview", post(info_preview::preview))
         .route("/api/v1/theme", get(theme::get).put(theme::put))
         .route("/api/v1/theme/preview", post(theme::preview))
+        .route("/api/v1/screens", get(screens::get))
+        .route("/api/v1/screens/preview", post(screens::preview))
+        .route(
+            "/api/v1/screens/:kind",
+            axum::routing::put(screens::put).delete(screens::delete),
+        )
         .route("/api/v1/live", get(live::get_live).post(live::set_live))
         .route("/api/v1/live/clear", post(live::clear_live))
         .route("/api/v1/live/preview", post(live::preview))

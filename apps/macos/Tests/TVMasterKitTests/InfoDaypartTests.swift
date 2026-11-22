@@ -242,3 +242,68 @@ final class ProgrammingWordsTests: XCTestCase {
         XCTAssertEqual(a.breaksLabel(in: [short]), "commercial breaks: custom")
     }
 }
+
+final class ScreenDesignTests: XCTestCase {
+    private let sample = #"""
+    {"name":"Liquid glass","backdrop":{"type":"aurora","colors":["primary","#ff8800"]},"fade_out_ms":300,
+     "layers":[
+       {"type":"shape","w":560,"h":520,"x":500,"y":500,"align":"center","opacity":100,"color":"accent","color2":null,"radius":48,"circle":false,"glass":true,"anim":{"enter":"zoom","enter_ms":800,"delay_ms":0,"motion":"none","speed":100}},
+       {"type":"text","text":"{channel}","size":56,"bold":true,"pixel":false,"color":"ink","shadow":false,"width":900,"lines":2,"x":500,"y":540,"align":"center","opacity":100,"anim":{"enter":"slide_up","enter_ms":600,"delay_ms":450,"motion":"float","speed":100}}
+     ]}
+    """#
+
+    private func design() throws -> ScreenDesign {
+        let any = try JSONSerialization.jsonObject(with: Data(sample.utf8))
+        return ScreenDesign(json: JSONValue(any: any))
+    }
+
+    func testADesignReadsAndWritesBackTheSameThing() throws {
+        let d = try design()
+        XCTAssertEqual(d.layers.count, 2)
+        XCTAssertEqual(d.backdrop.kind, "aurora")
+        XCTAssertEqual(d.backdrop.colors, ["primary", "#ff8800"])
+        XCTAssertTrue(d.layers[0].glass)
+        XCTAssertEqual(d.layers[1].anim.enter, "slide_up")
+        XCTAssertEqual(ScreenDesign(json: d.json), d)
+        XCTAssertEqual(d.json.get(["layers"])?.arrayValue?[1].get(["type"])?.stringValue, "text")
+    }
+
+    func testMotionCanBeSpedUpClampedAndStopped() throws {
+        var d = try design()
+        XCTAssertTrue(d.hasMotion)
+        d.motionSpeed = 9999
+        XCTAssertEqual(d.motionSpeed, 500)
+        XCTAssertTrue(d.layers.allSatisfy { $0.anim.speed == 500 })
+        d.keepStill()
+        XCTAssertFalse(d.hasMotion)
+    }
+
+    func testLayersMoveAndDesignsCompareWithoutTheirName() throws {
+        var d = try design()
+        let other = d
+        d.name = "Mine"
+        XCTAssertTrue(d.same(as: other))
+        d.move(0, by: 1)
+        XCTAssertEqual(d.layers[1].kind, "shape")
+        XCTAssertFalse(d.same(as: other))
+        d.move(1, by: 1) // nothing below it
+        XCTAssertEqual(d.layers[1].kind, "shape")
+        XCTAssertEqual(d.wordLayers, [0])
+    }
+
+    func testColoursAreThemeRolesOrHex() {
+        XCTAssertTrue(DesignColour.isRole("accent_text"))
+        XCTAssertFalse(DesignColour.isRole("#ff0000"))
+        XCTAssertEqual(DesignColour.hex("#abc"), "#aabbcc")
+        XCTAssertEqual(DesignColour.hex("accent", fallback: "#123456"), "#123456")
+    }
+
+    func testAKindOfScreenReadsItsGalleryAndWhatIsChosen() throws {
+        let j = #"{"id":"standby","name":"Stand-by","about":"x","words":["channel"],"seconds":0,"source":"station","current":{"preset":"glass","design":\#(sample)},"presets":[{"id":"glass","name":"Liquid glass","about":"y","design":\#(sample)}]}"#
+        let k = ScreenKindInfo(json: JSONValue(any: try JSONSerialization.jsonObject(with: Data(j.utf8))))
+        XCTAssertEqual(k.presets.count, 1)
+        XCTAssertEqual(k.currentPreset, "glass")
+        XCTAssertEqual(k.current?.layers.count, 2)
+        XCTAssertEqual(k.source, "station")
+    }
+}

@@ -219,3 +219,7 @@ The daemon also runs an autopilot loop (every minute) that tops up every channel
   a shuffled Mix channel from the media added so far), `POST /api/v1/setup/skip`.
 - Promos and old commercials: see `docs/PROMOS.md` (`/promos/...`, `POST /libraries/:id/fetch`).
 - Backup and restore: see `docs/BACKUP.md` (`/backups/...`).
+
+## Screens
+
+`GET/PUT/DELETE /api/v1/screens[/:kind]` and `POST /api/v1/screens/preview`: see [SCREENS.md](SCREENS.md).

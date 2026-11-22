@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.5.0
+
+Screens you can design.
+
+- **New Screens page** (web admin and Mac app, under Station). The stand-by screen, the sign-off screen and the screens around breaks (Up next, Later today, We'll be right back, Welcome back, Station ID) are each a design you choose from a gallery of 22 and change: the words (with fill-ins for the channel, show, time and clock), their colours and sizes, the background (the station theme, soft moving colour, a gradient, one colour, a moving pattern, colour bars or a picture of your own) and the speed of the motion. A live preview plays the animation and has a scrubber. Use a design on the whole station or on a single channel.
+- **Animated.** Words and shapes arrive by fading, sliding, zooming, typing themselves out or wiping across, then keep moving: breathing, floating, drifting around the screen like a screensaver, fading in and out, or scrolling. The stand-by screen can show a ticking clock, a drifting name or a test card.
+- **Liquid glass.** Frosted panels that blur the soft, moving colour behind them, in every screen.
+- **Everything is editable.** Under More options, every layer's position, size, colour, opacity, entrance (and how long it takes and when it starts) and motion, fading out, and the design as JSON. Words, shapes, clocks, programme lists and pictures (a logo keeps its see-through parts).
+- Nothing changes until you choose a design: **Classic** is the built-in screen. A channel set to colour bars, snow, black or a picture keeps its stand-by choice.
+- Per-channel designs are kept when a channel is saved from the web admin.
+- See `docs/SCREENS.md`. Not designed yet: the now-playing banner and alerts, and a design per day part.
+
 ## 1.4.0
 
 Picture & sound and Settings, tidied the same way as Programming.

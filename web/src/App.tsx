@@ -17,6 +17,7 @@ import { Promos } from './pages/Promos';
 import { Remote } from './pages/Remote';
 import { Shows } from './pages/Shows';
 import { Schedule } from './pages/Schedule';
+import { Screens } from './pages/Screens';
 import { Settings } from './pages/Settings';
 import { Setup } from './pages/Setup';
 import { Tvs } from './pages/Tvs';
@@ -40,6 +41,7 @@ const NAV: { group: string; items: { path: string; label: string; icon: string }
   ] },
   { group: 'Station', items: [
     { path: 'appearance', label: 'Appearance', icon: 'palette' },
+    { path: 'screens', label: 'Screens', icon: 'tv' },
     { path: 'settings', label: 'Settings', icon: 'settings' },
   ] },
 ];
@@ -121,6 +123,9 @@ function Shell() {
       break;
     case 'appearance':
       page = <Appearance />;
+      break;
+    case 'screens':
+      page = <Screens kindId={route.parts[1]} />;
       break;
     case 'settings':
       page = <Settings tab={route.parts[1]} />;

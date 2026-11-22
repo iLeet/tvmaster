@@ -294,7 +294,7 @@ pub fn render(scene: &Scene, th: &Theme, t: f32, dur: f32) -> Canvas {
             }
         }
         Scene::Promo { spec, photo } => promo(&mut c, th, spec, photo.as_ref(), t, dur),
-        Scene::Alert { .. } => {}
+        Scene::Alert { .. } | Scene::Design { .. } => {}
     }
     // Fade in from black and out to black.
     let f = (t / 0.3).min(1.0).min(((dur - t) / 0.4).max(0.0));

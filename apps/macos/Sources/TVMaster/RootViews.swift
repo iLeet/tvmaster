@@ -194,6 +194,7 @@ struct MainView: View {
                     case .promos: PromosView()
                     case .tvs: TVsView()
                     case .appearance: AppearanceView()
+                    case .screens: ScreensView()
                     case .share: ShareView()
                     }
                     }

@@ -13,6 +13,7 @@ mod manager;
 mod probe;
 mod profile;
 mod runner;
+mod screens;
 mod sound;
 mod ts;
 
@@ -25,6 +26,7 @@ pub use profile::{
     guide_run_args, item_args, rendered_args, rendered_args_with_audio, screen_args,
     segmenter_args, slate_args, GuideRun, ItemJob, LogoInput, OutputProfile, PipInput, ScreenInput,
 };
+pub use screens::{channel_vars, design_for, load_pictures, KINDS as SCREEN_KINDS};
 pub use sound::AlertSound;
 pub use tvmaster_render::alert::{AlertLook, AlertStyle};
 pub use tvmaster_render::GuideData;

@@ -215,3 +215,14 @@ html.native-glass.mac .main { padding-top: 34px; }
 .nav-head { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--dim, #8a93a6); padding: 4px 14px 2px; }
 .side .foot .toggle { font-size: 12px; margin-bottom: 8px; }
 .more { display: block; }
+
+/* Screens */
+.screens-layout { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 20px; align-items: start; }
+.screens-list { display: flex; flex-direction: column; gap: 6px; position: sticky; top: 12px; }
+.screens-item { text-align: left; font: inherit; color: var(--text); background: var(--surface, transparent); border: 1px solid var(--edge-soft); border-radius: 10px; padding: 10px 12px; cursor: pointer; display: flex; flex-direction: column; gap: 2px; }
+.screens-item.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; }
+.tile { text-align: left; font: inherit; color: var(--text); background: transparent; border: 2px solid var(--edge-soft); border-radius: 12px; padding: 8px; cursor: pointer; display: flex; flex-direction: column; gap: 4px; }
+.tile.on { border-color: var(--accent); }
+.tile img { border-radius: 6px; }
+@media (max-width: 800px) { .screens-layout { grid-template-columns: 1fr; } .screens-list { flex-direction: row; overflow-x: auto; position: static; } .screens-item { min-width: 140px; } }

@@ -218,6 +218,11 @@ impl std::fmt::Debug for DaypartSet {
 }
 
 impl DaypartSet {
+    /// The time zone these day parts (and the channel) keep.
+    pub fn zone(&self) -> Zone {
+        self.zone
+    }
+
     /// The parts that cover `channel`, in `zone`. A part that does not check out is left out
     /// rather than taking the channel off the air.
     pub fn new(zone: Zone, parts: &[Daypart], channel: &str) -> Self {

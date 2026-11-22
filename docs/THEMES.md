@@ -21,7 +21,7 @@ settings ("Look"); otherwise it follows the station.
   not frightened. The **Kids** theme is always gentle; any other theme can switch it on
   (`"gentle": true`). Gentle alerts are always drawn in the smooth style.
 
-A theme can also change with the time of day: see [DAYPARTS.md](DAYPARTS.md).
+A theme can also change with the time of day: see [DAYPARTS.md](DAYPARTS.md). The stand-by, sign-off and break screens can be designed as well: see [SCREENS.md](SCREENS.md).
 
 A guide whose own theme is "follow the station" (the default) takes the station's theme and style. Pick a
 theme on the guide to give that guide its own colours. Alerts offer "Match the station theme" (the
