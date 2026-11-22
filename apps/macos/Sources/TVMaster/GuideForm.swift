@@ -73,13 +73,14 @@ struct GuideForm: View {
             Picker("Corners", selection: $gs.corners) { Text("Square").tag("square"); Text("Rounded").tag("rounded") }.pickerStyle(.segmented)
             Picker("Text size", selection: $gs.textSize) { Text("Small").tag("small"); Text("Medium").tag("medium"); Text("Large").tag("large") }.pickerStyle(.segmented)
             Picker("Heading", selection: $gs.headerStyle) { Text("Coloured bar").tag("bar"); Text("Just the words").tag("minimal") }.pickerStyle(.segmented)
-            Picker("Background", selection: $gs.backgroundStyle) { Text("Gradient").tag("gradient"); Text("Solid").tag("solid"); Text("Stripes").tag("stripes"); Text("Picture").tag("image") }.pickerStyle(.segmented)
+            Picker("Background", selection: $gs.backgroundStyle) { Text("Gradient").tag("gradient"); Text("Solid").tag("solid"); Text("Stripes").tag("stripes"); Text("Soft colour").tag("aurora"); Text("Picture").tag("image") }.pickerStyle(.segmented)
             if gs.backgroundStyle == "image" {
                 PictureChooser(title: "Picture", path: $gs.backgroundImage, hint: "Fitted to the screen and darkened so the listing stays readable.")
                 LabeledContent("Darken the picture \(gs.backgroundDim)%") { Slider(value: Binding(get: { Double(gs.backgroundDim) }, set: { gs.backgroundDim = Int($0) }), in: 0...90, step: 1) }
             }
             Toggle("Times on each programme (when there is room)", isOn: $gs.cellTimes)
             Toggle("Line at “now” on the time grid", isOn: $gs.nowMarker)
+            Toggle("Frosted glass (see-through cells, names and cards with a bright edge; best on the Soft colour background)", isOn: Binding(get: { gs.glass }, set: { on in gs.glass = on; if on { gs.typeface = "smooth"; gs.corners = "rounded" } }))
         }
     }
 

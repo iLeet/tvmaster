@@ -102,6 +102,7 @@ const Api = (() => {
     resetWs,
     health: () => json('/api/v1/health'),
     channels: () => json('/api/v1/channels'),
+    json,
     guide,
     streamUrl: (id) => withToken(base() + '/stream/' + encodeURIComponent(id) + '/index.m3u8'),
     connectWs,

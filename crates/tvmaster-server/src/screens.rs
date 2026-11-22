@@ -888,6 +888,46 @@ pub(crate) fn effective(
     out
 }
 
+/// A gallery design, written out in full.
+pub(crate) fn preset_design(kind: &str, id: &str) -> Option<Value> {
+    presets()
+        .into_iter()
+        .find(|p| p.kind == kind && p.id == id)
+        .map(|p| p.design)
+}
+
+/// The station's chosen screens as stored: kind -> `{ preset, design }`.
+pub(crate) fn station_json(db: &rusqlite::Connection) -> Value {
+    Value::Object(station_screens(db))
+}
+
+/// Whether `design` is a good design for the screen `kind`.
+pub(crate) fn check_design(kind: &str, design: &Value) -> Result<(), String> {
+    kind_of(kind).map_err(|_| format!("There is no screen called {kind}."))?;
+    parse_design(design)
+        .map(|_| ())
+        .map_err(|e| e.message().to_string())
+}
+
+/// Make the station's screens exactly these (a look): those named are set, the rest go back to classic.
+/// The caller restarts what is on air.
+pub(crate) fn set_station_all(s: &AppState, designs: &Map<String, Value>) -> ApiResult<()> {
+    let mut m = Map::new();
+    for k in KINDS {
+        if let Some(e) = designs.get(k.id) {
+            if let Some(d) = e.get("design") {
+                parse_design(d)?;
+                m.insert(
+                    k.id.to_string(),
+                    json!({ "preset": e["preset"].as_str().unwrap_or("custom"), "design": d }),
+                );
+            }
+        }
+    }
+    tvmaster_db::meta_set(&s.db(), KEY, &Value::Object(m).to_string())?;
+    Ok(())
+}
+
 fn kind_of(id: &str) -> ApiResult<&'static Kind> {
     KINDS
         .iter()

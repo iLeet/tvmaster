@@ -25,6 +25,8 @@ public struct GuideSettings: Equatable, Sendable {
     public var tickerPosition = "bottom"
     public var cellTimes = false
     public var nowMarker = true
+    /// Frosted-glass cells, labels and cards.
+    public var glass = false
 
     public var style = "grid"
     public var rows = 6
@@ -112,6 +114,7 @@ public struct GuideSettings: Equatable, Sendable {
         tickerPosition = str(["look", "ticker_position"], "bottom")
         cellTimes = bool(["look", "cell_times"], false)
         nowMarker = bool(["look", "now_marker"], true)
+        glass = bool(["look", "glass"], false)
         style = str(["layout", "style"], "grid")
         rows = int(["layout", "rows"], 6)
         scroll = str(["layout", "scroll"], "page")
@@ -179,6 +182,7 @@ public struct GuideSettings: Equatable, Sendable {
         o.set(["look", "ticker_position"], .string(tickerPosition))
         o.set(["look", "cell_times"], .bool(cellTimes))
         o.set(["look", "now_marker"], .bool(nowMarker))
+        o.set(["look", "glass"], .bool(glass))
         o.set(["layout", "style"], .string(style))
         o.set(["layout", "rows"], .number(Double(rows)))
         o.set(["layout", "scroll"], .string(scroll))

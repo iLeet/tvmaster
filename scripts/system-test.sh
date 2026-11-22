@@ -363,6 +363,30 @@ OUT="$(ffmpeg -hide_banner -loglevel error -y -t 6 -i "$H/stream/standby/index.m
 api -XDELETE "$H/api/v1/channels/standby" >/dev/null
 api -XDELETE "$H/api/v1/screens/standby" >/dev/null
 
+# ---- looks and the new themes -------------------------------------------------------
+section "Looks and themes"
+[[ "$(api "$H/api/v1/theme" | json "all(any(t['id']==x for t in d['themes']) for x in ['cable','glass','terminal','rosewood'])")" == "True" ]] && ok "the new themes are on offer" || bad "new themes"
+[[ "$(api "$H/api/v1/theme/palettes" | json "len(d['palettes'])>=35 and d['palettes']['cable']['cell_now']!=d['palettes']['glass']['cell_now']")" == "True" ]] && ok "every theme's colours can be read (the TV app uses them)" || bad "palettes"
+[[ "$(api "$H/api/v1/looks" | json "len(d['looks'])>=8")" == "True" ]] && ok "eight looks come with the station" || bad "looks"
+api -XPOST "$H/api/v1/channels" -d '{"id":"lookguide","number":44,"name":"Look Guide","kind":"guide"}' >/dev/null
+api -XPOST "$H/api/v1/looks/liquid-glass/apply" -d '{}' >/dev/null
+[[ "$(api "$H/api/v1/channels/lookguide" | json "str(d['guide']['look']['glass'])+d['guide']['look']['background']['style']")" == "Trueaurora" ]] && ok "the liquid glass look lays the guide out in glass" || bad "apply a look"
+api "$H/api/v1/looks" > "$W/looks.json"
+python3 - "$W" <<'PY'
+import json, sys
+w = sys.argv[1]
+looks = json.load(open(w + "/looks.json"))["looks"]
+guide = [l for l in looks if l["id"] == "liquid-glass"][0]["preview_guide"]
+json.dump({"name": "Guide", "id": "preview", "guide": guide, "t": 1}, open(w + "/glassbody.json", "w"))
+PY
+curl -s -o "$W/glassguide.png" -XPOST "${auth[@]}" -H 'content-type: application/json' --data @"$W/glassbody.json" "$H/api/v1/guide/preview"
+[[ "$(head -c 4 "$W/glassguide.png" | tail -c 3)" == "PNG" ]] && ok "a frosted glass guide is drawn" || bad "glass guide"
+OUT="$(ffmpeg -hide_banner -loglevel error -y -t 5 -i "$H/stream/lookguide/index.m3u8?token=$TOKEN" -f null - 2>&1 | grep -v 'non monotonically' | tail -2)"
+[[ -z "$OUT" ]] && ok "and it streams" || bad "glass guide stream" "$OUT"
+api -XPOST "$H/api/v1/looks/classic-cable/apply" -d '{}' >/dev/null
+api -XDELETE "$H/api/v1/channels/lookguide" >/dev/null
+api -XPUT "$H/api/v1/theme" -d '{"theme":"auto","style":"retro"}' >/dev/null
+
 # docker stop and systemd send SIGTERM: it must stop cleanly, like Ctrl-C does
 "$BIN" serve --bind "127.0.0.1:$HP2" --data-dir "$W/data3" >"$W/server4.log" 2>&1 &
 PID2=$!

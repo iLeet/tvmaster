@@ -6,11 +6,12 @@
 const Cfg = (() => {
   const DEFAULT_SERVER = 'http://10.0.0.251:8787'; /*SERVER*/
   // tvId/tvName: how this TV shows up under TVs in TVMaster (and on the remote). The id is a-z, 0-9, - and _.
-  const v = { server: DEFAULT_SERVER, token: '', theme: 'classic', demo: false, lastChannel: null, showGuideChannels: true, tvId: 'samsung-tv', tvName: 'Samsung TV' };
+  const v = { server: DEFAULT_SERVER, token: '', theme: 'station', demo: false, lastChannel: null, showGuideChannels: true, tvId: 'samsung-tv', tvName: 'Samsung TV' };
   let override = null; // { url, token, base }
   try {
     const o = JSON.parse(localStorage.getItem('tvg.cfg') || '{}');
     ['theme', 'demo', 'lastChannel'].forEach((k) => { if (o[k] !== undefined) v[k] = o[k]; });
+    if (v.theme === 'classic') v.theme = 'station'; // older builds stored their default: follow the station now
     if (o.override && o.override.base === DEFAULT_SERVER && o.override.url) {
       override = o.override;
       v.server = override.url;

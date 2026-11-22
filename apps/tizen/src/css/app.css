@@ -8,6 +8,7 @@
   --ch-a: #0b1e68; --ch-b: #081448; --ch-num: #ffd84a;
   --sel-a: #fffbd0; --sel-b: #f4c92a; --sel-edge: #ffffff; --sel-text: #0a1650;
   --text: #ffffff; --muted: #b9cbff; --accent: #ffd84a;
+  --panel-ink: #ffffff; --panel-muted: #b9cbff; --panel-accent: #ffd84a; --ch-name: #ffffff; --ch-shadow: 2px 2px 0 #000; --tint: #3a6fe6;
 }
 body[data-theme="crimson"] {
   --bg-top: #a31224; --bg-bot: #2a0309;
@@ -99,13 +100,13 @@ body.tv #vid { display: none; }
 .g-pip { position: absolute; left: 76px; top: 76px; width: 640px; height: 360px; border: 4px solid var(--panel-edge); box-shadow: 0 0 0 3px #000, 0 6px 24px rgba(0,0,0,.7); }
 .g-info { position: absolute; left: 760px; top: 80px; width: 1080px; height: 360px; box-sizing: border-box; padding: 22px 36px;
   background: var(--panel); border: 3px solid var(--panel-edge); border-radius: 10px; }
-.gi-top { display: flex; justify-content: space-between; font-size: 36px; color: var(--muted); }
-.gi-ch b { color: var(--ch-num); font-size: 48px; margin-right: 10px; }
-.gi-clock { color: var(--accent); }
-.gi-title { margin-top: 24px; font-size: 62px; line-height: 1.1; max-height: 140px; overflow: hidden; text-shadow: 3px 3px 0 #000; }
-.gi-sub { margin-top: 10px; font-size: 36px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.gi-time { margin-top: 18px; font-size: 42px; color: var(--accent); }
-.gi-tag { position: absolute; right: 36px; bottom: 24px; font-size: 30px; padding: 4px 16px; border: 2px solid var(--accent); color: var(--accent); border-radius: 6px; letter-spacing: 3px; }
+.gi-top { display: flex; justify-content: space-between; font-size: 36px; color: var(--panel-muted); }
+.gi-ch b { color: var(--panel-ink); font-size: 48px; margin-right: 10px; }
+.gi-clock { color: var(--panel-accent); }
+.gi-title { margin-top: 24px; font-size: 62px; line-height: 1.1; max-height: 140px; overflow: hidden; color: var(--panel-ink); text-shadow: var(--ch-shadow); }
+.gi-sub { margin-top: 10px; font-size: 36px; color: var(--panel-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gi-time { margin-top: 18px; font-size: 42px; color: var(--panel-accent); }
+.gi-tag { position: absolute; right: 36px; bottom: 24px; font-size: 30px; padding: 4px 16px; border: 2px solid var(--panel-accent); color: var(--panel-accent); border-radius: 6px; letter-spacing: 3px; }
 
 .g-timebar { position: absolute; left: 80px; top: 468px; width: 1760px; height: 52px; font-size: 32px; }
 .g-timebar .tday { position: absolute; left: 0; top: 6px; width: 240px; color: var(--accent); }
@@ -117,8 +118,8 @@ body.tv #vid { display: none; }
 .row { position: absolute; left: 0; width: 1760px; height: 66px; }
 .chl { position: absolute; left: 0; top: 0; width: 240px; height: 62px; box-sizing: border-box; display: flex; align-items: center; gap: 10px; padding: 0 10px;
   background: linear-gradient(180deg, var(--ch-a), var(--ch-b)); border: 2px solid var(--cell-edge); border-radius: 6px; overflow: hidden; }
-.chl b { color: var(--ch-num); font-size: 34px; min-width: 44px; text-align: right; text-shadow: 2px 2px 0 #000; }
-.chl span { font-size: 21px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-transform: uppercase; }
+.chl b { color: var(--ch-num); font-size: 34px; min-width: 44px; text-align: right; text-shadow: var(--ch-shadow); }
+.chl span { color: var(--ch-name); font-size: 21px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-transform: uppercase; }
 .cells { position: absolute; left: 248px; top: 0; width: 1512px; height: 62px; }
 .cell { position: absolute; top: 0; height: 62px; box-sizing: border-box; display: flex; align-items: center; padding: 0 16px; font-size: 30px;
   background: linear-gradient(180deg, var(--cell-a), var(--cell-b)); border: 2px solid var(--cell-edge); border-radius: 6px;
@@ -133,3 +134,41 @@ body.tv #vid { display: none; }
 .cell.sel .ar { color: var(--sel-text); }
 .g-hints { position: absolute; left: 80px; right: 80px; bottom: 22px; font-size: 26px; color: var(--muted); font-weight: 400; text-align: center; }
 .g-hints b { color: var(--accent); margin: 0 4px 0 18px; }
+
+
+/* ---- layouts: the picture at the top right with the info card at the left (cable box and glass) ---- */
+body[data-layout="cable"] .g-pip, body[data-layout="glass"] .g-pip { left: 1196px; }
+body[data-layout="cable"] .g-info, body[data-layout="glass"] .g-info { left: 80px; width: 1080px; }
+
+/* A 2000s cable box: a cream card, a filled time bar, a light channel column, orange for what is on now, a button bar. */
+body[data-layout="cable"] .g-info { border-radius: 4px; border-width: 2px; box-shadow: inset 0 -40px 60px rgba(120, 90, 30, .12); }
+body[data-layout="cable"] .g-timebar { background: var(--cell-b); border-radius: 4px; box-shadow: inset 0 2px 0 rgba(255,255,255,.18); }
+body[data-layout="cable"] .g-timebar .tday, body[data-layout="cable"] .g-timebar .tm { top: 8px; text-shadow: none; }
+body[data-layout="cable"] .chl { border-radius: 3px; border-color: rgba(0,0,0,.25); }
+body[data-layout="cable"] .cell { border-radius: 3px; text-shadow: none; }
+body[data-layout="cable"] .cell.sel { background: linear-gradient(180deg, var(--cell-now-a), var(--cell-now-b)); border: 3px solid #fff; color: #fff; box-shadow: 0 0 0 2px #000; }
+body[data-layout="cable"] .g-hints { background: var(--ch-b); color: var(--ch-num); border-radius: 4px; padding: 8px 0; left: 80px; right: 80px; bottom: 16px; }
+body[data-layout="cable"] .g-hints b { color: var(--panel-accent); }
+
+/* Liquid glass: see-through panels with a bright edge over slow, soft colour. Without backdrop blur the panels are a little less clear. */
+body[data-layout="glass"] .g-bg { background:
+    radial-gradient(60% 70% at 18% 30%, color-mix(in srgb, var(--tint) 85%, transparent), transparent 70%),
+    radial-gradient(55% 65% at 82% 25%, color-mix(in srgb, var(--cell-now-b) 80%, transparent), transparent 70%),
+    radial-gradient(60% 60% at 60% 90%, color-mix(in srgb, var(--accent) 38%, transparent), transparent 70%),
+    linear-gradient(180deg, var(--bg-top), var(--bg-bot));
+  background-size: 130% 130%, 140% 140%, 150% 150%, 100% 100%; animation: glass-drift 40s ease-in-out infinite alternate; }
+@keyframes glass-drift { from { background-position: 0% 0%, 100% 0%, 50% 100%, 0 0; } to { background-position: 100% 100%, 0% 100%, 80% 0%, 0 0; } }
+body[data-layout="glass"] .g-info, body[data-layout="glass"] .chl, body[data-layout="glass"] .cell, body[data-layout="glass"] .g-timebar, body[data-layout="glass"] .g-hints {
+  background: rgba(255,255,255,.22); border: 2px solid rgba(255,255,255,.5); border-radius: 18px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.7), 0 8px 24px rgba(0,0,20,.25); text-shadow: 0 1px 2px rgba(0,0,30,.5); color: #fff; }
+@supports (backdrop-filter: blur(1px)) {
+  body[data-layout="glass"] .g-info, body[data-layout="glass"] .chl, body[data-layout="glass"] .cell, body[data-layout="glass"] .g-timebar, body[data-layout="glass"] .g-hints {
+    background: rgba(255,255,255,.14); -webkit-backdrop-filter: blur(24px) saturate(150%); backdrop-filter: blur(24px) saturate(150%); }
+}
+body[data-layout="glass"] .cell.now { background: rgba(255,255,255,.30); }
+body[data-layout="glass"] .cell.gap { background: rgba(255,255,255,.08); color: rgba(255,255,255,.7); }
+body[data-layout="glass"] .cell.sel { background: rgba(255,255,255,.72); color: #10163a; text-shadow: none; border-color: #fff; box-shadow: 0 0 28px rgba(255,255,255,.7); }
+body[data-layout="glass"] .gi-title, body[data-layout="glass"] .gi-ch b { color: #fff; }
+body[data-layout="glass"] .gi-top, body[data-layout="glass"] .gi-sub { color: rgba(255,255,255,.8); }
+body[data-layout="glass"] .gi-time, body[data-layout="glass"] .gi-clock, body[data-layout="glass"] .gi-tag { color: #fff; border-color: #fff; }
+body[data-layout="glass"] .chl b, body[data-layout="glass"] .chl span { color: #fff; text-shadow: 0 1px 2px rgba(0,0,30,.5); }

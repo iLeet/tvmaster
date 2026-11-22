@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.6.0
+
+Looks, new themes, and a cable box and liquid glass for the guide, the screens and the TV.
+
+- **Looks.** A whole appearance in one click, on the Appearance page: the colours and style, the stand-by and break screens, and how the guides are laid out, with a picture of the guide in each. Eight come with the station: Classic cable, **Cable box, 2000s** (blue cells with the one on now in orange, a light channel column, the live picture top right with a cream info card beside it), **Liquid glass**, Kids' TV, Night modern, Printed listing, Terminal and Sunset VHS. Choose which parts to change (colours, screens, guide layouts). **Save how the station looks now** as a look of your own, **export** one as a file and **import** one.
+- **14 more themes** for the guide and every screen: Cable box, Glass, Ember, Teal, Sakura, Sand, Royal, Vapor, Noir, Terminal, Dusk, Lime, Ice and Rosewood.
+- **Frosted glass for the guide:** see-through cells, channel names and cards with a bright edge, over a new **Soft colour** background that drifts slowly. A new switch in the guide's appearance (web and Mac), best with smooth type.
+- **Light cards are readable:** the info card beside the guide's picture now uses dark words when its colour is light (it did not on the light themes).
+- **Samsung TV app 1.6.0 follows the station.** It reads the station's theme from the server (so every theme above works on the TV, and Green steps through them), and takes its layout from the guide channel: the **Cable box** layout (info card at the left, picture at the right, light channel column, orange for what is on now, a button bar) and **Liquid glass** (frosted panels over drifting colour; a little less clear on older TVs that cannot blur). Without a server it keeps its three built-in themes.
+- `GET /api/v1/theme/palettes`, `GET /api/v1/looks` and `POST /api/v1/looks[/import|/:id/apply]`: see `docs/THEMES.md`.
+
 ## 1.5.0
 
 Screens you can design.

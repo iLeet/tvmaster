@@ -167,6 +167,34 @@ pub enum GuideTheme {
     Gold,
     /// Dark brown with a cream highlight.
     Coffee,
+    /// A 2000s cable box: blue programme cells with the one on now in orange, a light channel column, cream info panel.
+    Cable,
+    /// Deep blue for frosted glass, with a white highlight.
+    Glass,
+    /// Embers: dark red-brown with orange and gold.
+    Ember,
+    /// Deep teal with a mint highlight.
+    Teal,
+    /// Plum and blossom pink.
+    Sakura,
+    /// Warm sand, light.
+    Sand,
+    /// Royal blue with gold.
+    Royal,
+    /// Purple with a cyan highlight.
+    Vapor,
+    /// Near black with white.
+    Noir,
+    /// Black with bright green text, like an old terminal.
+    Terminal,
+    /// Dusky purple with a peach highlight.
+    Dusk,
+    /// Dark green with a lime highlight.
+    Lime,
+    /// Deep blue with an icy highlight.
+    Ice,
+    /// Dark wine red with a pale rose highlight.
+    Rosewood,
     /// From `colors.primary` and `colors.accent`.
     Custom,
 }
@@ -219,6 +247,8 @@ pub enum BackgroundStyle {
     Stripes,
     /// A picture of your own behind the listing (`background.image`).
     Image,
+    /// Soft colour drifting slowly behind frosted-glass panels.
+    Aurora,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -287,6 +317,10 @@ pub struct GuideAppearance {
     /// The vertical line at "now" on the time grid.
     #[serde(default = "yes")]
     pub now_marker: bool,
+    /// Frosted glass: cells, channel names and cards are see-through panels with a bright edge.
+    /// Looks best on the soft-colour background and with smooth type.
+    #[serde(default)]
+    pub glass: bool,
 }
 
 impl Default for GuideAppearance {
@@ -300,6 +334,7 @@ impl Default for GuideAppearance {
             ticker_position: TickerPosition::Bottom,
             cell_times: false,
             now_marker: true,
+            glass: false,
         }
     }
 }

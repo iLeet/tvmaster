@@ -157,6 +157,7 @@ struct AppearanceView: View {
                     }
                 }
                 Text("A channel can choose its own under its settings. Everything else follows this.").foregroundStyle(.secondary)
+                LooksSection(onApplied: { loaded = false; if let json = try? await model.client?.stationThemeJSON(), let t = ThemeChoice(json: json) { saved = t; draft = t }; loaded = true })
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Theme").font(.headline)
                     ThemeChoiceEditorView(choice: $draft, autoName: "Per channel", autoAbout: "Colours made from each channel, so every channel has its own look.")

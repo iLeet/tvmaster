@@ -43,3 +43,14 @@ describe('screen designs', () => {
     expect(sameDesign(design(), { ...design(), fade_out_ms: 300 })).toBe(false);
   });
 });
+
+import { lookFile, type Look } from './pages/Looks';
+
+describe('looks as files', () => {
+  it('keeps only what can be brought back', () => {
+    const l = { id: 'my-x', name: 'X', about: 'a', builtin: false, theme: { theme: 'glass', style: 'modern', gentle: false }, guide: {}, preview_guide: { big: true }, screens: {} } as Look;
+    const f = JSON.parse(lookFile(l));
+    expect(Object.keys(f).sort()).toEqual(['about', 'guide', 'name', 'screens', 'theme']);
+    expect(f.theme.theme).toBe('glass');
+  });
+});

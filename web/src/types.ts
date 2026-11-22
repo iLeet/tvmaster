@@ -173,11 +173,13 @@ export interface GuideConfig {
     typeface: 'pixel' | 'smooth';
     corners: 'square' | 'rounded';
     text_size: 'small' | 'medium' | 'large';
-    background: { style: 'gradient' | 'solid' | 'stripes' | 'image'; image: string | null; dim: number };
+    background: { style: 'gradient' | 'solid' | 'stripes' | 'image' | 'aurora'; image: string | null; dim: number };
     header_style: 'bar' | 'minimal';
     ticker_position: 'bottom' | 'top';
     cell_times: boolean;
     now_marker: boolean;
+    /** Frosted-glass cells, labels and cards. */
+    glass: boolean;
   };
   header: { title: boolean; clock: boolean; date: boolean; hour12: boolean; logo: string | null };
   ticker_options: { enabled: boolean; speed: 'slow' | 'normal' | 'fast'; now_on: boolean };

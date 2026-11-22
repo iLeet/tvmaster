@@ -4,6 +4,7 @@ import { PREVIEWS, ThemeChoiceEditor, ThemePreview, emptyChoice, kidsChoice, use
 import type { ThemeChoice } from '../types';
 import { href } from '../router';
 import { Badge, Btn, Card, Segmented, Spinner, useToast } from '../ui';
+import { Looks } from './Looks';
 
 /** One look for the whole station: the guide, the cards, the stand-by screen, alerts and on-screen graphics. */
 export function Appearance() {
@@ -38,6 +39,7 @@ export function Appearance() {
         </span>
       </div>
       <p className="dim">One look for everything the station draws itself: the guide, station and break cards, the stand-by and sign-off screens, alerts, the now-playing card, the channel logo and the clock. A channel can choose its own under its settings.</p>
+      <Looks onApplied={() => location.reload()} />
       <Card className="stack">
         <h2>Theme</h2>
         <ThemeChoiceEditor value={draft} onChange={setDraft} autoName="Per channel" autoAbout="Colours made from each channel, so every channel has its own look." />

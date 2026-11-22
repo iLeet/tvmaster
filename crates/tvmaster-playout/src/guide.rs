@@ -67,6 +67,20 @@ pub fn palette_for(
         GuideTheme::Cherry => Palette::cherry(),
         GuideTheme::Gold => Palette::gold(),
         GuideTheme::Coffee => Palette::coffee(),
+        GuideTheme::Cable => Palette::cable(),
+        GuideTheme::Glass => Palette::glass(),
+        GuideTheme::Ember => Palette::ember(),
+        GuideTheme::Teal => Palette::teal(),
+        GuideTheme::Sakura => Palette::sakura(),
+        GuideTheme::Sand => Palette::sand(),
+        GuideTheme::Royal => Palette::royal(),
+        GuideTheme::Vapor => Palette::vapor(),
+        GuideTheme::Noir => Palette::noir(),
+        GuideTheme::Terminal => Palette::terminal(),
+        GuideTheme::Dusk => Palette::dusk(),
+        GuideTheme::Lime => Palette::lime(),
+        GuideTheme::Ice => Palette::ice(),
+        GuideTheme::Rosewood => Palette::rosewood(),
         GuideTheme::Custom => {
             let auto = Theme::for_channel(channel_id);
             let pick = |s: &Option<String>, fallback| {
@@ -116,6 +130,7 @@ pub fn guide_look(c: &GuideConfig, channel_id: &str) -> GuideLook {
     look.date = c.header.date;
     let a = &c.look;
     look.smooth_text = a.typeface == tvmaster_core::GuideTypeface::Smooth;
+    look.glass = a.glass;
     look.rounded = a.corners == tvmaster_core::GuideCorners::Rounded;
     look.text_scale = match a.text_size {
         tvmaster_core::GuideTextSize::Small => 0.8,
@@ -125,6 +140,7 @@ pub fn guide_look(c: &GuideConfig, channel_id: &str) -> GuideLook {
     look.background = match a.background.style {
         tvmaster_core::BackgroundStyle::Solid => tvmaster_render::Background::Solid,
         tvmaster_core::BackgroundStyle::Stripes => tvmaster_render::Background::Stripes,
+        tvmaster_core::BackgroundStyle::Aurora => tvmaster_render::Background::Aurora,
         // A picture is loaded separately (see `background_image`); until then, the gradient.
         _ => tvmaster_render::Background::Gradient,
     };

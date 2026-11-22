@@ -307,3 +307,25 @@ final class ScreenDesignTests: XCTestCase {
         XCTAssertEqual(k.source, "station")
     }
 }
+
+final class LookTests: XCTestCase {
+    func testALookReadsItsPartsAndExportsOnlyWhatCanBeBroughtBack() throws {
+        let j = #"{"id":"liquid-glass","name":"Liquid glass","about":"x","builtin":true,"theme":{"theme":"glass","style":"modern","gentle":false},"guide":{"look":{"glass":true}},"preview_guide":{"theme":"glass"},"screens":{"standby":{"preset":"glass","design":{}},"up_next":{"preset":"glass","design":{}}}}"#
+        let l = LookInfo(json: JSONValue(any: try JSONSerialization.jsonObject(with: Data(j.utf8))))
+        XCTAssertEqual(l.theme, "glass")
+        XCTAssertEqual(l.style, "modern")
+        XCTAssertEqual(l.screens, ["standby", "up_next"])
+        XCTAssertTrue(l.builtin)
+        let out = try JSONSerialization.jsonObject(with: l.exportJSON) as? [String: Any]
+        XCTAssertEqual(Set(out?.keys.map { $0 } ?? []), ["name", "about", "theme", "guide", "screens"])
+    }
+
+    func testAGuideCanBeFrostedGlassOnSoftColour() {
+        var g = GuideSettings()
+        g.glass = true; g.backgroundStyle = "aurora"
+        let o = g.apply(to: nil)
+        XCTAssertEqual(o.get(["look", "glass"]), .bool(true))
+        XCTAssertEqual(o.get(["look", "background", "style"])?.stringValue, "aurora")
+        XCTAssertTrue(GuideSettings(guide: o).glass)
+    }
+}

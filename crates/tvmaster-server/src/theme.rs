@@ -101,6 +101,20 @@ const THEMES: &[(&str, &str, &str)] = &[
     ("cherry", "Cherry", "Deep red with a gold highlight"),
     ("gold", "Gold", "Black with gold"),
     ("coffee", "Coffee", "Dark brown with a cream highlight"),
+    ("cable", "Cable box", "Blue cells with the one on now in orange, a light channel column and a cream info card, like a 2000s cable box"),
+    ("glass", "Glass", "Deep blue for frosted glass over soft, moving colour"),
+    ("ember", "Ember", "Dark red-brown with orange and gold"),
+    ("teal", "Teal", "Deep teal with a mint highlight"),
+    ("sakura", "Sakura", "Plum and blossom pink"),
+    ("sand", "Sand", "Warm sand, light"),
+    ("royal", "Royal", "Royal blue with gold"),
+    ("vapor", "Vapor", "Purple with a cyan highlight"),
+    ("noir", "Noir", "Near black with white"),
+    ("terminal", "Terminal", "Black with bright green, like an old terminal"),
+    ("dusk", "Dusk", "Dusky purple with a peach highlight"),
+    ("lime", "Lime", "Dark green with a lime highlight"),
+    ("ice", "Ice", "Deep blue with an icy highlight"),
+    ("rosewood", "Rosewood", "Dark wine red with a pale rose highlight"),
     ("custom", "Custom", "Two colours of your choosing"),
 ];
 
@@ -131,6 +145,43 @@ fn options() -> Value {
             { "id": "modern", "name": "Modern", "about": "Smooth type, clean shapes and gentle motion" },
         ],
     })
+}
+
+fn palette_json(p: &tvmaster_render::Palette) -> Value {
+    json!({
+        "bg_top": rgb_hex(p.bg_top), "bg_bottom": rgb_hex(p.bg_bottom), "header": rgb_hex(p.header),
+        "header_text": rgb_hex(p.header_text), "header_sub": rgb_hex(p.header_sub), "rule": rgb_hex(p.rule),
+        "label_bg": rgb_hex(p.label_bg), "label_num": rgb_hex(p.label_num), "label_name": rgb_hex(p.label_name),
+        "bar": rgb_hex(p.bar), "bar_text": rgb_hex(p.bar_text), "tick": rgb_hex(p.tick), "empty": rgb_hex(p.empty),
+        "cell": rgb_hex(p.cell), "cell_alt": rgb_hex(p.cell_alt), "cell_now": rgb_hex(p.cell_now),
+        "text": rgb_hex(p.text), "text_now": rgb_hex(p.text_now), "accent": rgb_hex(p.accent),
+        "ticker_bg": rgb_hex(p.ticker_bg), "ticker_text": rgb_hex(p.ticker_text), "panel": rgb_hex(p.panel),
+    })
+}
+
+/// `GET /api/v1/theme/palettes`: every theme's full set of colours, and the station's own, so a
+/// screen that draws its own guide (the Samsung TV app) can wear the same look.
+pub async fn palettes(State(s): State<AppState>) -> Json<Value> {
+    let mut all = serde_json::Map::new();
+    for (id, _, _) in THEMES {
+        if matches!(*id, "auto" | "custom") {
+            continue;
+        }
+        let theme: GuideTheme = serde_json::from_value(json!(id)).unwrap_or(GuideTheme::Auto);
+        all.insert(
+            id.to_string(),
+            palette_json(&palette_for(theme, &GuideColors::default(), "guide")),
+        );
+    }
+    let choice = station(&s.db());
+    Json(json!({
+        "palettes": all,
+        "station": {
+            "theme": choice.theme,
+            "style": choice.style,
+            "palette": palette_json(&palette_for(choice.theme, &choice.colors, "guide")),
+        },
+    }))
 }
 
 /// `GET /api/v1/theme`: the station's theme and everything it can be.

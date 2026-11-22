@@ -743,11 +743,16 @@ fn aurora(c: &mut Canvas, th: &Theme, colors: &[String], t: f32) {
     } else {
         colors.iter().map(|s| colour(s, th)).collect()
     };
-    let (lw, lh) = (W as usize / 4, H as usize / 4);
+    aurora_rgb(c, th.dark, th.bottom, &cols, t);
+}
+
+/// Soft blobs of colour drifting over a gradient, filling the canvas (any size).
+pub(crate) fn aurora_rgb(c: &mut Canvas, dark: Rgb, bottom: Rgb, cols: &[Rgb], t: f32) {
+    let (lw, lh) = ((c.w / 4).max(2), (c.h / 4).max(2));
     let mut field = vec![[0f32; 3]; lw * lh];
-    let n = cols.len() as f32;
+    let n = cols.len().max(1) as f32;
     for (y, row) in field.chunks_mut(lw).enumerate() {
-        let base = mix(th.dark, th.bottom, y as f32 / (lh - 1) as f32);
+        let base = mix(dark, bottom, y as f32 / (lh - 1) as f32);
         for px in row.iter_mut() {
             *px = [base[0] as f32, base[1] as f32, base[2] as f32];
         }

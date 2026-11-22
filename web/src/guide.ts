@@ -12,7 +12,7 @@ export function emptyGuide(): GuideConfig {
     theme: 'auto',
     colors: { primary: null, accent: null, background: null },
     layout: { style: 'grid', rows: 6, scroll: 'page', page_seconds: 9, time_step: 30, channel_numbers: true, channel_names: true, progress: false, scanlines: true },
-    look: { typeface: 'pixel', corners: 'square', text_size: 'medium', background: { style: 'gradient', image: null, dim: 45 }, header_style: 'bar', ticker_position: 'bottom', cell_times: false, now_marker: true },
+    look: { typeface: 'pixel', corners: 'square', text_size: 'medium', background: { style: 'gradient', image: null, dim: 45 }, header_style: 'bar', ticker_position: 'bottom', cell_times: false, now_marker: true, glass: false },
     header: { title: true, clock: true, date: true, hour12: true, logo: null },
     ticker_options: { enabled: true, speed: 'normal', now_on: true },
     channels: [],

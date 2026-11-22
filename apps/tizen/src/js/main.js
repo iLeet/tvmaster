@@ -146,6 +146,7 @@ const App = (() => {
     Store.on(onStore);
     Status.show('TVMaster Guide', 'Connecting to ' + Cfg.get('server') + ' ...\n\nPress Red for server settings.');
     Store.start();
+    Theme.load();
     Log.d('started, server ' + Cfg.get('server') + (Cfg.get('demo') ? ' (demo)' : ''));
   }
   return { boot };

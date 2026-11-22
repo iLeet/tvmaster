@@ -5,7 +5,15 @@ const Guide = (() => {
   const MIN = Fmt.MIN;
   const G = { rowH: 66, rows: 7, chW: 240, gridW: 1512, minutes: 120, gap: 4, ahead: 7.5 * 60 * MIN };
   const PPM = G.gridW / (G.minutes * MIN); // pixels per millisecond
-  const PIP = { x: 80, y: 80, w: 640, h: 360 };
+  const PIP_LEFT = { x: 80, y: 80, w: 640, h: 360 };
+  const PIP_RIGHT = { x: 1200, y: 80, w: 640, h: 360 };
+  // Cable box and glass layouts put the picture at the top right and the info card at the left.
+  const pip = () => (Theme.layout() === 'default' ? PIP_LEFT : PIP_RIGHT);
+  function relayout() {
+    const r = pip();
+    $('guide').querySelector('.g-bg').style.clipPath = 'path(evenodd, "M0 0H1920V1080H0Z M' + r.x + ' ' + r.y + 'H' + (r.x + r.w) + 'V' + (r.y + r.h) + 'H' + r.x + 'Z")';
+    if (isOpen) Player.setRect(r);
+  }
 
   let isOpen = false;
   let chs = [];
@@ -180,7 +188,7 @@ const Guide = (() => {
     rowOff = Math.max(0, Math.min(selRow - 3, Math.max(0, chs.length - G.rows)));
     isOpen = true;
     Banner.hide();
-    Player.setRect(PIP);
+    relayout();
     $('guide').classList.remove('hide');
     refresh();
     return true;
@@ -233,7 +241,7 @@ const Guide = (() => {
 
   return {
     init(h) { Object.assign(host, h); Store.on(onStore); },
-    open, close, key,
+    open, close, key, relayout,
     isOpen: () => isOpen,
   };
 })();

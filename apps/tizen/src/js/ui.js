@@ -20,15 +20,85 @@ const Screen = (() => {
   };
 })();
 
+// Themes. "station" wears the look the TVMaster server has chosen (its palette, and its guide's layout);
+// the others are the server's own list of palettes, or three built into the app for when it cannot be reached.
 const Theme = (() => {
-  const LIST = ['classic', 'crimson', 'night'];
-  const apply = () => { document.body.setAttribute('data-theme', Cfg.get('theme')); };
+  const LOCAL = ['classic', 'crimson', 'night'];
+  const VARS = ['--tint', '--panel-accent', '--ch-shadow', '--bg-top', '--bg-bot', '--panel', '--panel-edge', '--panel-ink', '--panel-muted', '--cell-a', '--cell-b', '--cell-edge', '--cell-now-a', '--cell-now-b',
+    '--gap-a', '--gap-b', '--ch-a', '--ch-b', '--ch-num', '--ch-name', '--sel-a', '--sel-b', '--sel-edge', '--sel-text', '--text', '--muted', '--accent'];
+  let remote = null; // { palettes, station: { theme, palette }, glass, cable }
+  const rgb = (h) => { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+  const hex = (c) => '#' + c.map((x) => ('0' + Math.max(0, Math.min(255, Math.round(x))).toString(16)).slice(-2)).join('');
+  const mix = (a, b, t) => { const x = rgb(a); const y = rgb(b); return hex(x.map((v, i) => v + (y[i] - v) * t)); };
+  const lum = (h) => { const c = rgb(h); return 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]; };
+
+  function paint(p) {
+    const st = document.body.style;
+    const on = (bg) => (lum(bg) > 150 ? '#1c2038' : '#ffffff');
+    const set = {
+      '--bg-top': p.bg_top, '--bg-bot': p.bg_bottom, '--panel': p.panel, '--panel-edge': p.rule,
+      '--panel-ink': on(p.panel), '--panel-muted': lum(p.panel) > 150 ? '#4a5170' : p.header_sub,
+      '--cell-a': mix(p.cell, '#ffffff', 0.08), '--cell-b': p.cell_alt, '--cell-edge': mix(p.cell_alt, '#000000', 0.45),
+      '--cell-now-a': mix(p.cell_now, '#ffffff', 0.15), '--cell-now-b': p.cell_now,
+      '--gap-a': p.empty, '--gap-b': mix(p.empty, '#000000', 0.25),
+      '--ch-a': mix(p.label_bg, '#ffffff', 0.06), '--ch-b': p.label_bg, '--ch-num': p.label_num, '--ch-name': p.label_name,
+      '--sel-a': mix(p.accent, '#ffffff', 0.55), '--sel-b': p.accent, '--sel-edge': '#ffffff', '--sel-text': on(p.accent),
+      '--text': p.text, '--muted': mix(p.text, p.bg_top, 0.4), '--accent': p.accent,
+      '--tint': p.tick, '--panel-accent': lum(p.panel) > 150 ? mix(p.accent, '#000000', 0.45) : p.accent,
+      '--ch-shadow': lum(p.label_bg) > 150 ? 'none' : '2px 2px 0 #000',
+    };
+    Object.keys(set).forEach((k) => st.setProperty(k, set[k]));
+  }
+
+  function unpaint() { VARS.forEach((k) => document.body.style.removeProperty(k)); }
+
+  const ids = () => ['station'].concat(LOCAL, remote ? Object.keys(remote.palettes) : []);
+  const current = () => (ids().indexOf(Cfg.get('theme')) < 0 ? 'station' : Cfg.get('theme'));
+
+  // The guide's layout: the server's guide channel decides (frosted glass, or the picture top right with the info card at the left, like a cable box); with no guide channel the theme does.
+  function layout() {
+    const id = current();
+    const name = id === 'station' ? (remote && remote.station.theme) : id;
+    if (remote && id === 'station') { if (remote.glass) return 'glass'; if (remote.cable) return 'cable'; }
+    if (name === 'glass') return 'glass';
+    if (name === 'cable') return 'cable';
+    return 'default';
+  }
+
+  function apply() {
+    const id = current();
+    unpaint();
+    const pal = id === 'station' ? (remote && remote.station.palette) : (remote && remote.palettes[id]);
+    document.body.setAttribute('data-theme', pal ? 'palette' : (LOCAL.indexOf(id) >= 0 ? id : 'classic'));
+    if (pal) paint(pal);
+    document.body.setAttribute('data-layout', layout());
+    if (typeof Guide !== 'undefined' && Guide.relayout) Guide.relayout();
+  }
+
   return {
-    init() { if (LIST.indexOf(Cfg.get('theme')) < 0) Cfg.set('theme', 'classic'); apply(); },
+    init() { apply(); },
+    layout,
+    // Ask the server for its palettes and what its guide looks like; fine if it cannot be reached.
+    async load() {
+      try {
+        const t = await Api.json('/api/v1/theme/palettes');
+        let glass = false;
+        let cable = false;
+        try {
+          const chs = await Api.json('/api/v1/channels');
+          const g = (chs || []).filter((c) => c.kind === 'guide')[0];
+          if (g && g.guide) { glass = !!(g.guide.look && g.guide.look.glass); cable = !!(g.guide.pip && g.guide.pip.placement === 'top_right' && g.guide.pip.info !== false); }
+        } catch (e) { /* the list needs no more than this */ }
+        remote = { palettes: t.palettes || {}, station: t.station, glass, cable };
+        apply();
+      } catch (e) { Log.d('theme: ' + e); }
+    },
     next() {
-      Cfg.set('theme', LIST[(LIST.indexOf(Cfg.get('theme')) + 1) % LIST.length]);
+      const list = ids();
+      Cfg.set('theme', list[(list.indexOf(current()) + 1) % list.length]);
       apply();
-      Toast.show('Theme: ' + Cfg.get('theme'));
+      const id = current();
+      Toast.show('Theme: ' + (id === 'station' ? 'the station\'s' : id));
     },
   };
 })();

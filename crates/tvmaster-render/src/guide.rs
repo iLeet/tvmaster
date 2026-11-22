@@ -270,6 +270,89 @@ impl Palette {
         Self::dark([30, 20, 14], [140, 92, 60], [244, 210, 150])
     }
 
+    // ---- more looks
+
+    /// A 2000s cable box: blue cells, the one on now in orange, a light channel column and a cream info card.
+    pub fn cable() -> Self {
+        let navy = [24, 44, 112];
+        let dark_ink = [30, 34, 60];
+        Self {
+            bg_top: [26, 54, 128],
+            bg_bottom: [10, 22, 72],
+            header: [244, 232, 170],
+            header_text: dark_ink,
+            header_sub: [120, 84, 30],
+            rule: [150, 164, 214],
+            label_bg: [226, 230, 242],
+            label_num: dark_ink,
+            label_name: [60, 70, 110],
+            bar: [64, 78, 140],
+            bar_text: WHITE,
+            tick: [190, 204, 255],
+            empty: [18, 34, 92],
+            cell: [36, 62, 140],
+            cell_alt: [30, 52, 120],
+            cell_now: [216, 94, 38],
+            text: [236, 240, 255],
+            text_now: WHITE,
+            accent: [255, 176, 64],
+            ticker_bg: [206, 210, 222],
+            ticker_text: navy,
+            panel: [244, 236, 198],
+        }
+    }
+    /// Deep blue, made for frosted glass over soft colour: panels read as tinted smoke.
+    pub fn glass() -> Self {
+        let mut p = Self::dark([14, 20, 56], [96, 128, 255], [255, 255, 255]);
+        p.cell_now = [70, 96, 210];
+        p.cell = [12, 18, 48];
+        p.cell_alt = [20, 28, 70];
+        p.label_name = [220, 232, 255];
+        p
+    }
+    pub fn ember() -> Self {
+        Self::dark([30, 10, 6], [208, 74, 30], [255, 196, 96])
+    }
+    pub fn teal() -> Self {
+        Self::dark([6, 28, 30], [22, 150, 150], [150, 255, 232])
+    }
+    pub fn sakura() -> Self {
+        Self::dark([36, 14, 26], [224, 112, 164], [255, 222, 232])
+    }
+    pub fn sand() -> Self {
+        Self::bright(
+            [244, 234, 212],
+            [228, 214, 184],
+            [150, 104, 60],
+            [200, 90, 40],
+            [60, 44, 30],
+        )
+    }
+    pub fn royal() -> Self {
+        Self::dark([10, 12, 48], [62, 72, 206], [255, 216, 96])
+    }
+    pub fn vapor() -> Self {
+        Self::dark([26, 10, 48], [184, 72, 224], [96, 242, 255])
+    }
+    pub fn noir() -> Self {
+        Self::dark([10, 10, 10], [96, 96, 96], [236, 236, 236])
+    }
+    pub fn terminal() -> Self {
+        Self::dark([2, 14, 4], [22, 168, 64], [156, 255, 176])
+    }
+    pub fn dusk() -> Self {
+        Self::dark([32, 16, 36], [204, 102, 92], [255, 204, 126])
+    }
+    pub fn lime() -> Self {
+        Self::dark([10, 26, 6], [118, 196, 30], [234, 255, 124])
+    }
+    pub fn ice() -> Self {
+        Self::dark([8, 22, 38], [92, 174, 224], [224, 247, 255])
+    }
+    pub fn rosewood() -> Self {
+        Self::dark([36, 12, 18], [166, 52, 64], [252, 206, 186])
+    }
+
     /// Light, like a printed listing.
     pub fn paper() -> Self {
         let ink = [40, 40, 52];
@@ -377,6 +460,8 @@ pub enum Background {
     Solid,
     /// Faint diagonal stripes.
     Stripes,
+    /// Soft colour from the palette drifting slowly: the backdrop for frosted glass.
+    Aurora,
     /// A picture already scaled to the frame's size (RGB, 3 bytes a pixel).
     Image(Arc<Vec<u8>>),
 }
@@ -387,7 +472,8 @@ impl PartialEq for Background {
             (Background::Image(a), Background::Image(b)) => Arc::ptr_eq(a, b),
             (Background::Gradient, Background::Gradient)
             | (Background::Solid, Background::Solid)
-            | (Background::Stripes, Background::Stripes) => true,
+            | (Background::Stripes, Background::Stripes)
+            | (Background::Aurora, Background::Aurora) => true,
             _ => false,
         }
     }
@@ -429,6 +515,8 @@ pub struct GuideLook {
     /// Each programme's times under its name, when there is room.
     pub cell_times: bool,
     pub now_marker: bool,
+    /// Cells, labels and cards are frosted-glass panels.
+    pub glass: bool,
 }
 
 impl GuideLook {
@@ -458,6 +546,7 @@ impl GuideLook {
             ticker_top: false,
             cell_times: false,
             now_marker: true,
+            glass: false,
         }
     }
 
@@ -661,6 +750,8 @@ struct Gfx {
     k: i32,
     smooth: bool,
     radius: i32,
+    /// Frosted-glass panels instead of solid ones.
+    glass: bool,
     /// Added to every x (points), to draw a column of the layout without repeating its offset.
     ox: i32,
     /// Physical pixels: x0, y0, x1, y1.
@@ -674,7 +765,12 @@ impl Gfx {
             c: Canvas::new(w, h),
             k: look.k() as i32,
             smooth: look.smooth_text,
-            radius: if look.rounded { RADIUS } else { 0 },
+            radius: if look.rounded || look.glass {
+                RADIUS
+            } else {
+                0
+            },
+            glass: look.glass,
             ox: 0,
             clip: None,
         }
@@ -725,8 +821,51 @@ impl Gfx {
         );
     }
 
+    /// A see-through panel: the colour laid lightly over what is behind, a soft sheen from the
+    /// top and a bright edge.
+    fn glass_rrect(&mut self, x: i32, y: i32, w: i32, h: i32, col: Rgb) {
+        let k = self.k;
+        let r = ((self.radius.max(3) + 1) * k)
+            .min(w * k / 2)
+            .min(h * k / 2)
+            .max(1);
+        let (px, py, pw, ph) = ((x + self.ox) * k, y * k, w * k, h * k);
+        // Light tints stay clear, dark ones read as smoke.
+        let strength = if lum(col) > 150.0 { 0.30 } else { 0.46 };
+        let a = (strength * 255.0) as u8;
+        for row in 0..ph {
+            let d = row.min(ph - 1 - row);
+            let inset = if d >= r {
+                0
+            } else {
+                let dy = (r - d) as f32 - 0.5;
+                (r as f32 - ((r * r) as f32 - dy * dy).max(0.0).sqrt()).round() as i32
+            };
+            let sheen = ((1.0 - row as f32 / ph as f32).powi(2) * 34.0) as u8;
+            for xx in (px + inset)..(px + pw - inset) {
+                self.put(xx, py + row, col, a);
+                if sheen > 0 {
+                    self.put(xx, py + row, WHITE, sheen);
+                }
+            }
+            // the bright edge: the ends of the row, and the top and bottom rows
+            let edge = if row == 0 { 150 } else { 70 };
+            if row == 0 || row == ph - 1 {
+                for xx in (px + inset)..(px + pw - inset) {
+                    self.put(xx, py + row, WHITE, edge);
+                }
+            } else {
+                self.put(px + inset, py + row, WHITE, 120);
+                self.put(px + pw - inset - 1, py + row, WHITE, 70);
+            }
+        }
+    }
+
     /// A rectangle with rounded corners when the look asks for them.
     fn rrect(&mut self, x: i32, y: i32, w: i32, h: i32, col: Rgb) {
+        if self.glass {
+            return self.glass_rrect(x, y, w, h, col);
+        }
         let r = (self.radius * self.k)
             .min(w * self.k / 2)
             .min(h * self.k / 2);
@@ -1216,6 +1355,15 @@ fn panel(
     ad: bool,
 ) {
     let p = &look.palette;
+    // A light card (the cable box's cream one) needs dark words.
+    let light = !look.glass && lum(p.panel) > 150.0;
+    let title_ink = if light { [30, 34, 60] } else { p.text_now };
+    let sub_ink = if light { [70, 78, 110] } else { p.text };
+    let acc_ink = if light && lum(p.accent) > 140.0 {
+        mix(p.accent, [0, 0, 0], 0.5)
+    } else {
+        p.accent
+    };
     c.rrect(r.x, r.y, r.w, r.h, p.panel);
     c.rect(r.x + c.radius, r.y, r.w - 2 * c.radius, 2, p.accent);
     if ad {
@@ -1229,7 +1377,7 @@ fn panel(
             r.y + 10 + c.lh(3.0) + 6,
             &line,
             ts,
-            p.text_now,
+            title_ink,
             false,
         );
         let line = c.truncate("Back to your show in a moment", inner, ts, false);
@@ -1238,7 +1386,7 @@ fn panel(
             r.y + 10 + c.lh(3.0) + 6 + c.lh(ts) + 2,
             &line,
             ts,
-            p.accent,
+            acc_ink,
             false,
         );
         return;
@@ -1250,11 +1398,22 @@ fn panel(
     let inner = r.w - 12;
     let num = row.number.to_string();
     let nscale = if wide { 4.0 } else { 3.0 };
-    c.text_shadow(r.x + 6, y, &num, nscale, p.label_num, true);
+    if light {
+        c.text(r.x + 6, y, &num, nscale, title_ink, true);
+    } else {
+        c.text_shadow(r.x + 6, y, &num, nscale, p.label_num, true);
+    }
     let nx = r.x + 6 + c.tw(&num, nscale, true) + 8;
     let name = c.truncate(&row.name, r.x + r.w - nx - 6, ts, false);
-    c.text(nx, y + 2, &name, ts, p.label_name, false);
-    c.text(nx, y + nscale as i32 * 8 - 8, "ON NOW", ts, p.accent, false);
+    c.text(
+        nx,
+        y + 2,
+        &name,
+        ts,
+        if light { sub_ink } else { p.label_name },
+        false,
+    );
+    c.text(nx, y + nscale as i32 * 8 - 8, "ON NOW", ts, acc_ink, false);
     y += nscale as i32 * 8 + 8;
     let now = row.cells.iter().find(|x| airing(x, data.now_ms));
     let next = row
@@ -1282,27 +1441,47 @@ fn panel(
             if y + 8 * c.size(scale) as i32 > bottom {
                 break;
             }
-            c.text_shadow(r.x + 6, y, l, scale, p.text_now, true);
+            if light {
+                c.text(r.x + 6, y, l, scale, title_ink, true);
+            } else {
+                c.text_shadow(r.x + 6, y, l, scale, title_ink, true);
+            }
             y += c.lh(scale) - 2 + 3;
         }
         if !cell.range.is_empty() && y + 8 <= bottom {
             let t = c.truncate(&cell.range, inner, ts, false);
-            c.text(r.x + 6, y, &t, ts, p.accent, false);
+            c.text(r.x + 6, y, &t, ts, acc_ink, false);
             y += c.lh(ts) + 1;
         }
     }
     if let Some(cell) = next {
         if y + 22 <= bottom {
-            c.text(r.x + 6, y + 2, "NEXT", ts, p.label_name, false);
+            c.text(
+                r.x + 6,
+                y + 2,
+                "NEXT",
+                ts,
+                if light { sub_ink } else { p.label_name },
+                false,
+            );
             let line = c.truncate(&cell.title, inner, ts, false);
-            c.text(r.x + 6, y + 13, &line, ts, p.text, false);
+            c.text(r.x + 6, y + 13, &line, ts, sub_ink, false);
         }
     }
 }
 
-fn background(c: &mut Gfx, look: &GuideLook) {
+fn background(c: &mut Gfx, look: &GuideLook, t: f32) {
     let p = &look.palette;
     match &look.background {
+        Background::Aurora => {
+            let cols = [
+                p.tick,
+                p.cell_now,
+                mix(p.tick, p.accent, 0.3),
+                mix(p.header, p.tick, 0.5),
+            ];
+            crate::design::aurora_rgb(&mut c.c, p.bg_top, p.bg_bottom, &cols, t);
+        }
         Background::Image(img) if img.len() == c.c.px.len() => c.c.px.copy_from_slice(img),
         Background::Solid => c.c.fill(p.bg_top),
         Background::Stripes => {
@@ -1326,7 +1505,7 @@ fn background(c: &mut Gfx, look: &GuideLook) {
 
 /// The colour for words that sit straight on the background.
 fn ink_on_background(look: &GuideLook) -> Rgb {
-    if matches!(look.background, Background::Image(_)) {
+    if matches!(look.background, Background::Image(_) | Background::Aurora) {
         WHITE
     } else if lum(look.palette.bg_top) > 140.0 {
         [20, 24, 34]
@@ -1340,7 +1519,7 @@ pub fn render_guide(data: &GuideData, look: &GuideLook, view: &GuideView, t: f32
     let p = &look.palette;
     let g = geometry(look);
     let mut c = Gfx::new(look);
-    background(&mut c, look);
+    background(&mut c, look, t);
     let w = WIDTH as i32;
     let smooth = look.smooth_text;
 
@@ -1512,7 +1691,11 @@ pub fn render_guide(data: &GuideData, look: &GuideLook, view: &GuideView, t: f32
 
     // ticker
     if look.ticker {
-        c.rect(0, g.ticker_y, w, TICKER_H, p.ticker_bg);
+        if look.glass {
+            c.rrect(2, g.ticker_y, w - 4, TICKER_H, p.ticker_bg);
+        } else {
+            c.rect(0, g.ticker_y, w, TICKER_H, p.ticker_bg);
+        }
         let rule_y = if look.ticker_top {
             g.ticker_y + TICKER_H - 2
         } else {
@@ -1871,6 +2054,20 @@ mod tests {
             Palette::cherry(),
             Palette::gold(),
             Palette::coffee(),
+            Palette::cable(),
+            Palette::glass(),
+            Palette::ember(),
+            Palette::teal(),
+            Palette::sakura(),
+            Palette::sand(),
+            Palette::royal(),
+            Palette::vapor(),
+            Palette::noir(),
+            Palette::terminal(),
+            Palette::dusk(),
+            Palette::lime(),
+            Palette::ice(),
+            Palette::rosewood(),
             Palette::custom([30, 160, 90], [250, 240, 120]),
             Palette::custom_on([30, 160, 90], [250, 240, 120], Some([20, 20, 60])),
             Palette::from_theme(&Theme::for_channel("x")),

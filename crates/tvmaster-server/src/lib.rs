@@ -15,6 +15,7 @@ mod info_preview;
 mod iptv;
 mod libraries;
 mod live;
+mod looks;
 mod monitor;
 mod pip;
 mod plan;
@@ -625,6 +626,11 @@ fn build_router(state: AppState, https: bool) -> Router {
         .route("/api/v1/info/preview", post(info_preview::preview))
         .route("/api/v1/theme", get(theme::get).put(theme::put))
         .route("/api/v1/theme/preview", post(theme::preview))
+        .route("/api/v1/theme/palettes", get(theme::palettes))
+        .route("/api/v1/looks", get(looks::get).post(looks::save))
+        .route("/api/v1/looks/import", post(looks::import))
+        .route("/api/v1/looks/:id", axum::routing::delete(looks::delete))
+        .route("/api/v1/looks/:id/apply", post(looks::apply))
         .route("/api/v1/screens", get(screens::get))
         .route("/api/v1/screens/preview", post(screens::preview))
         .route(

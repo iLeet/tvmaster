@@ -37,3 +37,37 @@ default), or any of their own looks.
   `brb`, `back_to`, `up_next`, `later_today`, `station_id`), `guide`, `alert` or `bar`; `theme` is a theme
   as above; `id`, `name` and `number` make a channel's own card.
 - A channel's own theme is `options.theme` (absent or null = follow the station).
+
+
+## Looks
+
+A **look** is a whole appearance: the station theme (colours, style, gentle alerts), the screens
+(stand-by, Up next ... see [SCREENS.md](SCREENS.md)) and how the guides are laid out. They come with the
+station: Classic cable, Cable box 2000s, Liquid glass, Kids' TV, Night modern, Printed listing, Terminal and
+Sunset VHS. On **Appearance** choose one and which parts to change; save the current appearance as your own;
+export a look to a file and import one.
+
+- **Cable box:** the `cable` theme (blue cells, the one on now in orange, a light channel column, a cream
+  card) with the guide's picture at the top right and the info card at its left.
+- **Liquid glass:** the `glass` theme, the guide's *Frosted glass* switch with the *Soft colour* background,
+  smooth type and rounded corners, and the glass design for every screen.
+- Applying a look sets the guide channels' layout (they follow the station's colours); a guide you have
+  changed by hand is changed again, so untick *Guide layouts* to leave guides alone.
+
+### The guide's own settings
+
+`look.glass` (frosted glass) and `look.background.style: "aurora"` (soft colour) in a guide's settings.
+
+### API
+
+- `GET /api/v1/looks` - `{ looks: [{ id, name, about, builtin, theme, guide, screens, preview_guide }] }`.
+- `POST /api/v1/looks/:id/apply` - `{ "theme": true, "screens": true, "guides": true }`.
+- `POST /api/v1/looks` - `{ name, about }` saves the current appearance. `POST /api/v1/looks/import` takes
+  `{ name, about, theme, guide, screens }` (what an export holds). `DELETE /api/v1/looks/:id` forgets one of yours.
+- `GET /api/v1/theme/palettes` - every theme's full set of colours, and the station's own.
+
+## The Samsung TV app
+
+The TV guide follows the station: it uses the station theme's palette (Green steps through every theme the
+server has, then back to "the station's") and takes its layout from the guide channel: **Cable box** when the
+guide's picture is at the top right with its info card, **Liquid glass** when the guide has frosted glass on.

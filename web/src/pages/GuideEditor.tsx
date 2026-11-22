@@ -118,7 +118,7 @@ export function GuideEditor({
           <Field label="Heading"><Segmented value={g.look.header_style} options={[{ value: 'bar', label: 'Coloured bar' }, { value: 'minimal', label: 'Just the words' }]} onChange={(header_style) => look({ header_style })} /></Field>
         </div>
         <Field label="Background" hint={g.look.background.style === 'image' ? 'A picture fitted to the screen and darkened so the listing stays readable.' : undefined}>
-          <Segmented value={g.look.background.style} options={[{ value: 'gradient', label: 'Gradient' }, { value: 'solid', label: 'Solid' }, { value: 'stripes', label: 'Stripes' }, { value: 'image', label: 'Picture' }]} onChange={(style) => look({ background: { ...g.look.background, style } })} />
+          <Segmented value={g.look.background.style} options={[{ value: 'gradient', label: 'Gradient' }, { value: 'solid', label: 'Solid' }, { value: 'stripes', label: 'Stripes' }, { value: 'aurora', label: 'Soft colour' }, { value: 'image', label: 'Picture' }]} onChange={(style) => look({ background: { ...g.look.background, style } })} />
         </Field>
         {g.look.background.style === 'image' && (
           <div className="stack nest">
@@ -129,6 +129,7 @@ export function GuideEditor({
         <div className="row wrap">
           <Toggle checked={g.look.cell_times} onChange={(v) => look({ cell_times: v })} label={<span>Times on each programme <span className="dim small">when there is room</span></span>} />
           <Toggle checked={g.look.now_marker} onChange={(v) => look({ now_marker: v })} label="Line at “now” on the time grid" />
+          <Toggle checked={g.look.glass} onChange={(v) => look({ glass: v, ...(v ? { typeface: 'smooth' as const, corners: 'rounded' as const } : {}) })} label={<span>Frosted glass <span className="dim small">see-through cells, names and cards with a bright edge; best on the Soft colour background</span></span>} />
         </div>
       </Card>
 
