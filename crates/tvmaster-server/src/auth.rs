@@ -127,6 +127,8 @@ fn is_viewing(method: &axum::http::Method, path: &str) -> bool {
                 | "/device.xml"
         )
         || path == "/api/v1/channels"
+        // the colours of every theme: the TV app wears the station's look
+        || path == "/api/v1/theme/palettes"
         || path == "/api/v1/ws"
         || path == "/api/v1/tvs"
         || path.starts_with("/api/v1/tvs/"))
@@ -609,6 +611,7 @@ mod tests {
             "/discover.json",
             "/lineup.json",
             "/api/v1/tvs",
+            "/api/v1/theme/palettes",
         ] {
             assert_eq!(get(&app, uri, &[]).await, StatusCode::OK, "{uri}");
         }

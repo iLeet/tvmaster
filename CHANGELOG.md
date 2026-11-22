@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.1
+
+- **Fixed:** the Samsung TV app could not read the station's theme when the server lets anyone watch without a token (it asked for the colours and was refused), so it kept its built-in themes. The colours of the themes are now readable by viewers, like the channel list.
+
 ## 1.6.0
 
 Looks, new themes, and a cable box and liquid glass for the guide, the screens and the TV.
