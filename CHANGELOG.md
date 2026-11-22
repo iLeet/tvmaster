@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.7.1
+
+- **Fixed:** the Server page counted every thread of an encoder as another FFmpeg (it said 100 running); each encoder is now counted once. The guide window's internal commercials stream is no longer listed as a channel on air.
+- Measured on the 4-thread server: the commercials window costs about 0.6 of a core; the guide channel itself is the heavy part (about 1.9 cores while someone watches it).
+
 ## 1.7.0
 
 - **The guide's commercial window: no more Commercial Break channel.** The commercials now play from a small, light stream of their own (480p, 15 frames a second) that the guide starts while it needs it. It is not a channel: no number, nothing listed in the guide, the playlist, the listing or the TV app, and nothing stored. It is much cheaper than a full channel. The old "Commercial Break" channel is removed when the server starts.

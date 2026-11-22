@@ -263,7 +263,7 @@ pub async fn system(State(s): State<AppState>) -> Json<Value> {
         "arch": std::env::consts::ARCH,
         "timezone": crate::station::effective_timezone(&s.db()),
         "ffmpeg": ffmpeg,
-        "on_air": s.playout.as_ref().map(|p| p.running()).unwrap_or_default(),
+        "on_air": s.playout.as_ref().map(|p| p.running().into_iter().filter(|c| c != tvmaster_core::COMMERCIAL_CHANNEL).collect::<Vec<_>>()).unwrap_or_default(),
         "auth_required": s.token().is_some(),
         "data_dir": s.data_dir.as_ref().map(|d| d.to_string_lossy().to_string()),
         "network": network_json(&s.network),

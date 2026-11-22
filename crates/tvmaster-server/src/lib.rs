@@ -734,7 +734,14 @@ async fn health(axum::extract::State(s): axum::extract::State<AppState>) -> Json
             "encoder": s.playout.as_ref().map(|p| p.config().encoder.name()),
         })
     });
-    let on_air = s.playout.as_ref().map(|p| p.running()).unwrap_or_default();
+    let on_air: Vec<String> = s
+        .playout
+        .as_ref()
+        .map(|p| p.running())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|c| c != tvmaster_core::COMMERCIAL_CHANNEL)
+        .collect();
     Json(json!({
         "status": "ok",
         // So apps scanning the network can tell a TVMaster server from anything else on port 8787.

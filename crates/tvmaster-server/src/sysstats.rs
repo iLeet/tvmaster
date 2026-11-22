@@ -61,7 +61,15 @@ fn capacity(
 
 /// `GET /api/v1/system/stats`: the machine and what it is doing right now. Poll it every few seconds.
 pub async fn stats(State(s): State<AppState>) -> Json<Value> {
-    let on_air = s.playout.as_ref().map(|p| p.running()).unwrap_or_default();
+    let on_air: Vec<String> = s
+        .playout
+        .as_ref()
+        .map(|p| p.running())
+        .unwrap_or_default()
+        .into_iter()
+        // the guide window's commercials are an internal stream, not a channel
+        .filter(|c| c != tvmaster_core::COMMERCIAL_CHANNEL)
+        .collect();
     let hardware = s
         .playout
         .as_ref()
@@ -105,7 +113,11 @@ pub async fn stats(State(s): State<AppState>) -> Json<Value> {
         let mut ff: Vec<(Pid, f32, u64)> = sys
             .processes()
             .iter()
-            .filter(|(_, p)| p.name().to_string_lossy().to_lowercase().starts_with("ffmpeg"))
+            .filter(|(_, p)| {
+                // threads are listed as processes on Linux: count each encoder once
+                p.thread_kind().is_none()
+                    && p.name().to_string_lossy().to_lowercase().starts_with("ffmpeg")
+            })
             .map(|(pid, p)| (*pid, p.cpu_usage(), p.memory()))
             .collect();
         ff.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
