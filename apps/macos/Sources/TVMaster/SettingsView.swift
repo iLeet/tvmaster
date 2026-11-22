@@ -96,6 +96,7 @@ struct SettingsView: View {
             .formStyle(.grouped).tabItem { Label("Backups", systemImage: "externaldrive") }
 
             Form {
+                MachineSections()
                 Section("Server") {
                     TextField("Address", text: $model.serverText, prompt: Text("http://127.0.0.1:8787"))
                     DisclosureGroup("Servers on my network") {
@@ -236,6 +237,61 @@ struct SettingsView: View {
         case .stopped: "Not started by this app"
         case .running(let pid): "Running (process \(pid))"
         case .failed(let m): "Failed: \(m)"
+        }
+    }
+}
+
+/// The machine the server runs on and how hard it is working, refreshed every few seconds.
+struct MachineSections: View {
+    @Environment(AppModel.self) private var model
+    @State private var st: SystemStats?
+
+    var body: some View {
+        Group {
+            if let st {
+                let busy = st.busyWord
+                Section("How it is doing") {
+                    HStack { Spacer(); Text(busy.word).font(.callout.weight(.semibold)).foregroundStyle(busy.level == 0 ? Color.green : busy.level == 1 ? .orange : .red) }
+                    meter("Processor", st.cpuPct / 100, "\(Int(st.cpuPct))% of \(st.threads) threads")
+                    meter("Memory", st.memTotal > 0 ? st.memUsed / st.memTotal : 0, "\(SystemStats.bytes(st.memUsed)) of \(SystemStats.bytes(st.memTotal))\(st.memLimitedByContainer ? " (container limit)" : "")")
+                    Text("Load average \(st.load.map { String(format: "%.2f", $0) }.joined(separator: " · ")) (1, 5, 15 minutes; about the number of threads is full)").font(.caption).foregroundStyle(.secondary)
+                    Text(st.capacitySentence)
+                }
+                Section("What TVMaster is using") {
+                    LabeledContent("The server itself", value: st.serverCpuPct.map { "\(Int($0))% of a thread · \(SystemStats.bytes(st.serverMemory ?? 0)) · up \(SystemStats.duration(st.serverUptime ?? 0))" } ?? "—")
+                    LabeledContent("Encoders (FFmpeg)", value: "\(st.ffmpegProcesses) running · \(String(format: "%.2f", st.ffmpegCores)) cores · \(SystemStats.bytes(st.ffmpegMemory))")
+                    LabeledContent("Encoding with", value: (st.encoder ?? "not available") + (st.encoder == "software" ? " (the processor does it all)" : ""))
+                    LabeledContent("On air now", value: st.onAir.isEmpty ? "nothing: channels start when someone tunes in" : st.onAir.joined(separator: ", "))
+                }
+                Section("The machine") {
+                    LabeledContent("Name", value: st.hostName + (st.container ? " (in a container)" : ""))
+                    LabeledContent("System", value: "\(st.os) · \(st.arch)\(st.kernel.isEmpty ? "" : " · kernel \(st.kernel)")")
+                    LabeledContent("Processor", value: "\(st.cpuModel) · \(st.cores.map { "\($0) cores, " } ?? "")\(st.threads) threads")
+                    LabeledContent("Memory", value: "\(SystemStats.bytes(st.memTotal)) · \(SystemStats.bytes(st.memAvailable)) free")
+                    LabeledContent("Up for", value: SystemStats.duration(st.uptime))
+                    LabeledContent("TVMaster", value: st.version)
+                }
+                Section("Disks") {
+                    ForEach(st.disks) { d in
+                        meter("\(d.mount)\(d.name.isEmpty ? "" : " (\(d.name))")", d.total > 0 ? (d.total - d.free) / d.total : 0, "\(SystemStats.bytes(d.free)) free of \(SystemStats.bytes(d.total)) · \(d.usedFor.joined(separator: ", "))")
+                    }
+                }
+            } else {
+                Section("This machine") { ProgressView().controlSize(.small) }
+            }
+        }
+        .task {
+            while !Task.isCancelled {
+                if let client = model.client, let s = try? await client.systemStats() { st = s }
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
+            }
+        }
+    }
+
+    private func meter(_ label: String, _ frac: Double, _ text: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack { Text(label); Spacer(); Text(text).font(.caption).foregroundStyle(.secondary) }
+            ProgressView(value: min(1, max(0, frac))).tint(frac < 0.6 ? .green : frac < 0.85 ? .orange : .red)
         }
     }
 }

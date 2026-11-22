@@ -54,3 +54,25 @@ describe('looks as files', () => {
     expect(f.theme.theme).toBe('glass');
   });
 });
+
+import { bytes, busyWord, capacitySentence, uptime } from './sysstats';
+
+describe('the machine in plain words', () => {
+  it('writes sizes and times', () => {
+    expect(bytes(4 * 1024 ** 3)).toBe('4.0 GB');
+    expect(bytes(300 * 1024 ** 2)).toBe('300 MB');
+    expect(uptime(90061)).toBe('1d 1h');
+    expect(uptime(125)).toBe('2m');
+  });
+  it('says how busy it is by the worse of the processor and the load', () => {
+    expect(busyWord(20, 0.4, 4).tone).toBe('ok');
+    expect(busyWord(40, 3.0, 4).tone).toBe('warn');
+    expect(busyWord(95, 1, 4).tone).toBe('bad');
+  });
+  it('guesses how many more channels fit, and says it is a guess', () => {
+    const c = { per_channel_cores: 1.6, measured: false, free_cores: 3.2, more_channels: 2, limited_by: 'processor' as const };
+    expect(capacitySentence(c, 'software')).toContain('about 2 more live channels');
+    expect(capacitySentence(c, 'software')).toContain('rough guess');
+    expect(capacitySentence({ ...c, more_channels: 0, limited_by: 'memory' }, null)).toContain('Memory is the limit');
+  });
+});

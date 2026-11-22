@@ -170,53 +170,6 @@ fn commercial_libraries(db: &rusqlite::Connection, chosen: &[i64]) -> ApiResult<
     Ok(chosen.to_vec())
 }
 
-/// The channel that plays only commercials, for a guide's "Commercials only" window: made when it is
-/// first needed, and pointed at the libraries the guide chose each time. Anything else about it (its
-/// name, number, look) is the station's to change.
-pub(crate) fn ensure_commercial_channel(s: &AppState, chosen: &[i64]) -> ApiResult<()> {
-    let db = s.db();
-    let libs = commercial_libraries(&db, chosen)?;
-    let channel = match tvmaster_db::get_channel(&db, tvmaster_core::COMMERCIAL_CHANNEL)? {
-        Some(mut c) => {
-            if c.library_ids == libs {
-                return Ok(());
-            }
-            c.library_ids = libs;
-            c
-        }
-        None => {
-            let taken: Vec<u32> = tvmaster_db::list_channels(&db)?
-                .iter()
-                .map(|c| c.number)
-                .collect();
-            Channel {
-                id: tvmaster_core::COMMERCIAL_CHANNEL.to_string(),
-                number: (1..).find(|n| !taken.contains(n)).unwrap_or(1),
-                name: "Commercial Break".to_string(),
-                strategy: Strategy::Chaos,
-                run_out: RunOutPolicy::ChaosFill,
-                autopilot: true,
-                chaos: 0,
-                seed: now_ms() as u64,
-                epoch_ms: now_ms(),
-                always_on: false,
-                library_ids: libs,
-                lineup: with_timezone(Lineup::default(), &crate::station::effective_timezone(&db)),
-                kind: ChannelKind::Programming,
-                group: Some("Station".to_string()),
-                guide: Default::default(),
-                info: Default::default(),
-                options: Default::default(),
-            }
-        }
-    };
-    tvmaster_db::upsert_channel(&db, &channel)?;
-    drop(db);
-    // A schedule of nothing but ads, planned fresh.
-    apply_programming_change(s, &channel, true)?;
-    Ok(())
-}
-
 /// Whether `path` is a picture file the station can draw.
 fn picture_ok(path: &str) -> bool {
     let p = std::path::Path::new(path);
@@ -382,12 +335,15 @@ pub async fn upsert(
                 }
             }
         }
-        if g.pip.mode == tvmaster_core::PipMode::Commercials {
+        if matches!(
+            g.pip.mode,
+            tvmaster_core::PipMode::Commercials | tvmaster_core::PipMode::Mix
+        ) {
             let libs = commercial_libraries(&s.db(), &g.pip.libraries)?;
             if libs.is_empty() {
                 return Err(ApiError::new(
                     StatusCode::BAD_REQUEST,
-                    "a commercials-only window needs a commercials library: add one under Libraries (kind Commercials), or make or download some under Promos",
+                    "a window with commercials needs a commercials library: add one under Libraries (kind Commercials), or make or download some under Promos",
                 ));
             }
         }
@@ -523,11 +479,6 @@ pub async fn upsert(
         (channel, existing)
     };
 
-    if channel.kind == ChannelKind::Guide
-        && channel.guide.pip.mode == tvmaster_core::PipMode::Commercials
-    {
-        ensure_commercial_channel(&s, &channel.guide.pip.libraries)?;
-    }
     let changed = existing
         .as_ref()
         .map(|e| programming_differs(e, &channel))
@@ -1096,8 +1047,16 @@ mod tests {
         let data = crate::plan::build_guide(&state.db(), "guide", now).unwrap();
         assert_eq!(data.title, "Retro GUIDE");
         let numbers: Vec<u32> = data.rows.iter().map(|r| r.number).collect();
-        assert_eq!(numbers, vec![4, 5], "the guide does not list itself");
-        assert!(data.rows.iter().all(|r| r.cells.len() > 3));
+        assert_eq!(
+            numbers,
+            vec![3, 4, 5],
+            "the guide lists itself, by its number"
+        );
+        assert!(data
+            .rows
+            .iter()
+            .filter(|r| r.id != "guide")
+            .all(|r| r.cells.len() > 3));
         assert_eq!(data.marks.len(), 6, "a mark every half hour for 3 hours");
         assert_eq!(data.window_ms, 3 * 3_600_000);
         assert!(data.window_start_ms <= now && now - data.window_start_ms < 30 * 60_000);
@@ -1167,10 +1126,11 @@ mod tests {
         let d = build();
         assert_eq!(
             d.rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
-            ["a", "b", "c"]
+            ["guide", "a", "b", "c"],
+            "the guide lists itself too, by its number"
         );
         assert!(
-            d.rows[0]
+            d.rows[1]
                 .cells
                 .iter()
                 .all(|c| !c.range.is_empty() && c.range.contains('-')),
@@ -1206,10 +1166,10 @@ mod tests {
             d.clock
         );
         assert!(
-            d.rows[0].cells[0].range.matches(':').count() == 2
-                && !d.rows[0].cells[0].range.contains('M'),
+            d.rows[1].cells[0].range.matches(':').count() == 2
+                && !d.rows[1].cells[0].range.contains('M'),
             "{}",
-            d.rows[0].cells[0].range
+            d.rows[1].cells[0].range
         );
         assert_eq!(d.ticker, "Hello", "only your own line");
     }

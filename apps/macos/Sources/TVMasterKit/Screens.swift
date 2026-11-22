@@ -325,8 +325,9 @@ extension TVMasterClient {
     }
 
     /// One frame of a design as a PNG, `t` seconds in. Nothing goes on air.
-    public func screenPreview(kind: String, design: ScreenDesign, t: Double, channel: String?) async throws -> Data {
-        var body: [String: JSONValue] = ["kind": .string(kind), "design": design.json, "t": .number(t)]
+    /// `design` nil = the classic screen.
+    public func screenPreview(kind: String, design: ScreenDesign?, t: Double, channel: String?) async throws -> Data {
+        var body: [String: JSONValue] = ["kind": .string(kind), "design": design?.json ?? .null, "t": .number(t)]
         if let channel { body["channel"] = .string(channel) }
         return try await send("POST", "/screens/preview", body: .object(body))
     }

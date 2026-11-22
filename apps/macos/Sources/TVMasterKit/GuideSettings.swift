@@ -60,6 +60,12 @@ public struct GuideSettings: Equatable, Sendable {
     public var pipSize = "medium"
     public var pipAudio = "music"
     public var pipInfo = true
+    /// For mix: seconds of commercials between channels.
+    public var commercialSeconds = 30
+    /// The card beside a commercial window: heading (blank = AD BREAK), lines two at a time, seconds per pair.
+    public var adTitle = ""
+    public var adLines: [String] = []
+    public var adRotateSeconds = 6
 
 
     /// One-click looks: colours and style together.
@@ -142,6 +148,10 @@ public struct GuideSettings: Equatable, Sendable {
         pipSize = str(["pip", "size"], "medium")
         pipAudio = str(["pip", "audio"], "music")
         pipInfo = bool(["pip", "info"], true)
+        commercialSeconds = int(["pip", "commercial_seconds"], 30)
+        adTitle = str(["pip", "ad_title"], "")
+        adLines = g?.get(["pip", "ad_lines"])?.stringArray ?? []
+        adRotateSeconds = int(["pip", "ad_rotate_seconds"], 6)
     }
 
     /// What the video window still needs before the server will take the guide.
@@ -210,6 +220,10 @@ public struct GuideSettings: Equatable, Sendable {
         o.set(["pip", "size"], .string(pipSize))
         o.set(["pip", "audio"], .string(pipAudio))
         o.set(["pip", "info"], .bool(pipInfo))
+        o.set(["pip", "commercial_seconds"], .number(Double(commercialSeconds)))
+        o.set(["pip", "ad_title"], .string(adTitle))
+        o.set(["pip", "ad_lines"], strings(adLines))
+        o.set(["pip", "ad_rotate_seconds"], .number(Double(adRotateSeconds)))
         return o
     }
 

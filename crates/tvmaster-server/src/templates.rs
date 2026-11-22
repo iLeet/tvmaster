@@ -281,7 +281,8 @@ mod tests {
         // The guide lists the info channels beside the TV ones, each with what it is.
         let data = crate::plan::build_guide(&state.db(), "guide", crate::plan::now_ms()).unwrap();
         let titles: Vec<String> = data.rows.iter().map(|r| r.cells[0].title.clone()).collect();
-        assert_eq!(data.rows.len(), 5, "{titles:?}");
+        // (and the guide itself, which lists itself too)
+        assert_eq!(data.rows.len(), 6, "{titles:?}");
         assert!(titles.contains(&"News and headlines".to_string()));
         assert!(titles.contains(&"What's on tonight".to_string()));
         assert!(titles.contains(&"Time and date".to_string()));
@@ -350,24 +351,15 @@ mod tests {
         let (st, r) = call(&app, "POST", "/api/v1/channels", &guide("[]")).await;
         assert_eq!(st, StatusCode::CREATED, "{r}");
         assert_eq!(r["guide"]["pip"]["mode"], "commercials");
-        let (_, ch) = call(&app, "GET", "/api/v1/channels/commercial-break", "").await;
-        assert_eq!(ch["strategy"], "chaos");
-        assert_eq!(ch["library_ids"], serde_json::json!([lib.id]));
-        // It plays the commercials, and the guide does not list it as a channel of its own.
-        let catalog = {
-            let db = state.db();
-            let ch = tvmaster_db::get_channel(&db, "commercial-break")
-                .unwrap()
-                .unwrap();
-            crate::autopilot::catalog_for(&db, &ch).unwrap()
-        };
-        assert_eq!(catalog.episode_count(), 1);
+        // The commercials play in the window from an internal stream: no channel is made for them.
+        let (st, _) = call(&app, "GET", "/api/v1/channels/commercial-break", "").await;
+        assert_eq!(st, StatusCode::NOT_FOUND);
         let data = {
             let db = state.db();
             crate::plan::build_guide(&db, "guide", crate::plan::now_ms()).unwrap()
         };
         assert!(data.rows.iter().all(|r| r.id != "commercial-break"));
-        // Choosing a library again points the channel at it, without making another.
+        // A guide can save again, and can mix commercials with its channels, with words of its own.
         let (st, _) = call(
             &app,
             "POST",
@@ -376,14 +368,19 @@ mod tests {
         )
         .await;
         assert_eq!(st, StatusCode::OK, "saving an existing guide updates it");
+        let mix = r#"{"id":"guide","number":9,"name":"Guide","kind":"guide","guide":{"pip":{"mode":"mix","seconds":20,"commercial_seconds":45,"ad_title":"SPONSORS","ad_lines":["Brought to you by Mel's Diner","Open late, {clock}"],"ad_rotate_seconds":4}}}"#;
+        let (st, r) = call(&app, "POST", "/api/v1/channels", mix).await;
+        assert_eq!(st, StatusCode::OK, "{r}");
+        assert_eq!(r["guide"]["pip"]["mode"], "mix");
+        assert_eq!(r["guide"]["pip"]["ad_lines"][1], "Open late, {clock}");
+        let too_fast = r#"{"id":"guide","number":9,"name":"Guide","kind":"guide","guide":{"pip":{"mode":"mix","ad_rotate_seconds":1}}}"#;
+        let (st, r) = call(&app, "POST", "/api/v1/channels", too_fast).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "{r}");
         let (_, all) = call(&app, "GET", "/api/v1/channels", "").await;
-        assert_eq!(
-            all.as_array()
-                .unwrap()
-                .iter()
-                .filter(|c| c["id"] == "commercial-break")
-                .count(),
-            1
-        );
+        assert!(all
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|c| c["id"] != "commercial-break"));
     }
 }

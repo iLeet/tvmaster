@@ -39,7 +39,7 @@ function NumField({ label, value, onChange, min = 0, max = 2000, step = 1, hint 
 }
 
 /** A picture of the design at one moment, redrawn a moment after each change. */
-function Frame({ kind, design, channel, t }: { kind: string; design: Design; channel: string | null; t: number }) {
+function Frame({ kind, design, channel, t }: { kind: string; design: Design | null; channel: string | null; t: number }) {
   const [url, setUrl] = useState<string | null>(null);
   const last = useRef<string | null>(null);
   const busy = useRef(false);
@@ -74,7 +74,7 @@ function Frame({ kind, design, channel, t }: { kind: string; design: Design; cha
 }
 
 /** The big preview with play and a scrubber. */
-function Player({ kind, design, channel, seconds }: { kind: string; design: Design; channel: string | null; seconds: number }) {
+function Player({ kind, design, channel, seconds }: { kind: string; design: Design | null; channel: string | null; seconds: number }) {
   const length = seconds || 10;
   const [t, setT] = useState(2.5);
   const [playing, setPlaying] = useState(false);
@@ -315,7 +315,8 @@ function ScreenEditor({ kind, channel, onSaved }: { kind: ScreenKind; channel: s
             {kind.source === 'none' && <Badge>Classic</Badge>}
           </span>
         </div>
-        {design ? <Player kind={kind.id} design={design} channel={channel} seconds={kind.seconds} /> : <p className="small dim">The classic screen is used, as before: nothing here to preview. Choose a design below to try one.</p>}
+        <Player kind={kind.id} design={design} channel={channel} seconds={kind.seconds} />
+        {design === null && <p className="small dim">This is the classic screen, as it airs now. It follows the station’s style (chunky retro or smooth modern) and can’t be edited: choose a design below to try one, then change it.</p>}
         <div className="row wrap">
           <Btn kind="primary" disabled={!dirty} onClick={save}>Use this on {where}</Btn>
           {dirty && <Btn onClick={() => { setDesign(saved); setPreset(presetFor(kind)); }}>Undo changes</Btn>}
@@ -328,9 +329,9 @@ function ScreenEditor({ kind, channel, onSaved }: { kind: ScreenKind; channel: s
         <h2>Choose a design</h2>
         <div className="gallery">
           <button type="button" className={`tile ${design === null ? 'on' : ''}`} onClick={() => { setDesign(null); setPreset('classic'); }}>
-            <div className="empty" style={{ aspectRatio: '16 / 9', fontSize: 12 }}>As before</div>
+            <Frame kind={kind.id} design={null} channel={channel} t={3.2} />
             <strong>Classic</strong>
-            <span className="small dim">The built-in screen.</span>
+            <span className="small dim">The built-in screen, as it airs now.</span>
           </button>
           {kind.presets.map((p) => (
             <button type="button" key={p.id} className={`tile ${design && preset === p.id ? 'on' : ''}`} onClick={() => pick(p)}>

@@ -74,7 +74,7 @@ fn builtins() -> Vec<Builtin> {
             style: "modern",
             gentle: false,
             guide: with(json!({ "layout": { "rows": 5 }, "pip": { "placement": "top_right", "size": "medium", "info": true } })),
-            screens: &[("up_next", "slide"), ("later_today", "list"), ("brb", "classic"), ("back_to", "welcome"), ("station_id", "logo"), ("standby", "clock")],
+            screens: &[("up_next", "slide"), ("later_today", "list"), ("standby", "clock")],
         },
         Builtin {
             id: "liquid-glass",
@@ -94,7 +94,7 @@ fn builtins() -> Vec<Builtin> {
             style: "modern",
             gentle: true,
             guide: with(json!({ "layout": { "rows": 5 }, "look": { "corners": "rounded", "text_size": "large" } })),
-            screens: &[("up_next", "big"), ("brb", "pulse"), ("back_to", "welcome"), ("station_id", "logo"), ("standby", "drift")],
+            screens: &[("up_next", "big"), ("brb", "pulse"), ("standby", "drift")],
         },
         Builtin {
             id: "night-modern",
@@ -104,7 +104,7 @@ fn builtins() -> Vec<Builtin> {
             style: "modern",
             gentle: false,
             guide: with(json!({ "look": { "corners": "rounded" } })),
-            screens: &[("up_next", "slide"), ("later_today", "list"), ("brb", "classic"), ("back_to", "welcome"), ("station_id", "logo")],
+            screens: &[("up_next", "slide"), ("later_today", "list")],
         },
         Builtin {
             id: "paper-listing",

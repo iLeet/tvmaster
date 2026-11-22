@@ -154,16 +154,16 @@ struct GuideForm: View {
         Section("Video window") {
             Text("A live picture-in-picture of one of your channels inside the guide, with a card saying what is on. The guide starts that channel while it is showing it.")
                 .font(.caption).foregroundStyle(.secondary)
-            Picker("Show", selection: $gs.pipMode) { Text("Nothing").tag("off"); Text("One channel").tag("channel"); Text("Flip through channels").tag("rotate"); Text("Commercials only").tag("commercials") }.pickerStyle(.segmented)
+            Picker("Show", selection: $gs.pipMode) { Text("Nothing").tag("off"); Text("One channel").tag("channel"); Text("Flip through channels").tag("rotate"); Text("Commercials only").tag("commercials"); Text("Channels and commercials").tag("mix") }.pickerStyle(.segmented)
             if gs.pipMode == "channel" {
                 Picker("Channel", selection: $gs.pipChannel) {
                     Text("Choose…").tag("")
                     ForEach(showable) { Text("\($0.number) \($0.name)").tag($0.id) }
                 }
             }
-            if gs.pipMode == "commercials" {
+            if gs.pipMode == "commercials" || gs.pipMode == "mix" {
                 let ads = model.libraries.filter { $0.kind == .commercials }
-                Text("The window plays commercials one after another, in random order, while the guide runs: no channel is watched, so it costs little. The card beside it says “Ad break”. It uses a channel called Commercial Break that the station makes for it.")
+                Text((gs.pipMode == "commercials" ? "The window plays your commercials one after another, in random order, while the guide runs." : "The window takes turns: commercials, then a channel, then commercials, then the next channel.") + " The commercials come from a small, light stream of their own that the guide starts while it needs it: it is not a channel, has no number and is listed nowhere.")
                     .font(.caption).foregroundStyle(.secondary)
                 if ads.isEmpty {
                     Label("There are no commercials yet. Add a commercials library under Libraries, or make or download some under Promos.", systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange)
@@ -176,8 +176,19 @@ struct GuideForm: View {
                         }
                     }
                 }
+                if gs.pipMode == "mix" {
+                    LabeledContent("Commercials for \(gs.commercialSeconds) s at a time") { Slider(value: Binding(get: { Double(gs.commercialSeconds) }, set: { gs.commercialSeconds = Int($0) }), in: 10...300, step: 5) }
+                }
+                Text("The card beside the window").fontWeight(.semibold)
+                Text("Say anything you like while the commercials play: station promos, a sponsor, what is coming up. Lines turn over two at a time, so a longer list rotates. {clock} and {date} are filled in. Leave them blank for the station's own words.")
+                    .font(.caption).foregroundStyle(.secondary)
+                TextField("Heading", text: $gs.adTitle, prompt: Text("AD BREAK"))
+                Text("Lines, one per line").font(.caption).foregroundStyle(.secondary)
+                TextEditor(text: Binding(get: { gs.adLines.joined(separator: "\n") }, set: { gs.adLines = Array($0.split(separator: "\n", omittingEmptySubsequences: false).map(String.init).prefix(40)) }))
+                    .frame(height: 100).overlay(RoundedRectangle(cornerRadius: 6).stroke(.secondary.opacity(0.3)))
+                LabeledContent("Each pair of lines stays \(gs.adRotateSeconds) s") { Slider(value: Binding(get: { Double(gs.adRotateSeconds) }, set: { gs.adRotateSeconds = Int($0) }), in: 2...60, step: 1) }
             }
-            if gs.pipMode == "rotate" {
+            if gs.pipMode == "rotate" || gs.pipMode == "mix" {
                 LabeledContent("Each channel for \(gs.pipSeconds) s") { Slider(value: Binding(get: { Double(gs.pipSeconds) }, set: { gs.pipSeconds = Int($0) }), in: 10...300, step: 5) }
                 DisclosureGroup("Which channels (\(gs.pipChannels.isEmpty ? "every one in the guide" : "\(gs.pipChannels.count) chosen"))") {
                     ForEach(showable) { c in

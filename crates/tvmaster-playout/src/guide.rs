@@ -131,6 +131,9 @@ pub fn guide_look(c: &GuideConfig, channel_id: &str) -> GuideLook {
     let a = &c.look;
     look.smooth_text = a.typeface == tvmaster_core::GuideTypeface::Smooth;
     look.glass = a.glass;
+    look.ad_title = c.pip.ad_title.clone();
+    look.ad_lines = c.pip.ad_lines.clone();
+    look.ad_rotate = f32::from(c.pip.ad_rotate_seconds);
     look.rounded = a.corners == tvmaster_core::GuideCorners::Rounded;
     look.text_scale = match a.text_size {
         tvmaster_core::GuideTextSize::Small => 0.8,
@@ -349,6 +352,21 @@ fn pick_window_channel(
         PipMode::Off => None,
         PipMode::Channel => c.pip.channel.clone().filter(usable),
         PipMode::Commercials => Some(tvmaster_core::COMMERCIAL_CHANNEL.to_string()).filter(usable),
+        // Channels and commercials take turns: commercials, a channel, commercials, the next channel...
+        PipMode::Mix => {
+            let ads = tvmaster_core::COMMERCIAL_CHANNEL.to_string();
+            let all: Vec<String> = if c.pip.channels.is_empty() {
+                rows.iter().map(|r| r.id.clone()).collect()
+            } else {
+                c.pip.channels.clone()
+            };
+            let ok: Vec<&String> = all.iter().filter(|id| usable(id)).collect();
+            if ok.is_empty() || rotation.is_multiple_of(2) {
+                Some(ads).filter(usable)
+            } else {
+                Some(ok[(rotation / 2) % ok.len()].clone())
+            }
+        }
         PipMode::Rotate => {
             let all: Vec<String> = if c.pip.channels.is_empty() {
                 rows.iter().map(|r| r.id.clone()).collect()
@@ -413,7 +431,7 @@ pub(crate) async fn produce_guide(
     let mut frames_so_far: u64 = 0;
     // The channels in the guide, for a window that rotates through all of them.
     let mut rows: Vec<tvmaster_render::GuideRow> = Vec::new();
-    if config.pip.mode == PipMode::Rotate {
+    if matches!(config.pip.mode, PipMode::Rotate | PipMode::Mix) {
         let (src, ch) = (spec.source.clone(), spec.id.clone());
         if let Ok(Some(d)) =
             tokio::task::spawn_blocking(move || src.guide_data(&ch, now_ms())).await
@@ -429,11 +447,15 @@ pub(crate) async fn produce_guide(
 
     loop {
         // Which channel is in the window this run?
-        let want = pick_window_channel(&config, &rows, rotation, &failed);
+        // The guide lists itself, but cannot sit in its own window.
+        let others: Vec<tvmaster_render::GuideRow> =
+            rows.iter().filter(|r| r.id != spec.id).cloned().collect();
+        let want = pick_window_channel(&config, &others, rotation, &failed);
         let mut pip: Option<(String, PathBuf)> = None;
         if let (Some(ch), Some(host)) = (want.clone(), gspec.pip_host.clone()) {
             let c2 = ch.clone();
-            match tokio::task::spawn_blocking(move || host.open(&c2)).await {
+            let libs = config.pip.libraries.clone();
+            match tokio::task::spawn_blocking(move || host.open_for(&c2, &libs)).await {
                 Ok(Some(playlist)) => pip = Some((ch, playlist)),
                 _ => {
                     tracing::info!(channel = %spec.id, window = %ch, "the video window's channel is not available");
@@ -451,6 +473,17 @@ pub(crate) async fn produce_guide(
             }
             (PipMode::Rotate, true) => Some(secs_to_frames(u64::from(config.pip.seconds))),
             (PipMode::Rotate, false) => Some(secs_to_frames(20)),
+            (PipMode::Mix, true) => {
+                let ads = pip
+                    .as_ref()
+                    .is_some_and(|(c, _)| c == tvmaster_core::COMMERCIAL_CHANNEL);
+                Some(secs_to_frames(u64::from(if ads {
+                    config.pip.commercial_seconds
+                } else {
+                    config.pip.seconds
+                })))
+            }
+            (PipMode::Mix, false) => Some(secs_to_frames(20)),
         };
 
         // Music carries on from where the stream is.
@@ -502,11 +535,12 @@ pub(crate) async fn produce_guide(
         let keepalive = match (&pip, gspec.pip_host.clone()) {
             (Some((ch, _)), Some(host)) => {
                 let ch = ch.clone();
+                let libs = config.pip.libraries.clone();
                 Some(StopOnDrop(tokio::spawn(async move {
                     loop {
                         tokio::time::sleep(KEEPALIVE).await;
-                        let (h, c) = (host.clone(), ch.clone());
-                        let _ = tokio::task::spawn_blocking(move || h.open(&c)).await;
+                        let (h, c, l) = (host.clone(), ch.clone(), libs.clone());
+                        let _ = tokio::task::spawn_blocking(move || h.open_for(&c, &l)).await;
                     }
                 })))
             }
@@ -587,10 +621,8 @@ async fn run_once(
     let written = Arc::new(AtomicU64::new(0));
     let (source, id) = (spec.source.clone(), spec.id.clone());
     let look = look.clone();
-    let ad_window = spec
-        .guide
-        .as_ref()
-        .is_some_and(|g| g.config.pip.mode == PipMode::Commercials);
+    // The card says "ad break" whenever the window is on the commercials.
+    let ad_window = window.as_deref() == Some(tvmaster_core::COMMERCIAL_CHANNEL);
     let (written_w, window_w) = (written.clone(), window.clone());
     let (row_tx, mut row_rx) = mpsc::unbounded_channel::<Vec<tvmaster_render::GuideRow>>();
     let writer = StopOnDrop(tokio::spawn(async move {
@@ -862,5 +894,29 @@ mod tests {
             Palette::custom([0x20, 0x80, 0xff], auto.accent),
             "a bad colour falls back"
         );
+    }
+
+    #[test]
+    fn a_mixed_window_alternates_commercials_and_channels() {
+        let mut c = GuideConfig::default();
+        c.pip.mode = PipMode::Mix;
+        let rows: Vec<tvmaster_render::GuideRow> = ["a", "b"]
+            .iter()
+            .map(|id| tvmaster_render::GuideRow {
+                id: id.to_string(),
+                ..Default::default()
+            })
+            .collect();
+        let none = HashMap::new();
+        let ads = tvmaster_core::COMMERCIAL_CHANNEL;
+        let seq: Vec<String> = (0..6)
+            .map(|i| pick_window_channel(&c, &rows, i, &none).unwrap())
+            .collect();
+        assert_eq!(seq, vec![ads, "a", ads, "b", ads, "a"]);
+        // with no channel to show it is commercials all the way
+        let only: Vec<String> = (0..4)
+            .map(|i| pick_window_channel(&c, &[], i, &none).unwrap())
+            .collect();
+        assert!(only.iter().all(|x| x == ads));
     }
 }

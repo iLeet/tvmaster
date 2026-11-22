@@ -485,9 +485,12 @@ pub enum PipMode {
     Channel,
     /// Cycle through channels, `pip.seconds` each.
     Rotate,
-    /// Only commercials, one after another, from `pip.libraries`: a station-owned channel
-    /// ([`COMMERCIAL_CHANNEL`]) of nothing but ads plays in the window.
+    /// Only commercials, from `pip.libraries`, in the window. They play from a light, internal
+    /// stream of their own that is not a channel (no number, not listed anywhere).
     Commercials,
+    /// Channels and commercials taking turns: a channel for `seconds`, then commercials for
+    /// `commercial_seconds`, then the next channel.
+    Mix,
 }
 
 /// The id of the channel that plays only commercials, made for a guide's "Commercials only" window.
@@ -547,9 +550,31 @@ pub struct GuidePip {
     /// A name card (channel, what is on and when) beside the window.
     #[serde(default = "yes")]
     pub info: bool,
-    /// For `commercials`: which commercial libraries it plays. Empty = every commercials library.
+    /// For `commercials` and `mix`: which commercial libraries it plays. Empty = every commercials library.
     #[serde(default)]
     pub libraries: Vec<i64>,
+    /// For `mix`: seconds of commercials between channels (10-300).
+    #[serde(default = "default_commercial_seconds")]
+    pub commercial_seconds: u16,
+    /// The card beside a commercial window: its heading. Blank = "AD BREAK".
+    #[serde(default)]
+    pub ad_title: String,
+    /// The lines on that card, two at a time, turning over every `ad_rotate_seconds`: station
+    /// promos, announcements, anything. Blank = the station's two standard lines. `{clock}`
+    /// and `{date}` are filled in.
+    #[serde(default)]
+    pub ad_lines: Vec<String>,
+    /// Seconds each pair of lines stays up (2-60).
+    #[serde(default = "default_ad_rotate")]
+    pub ad_rotate_seconds: u16,
+}
+
+fn default_commercial_seconds() -> u16 {
+    30
+}
+
+fn default_ad_rotate() -> u16 {
+    6
 }
 
 fn default_pip_seconds() -> u16 {
@@ -568,6 +593,10 @@ impl Default for GuidePip {
             audio: PipAudio::Music,
             info: true,
             libraries: Vec::new(),
+            commercial_seconds: default_commercial_seconds(),
+            ad_title: String::new(),
+            ad_lines: Vec::new(),
+            ad_rotate_seconds: default_ad_rotate(),
         }
     }
 }
@@ -992,6 +1021,18 @@ impl GuideConfig {
         }
         if p.libraries.len() > 50 {
             return Err("guide.pip.libraries: at most 50 libraries".into());
+        }
+        if !(10..=300).contains(&p.commercial_seconds) {
+            return Err("guide.pip.commercial_seconds must be 10-300".into());
+        }
+        if !(2..=60).contains(&p.ad_rotate_seconds) {
+            return Err("guide.pip.ad_rotate_seconds must be 2-60".into());
+        }
+        if p.ad_title.chars().count() > 40 {
+            return Err("the commercial card's heading is at most 40 letters".into());
+        }
+        if p.ad_lines.len() > 40 || p.ad_lines.iter().any(|l| l.chars().count() > 120) {
+            return Err("the commercial card has at most 40 lines of at most 120 letters".into());
         }
         if p.channels.len() > 50 || p.channels.iter().any(|c| c.len() > 100) {
             return Err("guide.pip.channels: at most 50 channel ids".into());

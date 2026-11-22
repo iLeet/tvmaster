@@ -40,7 +40,7 @@ private extension Color {
 struct ScreenFrame: View {
     @Environment(AppModel.self) private var model
     let kind: String
-    let design: ScreenDesign
+    let design: ScreenDesign?
     let channel: String?
     let t: Double
     @State private var image: NSImage?
@@ -53,7 +53,7 @@ struct ScreenFrame: View {
                 RoundedRectangle(cornerRadius: 8).fill(.black.opacity(0.4)).aspectRatio(16.0 / 9.0, contentMode: .fit).overlay(ProgressView().controlSize(.small))
             }
         }
-        .task(id: "\(kind)|\(channel ?? "")|\(t)|\(design.json)") {
+        .task(id: "\(kind)|\(channel ?? "")|\(t)|\(design.map { "\($0.json)" } ?? "classic")") {
             try? await Task.sleep(nanoseconds: t == 0 ? 150_000_000 : 60_000_000)
             guard !Task.isCancelled, let client = model.client else { return }
             if let data = try? await client.screenPreview(kind: kind, design: design, t: t, channel: channel), let img = NSImage(data: data) { image = img }
@@ -64,7 +64,7 @@ struct ScreenFrame: View {
 /// The big preview with play and a scrubber.
 struct ScreenPlayer: View {
     let kind: String
-    let design: ScreenDesign
+    let design: ScreenDesign?
     let channel: String?
     let seconds: Int
     @State private var t = 2.5
@@ -270,10 +270,9 @@ struct ScreenEditor: View {
                     default: Badge(text: "Classic")
                     }
                 }
-                if let design {
-                    ScreenPlayer(kind: kind.id, design: design, channel: channel, seconds: kind.seconds)
-                } else {
-                    Text("The classic screen is used, as before: nothing here to preview. Choose a design below to try one.").font(.callout).foregroundStyle(.secondary)
+                ScreenPlayer(kind: kind.id, design: design, channel: channel, seconds: kind.seconds)
+                if design == nil {
+                    Text("This is the classic screen, as it airs now. It follows the station's style (chunky retro or smooth modern) and can't be edited: choose a design below to try one, then change it.").font(.caption).foregroundStyle(.secondary)
                 }
                 HStack {
                     Button { Task { await save() } } label: { saving ? AnyView(ProgressView().controlSize(.small)) : AnyView(Text("Use this on \(channel == nil ? "the whole station" : "this channel")")) }
@@ -293,8 +292,8 @@ struct ScreenEditor: View {
                 Text("Choose a design").font(.headline)
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 12, alignment: .top)], alignment: .leading, spacing: 12) {
                     tile(selected: design == nil) { design = nil; preset = "classic" } content: {
-                        RoundedRectangle(cornerRadius: 8).fill(.black.opacity(0.35)).aspectRatio(16.0 / 9.0, contentMode: .fit).overlay(Text("As before").font(.caption).foregroundStyle(.secondary))
-                    } title: { "Classic" } about: { "The built-in screen." }
+                        ScreenFrame(kind: kind.id, design: nil, channel: channel, t: 3.2)
+                    } title: { "Classic" } about: { "The built-in screen, as it airs now." }
                     ForEach(kind.presets) { p in
                         tile(selected: design != nil && preset == p.id) { design = p.design; preset = p.id } content: {
                             ScreenFrame(kind: kind.id, design: p.design, channel: channel, t: 3.2)

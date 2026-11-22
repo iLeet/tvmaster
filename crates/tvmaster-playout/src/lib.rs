@@ -184,6 +184,12 @@ pub trait PipHost: Send + Sync + 'static {
     /// cannot be shown: unknown, a guide itself, or not up within a few
     /// seconds. Blocks.
     fn open(&self, channel: &str) -> Option<PathBuf>;
+    /// The same, for a window that may be on the station's commercials (the internal channel
+    /// [`tvmaster_core::COMMERCIAL_CHANNEL`]): `libraries` are the commercials libraries to play
+    /// (empty = all of them).
+    fn open_for(&self, channel: &str, _libraries: &[i64]) -> Option<PathBuf> {
+        self.open(channel)
+    }
 }
 
 /// What a guide channel needs besides the schedule data.

@@ -324,8 +324,8 @@ api -XDELETE "$H/api/v1/channels/bulletin" >/dev/null
 # ---- the guide's commercials-only window ------------------------------------
 section "Guide window: commercials only"
 api -XPOST "$H/api/v1/channels" -d '{"id":"adguide","number":77,"name":"Ad Guide","kind":"guide","guide":{"pip":{"mode":"commercials","info":true}}}' >/dev/null
-[[ "$(api "$H/api/v1/channels/commercial-break" | json "d['strategy']+'/'+str(len(d['library_ids'])>0)")" == "chaos/True" ]] && ok "the station makes a Commercial Break channel from the commercials found" || bad "commercial-break channel"
-[[ "$(api "$H/api/v1/channels/commercial-break/schedule?hours=1" | json "len(d if isinstance(d,list) else d.get('items',d.get('programs',[])))>2")" == "True" ]] && ok "which has a schedule of nothing but commercials" || bad "commercial-break schedule"
+[[ "$(curl -s -o /dev/null -w '%{http_code}' "${auth[@]}" "$H/api/v1/channels/commercial-break")" == 404 ]] && ok "no channel is made for the commercials: they play from an internal stream" || bad "commercial-break channel should not exist"
+[[ "$(api "$H/api/v1/channels" | json "all(c['id']!='commercial-break' for c in d)")" == "True" ]] && ok "and nothing like it is listed" || bad "commercial-break listed"
 OUT="$(ffmpeg -hide_banner -loglevel error -y -t 8 -i "$H/stream/adguide/index.m3u8?token=$TOKEN" -f null - 2>&1 | grep -v 'non monotonically' | tail -2)"
 [[ -z "$OUT" ]] && ok "the guide streams with commercials playing in its window" || bad "guide with a commercials window" "$OUT"
 api -XDELETE "$H/api/v1/channels/adguide" >/dev/null
@@ -386,6 +386,17 @@ OUT="$(ffmpeg -hide_banner -loglevel error -y -t 5 -i "$H/stream/lookguide/index
 api -XPOST "$H/api/v1/looks/classic-cable/apply" -d '{}' >/dev/null
 api -XDELETE "$H/api/v1/channels/lookguide" >/dev/null
 api -XPUT "$H/api/v1/theme" -d '{"theme":"auto","style":"retro"}' >/dev/null
+
+# ---- a guide mixing commercials with channels, words of its own, the machine's numbers ----
+section "Mixed window, ad card words and machine stats"
+api -XPOST "$H/api/v1/channels" -d '{"id":"mixguide","number":76,"name":"Mix Guide","kind":"guide","guide":{"pip":{"mode":"mix","seconds":10,"commercial_seconds":10,"ad_title":"SPONSORS","ad_lines":["Brought to you by Mel","Open late, {clock}"],"ad_rotate_seconds":3}}}' >/dev/null
+[[ "$(api "$H/api/v1/channels/mixguide" | json "d['guide']['pip']['mode']+d['guide']['pip']['ad_title']+str(len(d['guide']['pip']['ad_lines']))")" == "mixSPONSORS2" ]] && ok "a guide can mix channels and commercials, with an ad card of its own words" || bad "mix guide"
+OUT="$(ffmpeg -hide_banner -loglevel error -y -t 14 -i "$H/stream/mixguide/index.m3u8?token=$TOKEN" -f null - 2>&1 | grep -v 'non monotonically' | tail -2)"
+[[ -z "$OUT" ]] && ok "the mixed guide streams while the commercials run in its window" || bad "mixed guide stream" "$OUT"
+api -XDELETE "$H/api/v1/channels/mixguide" >/dev/null
+[[ "$(api "$H/api/v1/system/stats" | json "d['host']['threads']>0 and d['memory']['total']>0 and 'capacity' in d and 'disks' in d")" == "True" ]] && ok "the server reports its machine, load, memory, disks and a capacity guess" || bad "system stats"
+curl -s -o "$W/classic.png" -XPOST "${auth[@]}" -H 'content-type: application/json' -d '{"kind":"up_next","design":null,"t":2}' "$H/api/v1/screens/preview"
+[[ "$(head -c 4 "$W/classic.png" | tail -c 3)" == "PNG" ]] && ok "the classic screen has a preview too" || bad "classic preview"
 
 # docker stop and systemd send SIGTERM: it must stop cleanly, like Ctrl-C does
 "$BIN" serve --bind "127.0.0.1:$HP2" --data-dir "$W/data3" >"$W/server4.log" 2>&1 &

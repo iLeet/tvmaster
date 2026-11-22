@@ -517,6 +517,10 @@ pub struct GuideLook {
     pub now_marker: bool,
     /// Cells, labels and cards are frosted-glass panels.
     pub glass: bool,
+    /// The card beside a commercial window: heading, lines (two at a time) and seconds per pair.
+    pub ad_title: String,
+    pub ad_lines: Vec<String>,
+    pub ad_rotate: f32,
 }
 
 impl GuideLook {
@@ -547,6 +551,9 @@ impl GuideLook {
             cell_times: false,
             now_marker: true,
             glass: false,
+            ad_title: String::new(),
+            ad_lines: Vec::new(),
+            ad_rotate: 6.0,
         }
     }
 
@@ -1346,6 +1353,13 @@ fn now_next_row(
 }
 
 /// The card beside the video window: the channel and what is on it.
+/// `{clock}` and `{date}` in the owner's words.
+fn fill_ad_words(s: &str, data: &GuideData) -> String {
+    s.replace("{clock}", &data.clock)
+        .replace("{date}", &data.date)
+}
+
+#[allow(clippy::too_many_arguments)]
 fn panel(
     c: &mut Gfx,
     look: &GuideLook,
@@ -1353,6 +1367,7 @@ fn panel(
     data: &GuideData,
     row: Option<&GuideRow>,
     ad: bool,
+    t: f32,
 ) {
     let p = &look.palette;
     // A light card (the cable box's cream one) needs dark words.
@@ -1367,28 +1382,56 @@ fn panel(
     c.rrect(r.x, r.y, r.w, r.h, p.panel);
     c.rect(r.x + c.radius, r.y, r.w - 2 * c.radius, 2, p.accent);
     if ad {
-        // A window of commercials: no channel to name, so say what it is.
+        // A window of commercials: no channel to name, so the card says what it is. The owner's
+        // words turn over, two lines at a time.
         let ts = look.text_scale;
         let inner = r.w - 12;
-        c.text_shadow(r.x + 6, r.y + 10, "AD BREAK", 3.0, p.label_num, true);
-        let line = c.truncate("Commercials, one after another", inner, ts, false);
-        c.text(
-            r.x + 6,
-            r.y + 10 + c.lh(3.0) + 6,
-            &line,
-            ts,
-            title_ink,
-            false,
-        );
-        let line = c.truncate("Back to your show in a moment", inner, ts, false);
-        c.text(
-            r.x + 6,
-            r.y + 10 + c.lh(3.0) + 6 + c.lh(ts) + 2,
-            &line,
-            ts,
-            acc_ink,
-            false,
-        );
+        let title = if look.ad_title.trim().is_empty() {
+            "AD BREAK"
+        } else {
+            look.ad_title.trim()
+        };
+        let title = fill_ad_words(title, data);
+        let shown = c.truncate(&title, inner, 3.0, true);
+        if light {
+            c.text(r.x + 6, r.y + 10, &shown, 3.0, title_ink, true);
+        } else {
+            c.text_shadow(r.x + 6, r.y + 10, &shown, 3.0, p.label_num, true);
+        }
+        let lines: Vec<String> = if look.ad_lines.iter().all(|l| l.trim().is_empty()) {
+            vec![
+                "Commercials, one after another".into(),
+                "Back to your show in a moment".into(),
+            ]
+        } else {
+            look.ad_lines
+                .iter()
+                .filter(|l| !l.trim().is_empty())
+                .map(|l| fill_ad_words(l, data))
+                .collect()
+        };
+        let pages = lines.len().div_ceil(2).max(1);
+        let page = ((t / look.ad_rotate.max(1.0)) as usize) % pages;
+        let top = r.y + 10 + c.lh(3.0) + 6;
+        let room = ((r.y + r.h - 6 - top) / (c.lh(ts) + 2)).clamp(1, 4) as usize;
+        for (i, raw) in lines.iter().skip(page * 2).take(2.min(room)).enumerate() {
+            // a long line wraps to fit, then is cut short
+            let wrapped = c.fit(raw, inner, ts, false, 2);
+            for (j, l) in wrapped.iter().enumerate() {
+                let y = top + (i * 2 + j) as i32 * (c.lh(ts) + 2);
+                if y + 8 > r.y + r.h - 4 {
+                    break;
+                }
+                c.text(
+                    r.x + 6,
+                    y,
+                    l,
+                    ts,
+                    if i == 0 { title_ink } else { acc_ink },
+                    false,
+                );
+            }
+        }
         return;
     }
     let Some(row) = row else { return };
@@ -1609,6 +1652,7 @@ pub fn render_guide(data: &GuideData, look: &GuideLook, view: &GuideView, t: f32
             data,
             view.window_row.and_then(|i| data.rows.get(i)),
             view.window_ad,
+            t,
         );
     }
 

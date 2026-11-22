@@ -246,14 +246,15 @@ pub fn build_guide_with(
     // The channels to list: the ones the guide names, in its order, or all by number. Info
     // channels are listed beside the programming ones.
     let listable = || {
-        channels
-            .iter()
-            .filter(|c| matches!(c.kind, ChannelKind::Programming | ChannelKind::Info))
+        channels.iter().filter(|c| {
+            matches!(
+                c.kind,
+                ChannelKind::Programming | ChannelKind::Info | ChannelKind::Guide
+            )
+        })
     };
-    // The channel of only commercials is the guide window's, not a listing of its own (unless chosen).
-    let not_ads = |c: &&Channel| c.id != tvmaster_core::COMMERCIAL_CHANNEL;
     let listed: Vec<&Channel> = if cfg.channels.is_empty() {
-        listable().filter(not_ads).collect()
+        listable().collect()
     } else {
         cfg.channels
             .iter()
@@ -264,6 +265,21 @@ pub fn build_guide_with(
     let mut rows = Vec::new();
     let mut ticker: Vec<String> = cfg.ticker.clone();
     for ch in listed {
+        if ch.kind == ChannelKind::Guide {
+            // The guide lists itself (and any other guide) like a channel: it is one.
+            rows.push(GuideRow {
+                id: ch.id.clone(),
+                number: ch.number,
+                name: ch.name.clone(),
+                cells: vec![GuideCell {
+                    start_ms: start,
+                    end_ms: start + window_ms,
+                    range: String::new(),
+                    title: "TV guide: what is on every channel".to_string(),
+                }],
+            });
+            continue;
+        }
         if ch.kind == ChannelKind::Info {
             // One long entry for the whole window: what the channel is.
             rows.push(GuideRow {
@@ -359,7 +375,7 @@ pub fn tonight_rows_in(
     let mut rows = Vec::new();
     for ch in channels
         .iter()
-        .filter(|c| c.kind == ChannelKind::Programming && c.id != tvmaster_core::COMMERCIAL_CHANNEL)
+        .filter(|c| c.kind == ChannelKind::Programming)
     {
         let progs = programs(db, &ch.id, now_ms, now_ms + 12 * 3_600_000).unwrap_or_default();
         let (now, next) = now_and_next(&progs, now_ms);

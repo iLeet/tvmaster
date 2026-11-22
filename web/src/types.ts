@@ -148,7 +148,7 @@ export interface ThemeCatalogue {
 }
 export interface AdPreset { id: string; name: string; about: string; commercials: boolean; pod_seconds: number; max_breaks: number; minutes_per_hour: number; mid_breaks: boolean }
 export interface AdOptions { presets: AdPreset[]; cards: { id: 'brb' | 'back_to' | 'up_next' | 'later_today' | 'station_id'; name: string; about: string }[] }
-export type PipMode = 'off' | 'channel' | 'rotate' | 'commercials';
+export type PipMode = 'off' | 'channel' | 'rotate' | 'commercials' | 'mix';
 export type PipPlacement = 'top_left' | 'top_right' | 'side_left' | 'side_right';
 
 export interface GuideConfig {
@@ -194,8 +194,14 @@ export interface GuideConfig {
     size: 'small' | 'medium' | 'large';
     audio: 'music' | 'channel';
     info: boolean;
-    /** For commercials only: which commercials libraries (empty = all of them). */
+    /** For commercials and mix: which commercials libraries (empty = all of them). */
     libraries: number[];
+    /** For mix: seconds of commercials between channels. */
+    commercial_seconds: number;
+    /** The card beside a commercial window: heading (blank = AD BREAK), lines two at a time, seconds per pair. */
+    ad_title: string;
+    ad_lines: string[];
+    ad_rotate_seconds: number;
   };
 }
 

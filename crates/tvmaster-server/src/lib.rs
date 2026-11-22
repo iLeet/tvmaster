@@ -27,6 +27,7 @@ mod shownames;
 mod soak;
 mod station;
 mod stream;
+mod sysstats;
 mod templates;
 mod theme;
 pub mod tls;
@@ -390,6 +391,12 @@ impl AppState {
 
     /// Put `always_on` channels on air (call once at startup).
     pub fn start_always_on(&self) {
+        // Earlier versions made a real channel for a guide's commercials window; the window now
+        // plays them from an internal stream, so that channel is no longer needed.
+        if let Ok(true) = tvmaster_db::delete_channel(&self.db(), tvmaster_core::COMMERCIAL_CHANNEL)
+        {
+            tracing::info!("removed the old Commercial Break channel (the guide window plays commercials by itself now)");
+        }
         let Some(playout) = &self.playout else { return };
         let channels = match tvmaster_db::list_channels(&self.db()) {
             Ok(c) => c,
@@ -687,6 +694,7 @@ fn build_router(state: AppState, https: bool) -> Router {
         .route("/api/v1/ads/options", get(admin::ad_options))
         .route("/api/v1/ads/explain", post(admin::ad_explain))
         .route("/api/v1/system", get(admin::system))
+        .route("/api/v1/system/stats", get(sysstats::stats))
         .route("/stream/:channel/:file", get(stream::hls))
         .route("/iptv/playlist.m3u", get(iptv::playlist))
         .route("/iptv/guide.xml", get(iptv::guide))

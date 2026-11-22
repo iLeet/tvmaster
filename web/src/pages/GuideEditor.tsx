@@ -235,7 +235,7 @@ export function GuideEditor({
         <Field label="Show">
           <Segmented
             value={g.pip.mode}
-            options={[{ value: 'off', label: 'Nothing' }, { value: 'channel', label: 'One channel' }, { value: 'rotate', label: 'Flip through channels' }, { value: 'commercials', label: 'Commercials only' }]}
+            options={[{ value: 'off', label: 'Nothing' }, { value: 'channel', label: 'One channel' }, { value: 'rotate', label: 'Flip through channels' }, { value: 'commercials', label: 'Commercials only' }, { value: 'mix', label: 'Channels and commercials' }]}
             onChange={(mode) => pip({ mode })}
           />
         </Field>
@@ -247,9 +247,9 @@ export function GuideEditor({
             </select>
           </Field>
         )}
-        {g.pip.mode === 'commercials' && (
+        {(g.pip.mode === 'commercials' || g.pip.mode === 'mix') && (
           <div className="stack nest">
-            <p className="small dim">The window plays commercials one after another, in random order, while the guide runs: no channel is watched, so it costs little. The card beside it says “Ad break”. It uses a channel called Commercial Break that the station makes for it (you can rename or restyle it under Channels).</p>
+            <p className="small dim">{g.pip.mode === 'commercials' ? 'The window plays your commercials one after another, in random order, while the guide runs.' : 'The window takes turns: commercials, then a channel, then commercials, then the next channel.'} The commercials come from a small, light stream of their own that the guide starts while it needs it: it is not a channel, has no number and is listed nowhere.</p>
             {commercialLibs.length === 0 ? (
               <div className="err-banner">There are no commercials yet. <a href={href('libraries')}>Add a commercials library</a>, or make or download some under <a href={href('promos')}>Promos</a>.</div>
             ) : (
@@ -257,9 +257,25 @@ export function GuideEditor({
                 <Chips options={commercialLibs.map((l) => ({ value: l.id, label: `${l.path.split(/[\\/]/).filter(Boolean).pop() ?? l.path} (${l.items})` }))} value={g.pip.libraries} onToggle={(lid) => pip({ libraries: g.pip.libraries.includes(lid) ? g.pip.libraries.filter((x) => x !== lid) : [...g.pip.libraries, lid] })} />
               </Field>
             )}
+            {g.pip.mode === 'mix' && (
+              <Field label={`Commercials for ${g.pip.commercial_seconds} s at a time`}>
+                <input type="range" min={10} max={300} step={5} value={g.pip.commercial_seconds} onChange={(e) => pip({ commercial_seconds: Number(e.target.value) })} />
+              </Field>
+            )}
+            <div className="stack">
+              <strong>The card beside the window</strong>
+              <p className="small dim">Say anything you like while the commercials play: station promos, a sponsor, what is coming up. Lines turn over two at a time, so a longer list rotates. <span className="mono">{'{clock}'}</span> and <span className="mono">{'{date}'}</span> are filled in. Leave them blank for the station's own words.</p>
+              <Field label="Heading" hint="Blank = AD BREAK."><input className="input" style={{ maxWidth: 320 }} maxLength={40} placeholder="AD BREAK" value={g.pip.ad_title} onChange={(e) => pip({ ad_title: e.target.value })} /></Field>
+              <Field label="Lines" hint="One per line, up to 40.">
+                <textarea className="input" rows={5} maxLength={4800} placeholder={'Commercials, one after another\nBack to your show in a moment'} value={g.pip.ad_lines.join('\n')} onChange={(e) => pip({ ad_lines: e.target.value.split('\n').slice(0, 40) })} />
+              </Field>
+              <Field label={`Each pair of lines stays ${g.pip.ad_rotate_seconds} s`}>
+                <input type="range" min={2} max={60} value={g.pip.ad_rotate_seconds} onChange={(e) => pip({ ad_rotate_seconds: Number(e.target.value) })} />
+              </Field>
+            </div>
           </div>
         )}
-        {g.pip.mode === 'rotate' && (
+        {(g.pip.mode === 'rotate' || g.pip.mode === 'mix') && (
           <>
             <Field label={`Each channel for ${g.pip.seconds} s`}>
               <input type="range" min={10} max={300} step={5} value={g.pip.seconds} onChange={(e) => pip({ seconds: Number(e.target.value) })} />

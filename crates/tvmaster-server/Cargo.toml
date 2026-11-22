@@ -31,6 +31,7 @@ if-addrs.workspace = true
 gethostname.workspace = true
 tar.workspace = true
 flate2.workspace = true
+sysinfo = { version = "0.33", default-features = false, features = ["system", "disk"] }
 
 [dev-dependencies]
 tokio-rustls.workspace = true

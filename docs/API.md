@@ -223,3 +223,7 @@ The daemon also runs an autopilot loop (every minute) that tops up every channel
 ## Screens
 
 `GET/PUT/DELETE /api/v1/screens[/:kind]` and `POST /api/v1/screens/preview`: see [SCREENS.md](SCREENS.md).
+
+## System
+
+`GET /api/v1/system/stats`: the machine (host, processor model and threads, memory, uptime, container or not), live processor use per thread and load average, TVMaster's and FFmpeg's own use, the disks the data folder and libraries sit on, and a rough capacity guess (`capacity.more_channels`). Poll every few seconds; the first reading after a start shows 0% processor.

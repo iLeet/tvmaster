@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { href } from '../router';
 import { isLoopback, shareHosts, shareLinks, shareSchemes, type Scheme } from '../share';
@@ -6,6 +6,7 @@ import { useQuery } from '../live';
 import type { AuthStatus, MonitorSettings, MonitorState, SecurityStatus, System, TimezoneState } from '../types';
 import { Badge, Btn, Card, ConfirmBtn, CopyField, Field, Segmented, Spinner, Toggle, useToast } from '../ui';
 import { Backups } from './Backups';
+import { bytes, busyWord, capacitySentence, uptime, type SysStats } from '../sysstats';
 
 const TABS: { id: string; label: string }[] = [
   { id: 'station', label: 'Station' },
@@ -14,6 +15,90 @@ const TABS: { id: string; label: string }[] = [
   { id: 'backups', label: 'Backups' },
   { id: 'server', label: 'Server' },
 ];
+
+function Meter({ label, pct, text, tone }: { label: string; pct: number; text: string; tone?: 'ok' | 'warn' | 'bad' }) {
+  const t = tone ?? (pct < 60 ? 'ok' : pct < 85 ? 'warn' : 'bad');
+  return (
+    <div className="stack" style={{ gap: 4 }}>
+      <div className="row between"><span>{label}</span><span className="dim small">{text}</span></div>
+      <div style={{ height: 10, borderRadius: 5, background: 'var(--edge-soft)', overflow: 'hidden' }}>
+        <div style={{ width: `${Math.max(1, Math.min(100, pct))}%`, height: '100%', background: t === 'ok' ? 'var(--ok, #3fb27f)' : t === 'warn' ? 'var(--warn, #e0a030)' : 'var(--bad, #e05555)', transition: 'width .6s' }} />
+      </div>
+    </div>
+  );
+}
+
+/** The machine this server runs on and how hard it is working, refreshed every few seconds. */
+function Machine() {
+  const [st, setSt] = useState<SysStats | null>(null);
+  useEffect(() => {
+    let live = true;
+    const load = () => api.get<SysStats>('/system/stats').then((d) => live && setSt(d)).catch(() => undefined);
+    load();
+    const id = setInterval(load, 4000);
+    return () => { live = false; clearInterval(id); };
+  }, []);
+  if (!st) return <Card className="stack"><h2>This machine</h2><Spinner /></Card>;
+  const h = st.host;
+  const busy = busyWord(st.cpu.usage_pct, st.cpu.load[0], h.threads);
+  const memPct = st.memory.total ? (st.memory.used / st.memory.total) * 100 : 0;
+  return (
+    <>
+      <Card className="stack">
+        <div className="row between wrap">
+          <h2 style={{ margin: 0 }}>How it is doing</h2>
+          <Badge tone={busy.tone === 'ok' ? 'ok' : 'warn'}>{busy.word}</Badge>
+        </div>
+        <Meter label="Processor" pct={st.cpu.usage_pct} text={`${st.cpu.usage_pct.toFixed(0)}% of ${h.threads} threads`} />
+        <Meter label="Memory" pct={memPct} text={`${bytes(st.memory.used)} of ${bytes(st.memory.total)}${st.memory.limited_by_container ? ' (this container’s limit)' : ''}`} />
+        <div className="row wrap small dim">
+          <span>Load average {st.cpu.load.map((x) => x.toFixed(2)).join(' · ')} <span title="the last 1, 5 and 15 minutes; about the number of threads is full">(1, 5, 15 min)</span></span>
+          {st.memory.swap_total > 0 && <span>Swap {bytes(st.memory.swap_used)} of {bytes(st.memory.swap_total)}</span>}
+        </div>
+        <p>{capacitySentence(st.capacity, st.encoder)}</p>
+        {st.cpu.per_core.length > 1 && (
+          <details>
+            <summary className="small dim" style={{ cursor: 'pointer' }}>Each processor thread</summary>
+            <div className="stack" style={{ gap: 6, marginTop: 8 }}>
+              {st.cpu.per_core.map((p, i) => <Meter key={i} label={`Thread ${i + 1}`} pct={p} text={`${p.toFixed(0)}%`} />)}
+            </div>
+          </details>
+        )}
+      </Card>
+
+      <Card className="stack">
+        <h2>What TVMaster is using</h2>
+        <table className="table"><tbody>
+          <tr><td className="dim">The server itself</td><td>{st.tvmaster ? `${st.tvmaster.cpu_pct.toFixed(0)}% of a thread · ${bytes(st.tvmaster.memory)} · up ${uptime(st.tvmaster.uptime_s)}` : '—'}</td></tr>
+          <tr><td className="dim">Encoders (FFmpeg)</td><td>{st.ffmpeg.processes} running · {st.ffmpeg.cpu_cores.toFixed(2)} cores · {bytes(st.ffmpeg.memory)}</td></tr>
+          <tr><td className="dim">Encoding with</td><td>{st.encoder ?? 'not available'}{st.encoder === 'software' ? ' (the processor does it all)' : ''}</td></tr>
+          <tr><td className="dim">On air now</td><td>{st.on_air.length ? st.on_air.join(', ') : 'nothing: channels start when someone tunes in'}</td></tr>
+        </tbody></table>
+        {st.ffmpeg.top.length > 0 && <p className="small dim">Busiest encoders: {st.ffmpeg.top.map((f) => `${f.cpu_pct.toFixed(0)}% / ${bytes(f.memory)}`).join(' · ')}</p>}
+      </Card>
+
+      <Card className="stack">
+        <h2>The machine</h2>
+        <table className="table"><tbody>
+          <tr><td className="dim">Name</td><td>{h.name ?? '—'}{h.container && <> <Badge>running in a container</Badge></>}</td></tr>
+          <tr><td className="dim">System</td><td>{[h.os, h.os_version].filter(Boolean).join(' ')} · {h.arch}{h.kernel ? ` · kernel ${h.kernel}` : ''}</td></tr>
+          <tr><td className="dim">Processor</td><td>{h.cpu_model ?? '—'} · {h.cores ? `${h.cores} cores, ` : ''}{h.threads} threads</td></tr>
+          <tr><td className="dim">Memory</td><td>{bytes(st.memory.total)} · {bytes(st.memory.available)} free</td></tr>
+          <tr><td className="dim">Up for</td><td>{uptime(h.uptime_s)}</td></tr>
+          <tr><td className="dim">TVMaster</td><td>{st.version}</td></tr>
+        </tbody></table>
+      </Card>
+
+      <Card className="stack">
+        <h2>Disks</h2>
+        {st.disks.length === 0 ? <p className="small dim">No disk information.</p> : st.disks.map((d) => {
+          const used = d.total - d.free;
+          return <Meter key={d.mount} label={`${d.mount}${d.name ? ` (${d.name})` : ''}`} pct={d.total ? (used / d.total) * 100 : 0} text={`${bytes(d.free)} free of ${bytes(d.total)} · ${d.used_for.join(', ')}`} />;
+        })}
+      </Card>
+    </>
+  );
+}
 
 export function Settings({ tab: wanted }: { tab?: string }) {
   const tab = TABS.some((t) => t.id === wanted) ? (wanted as string) : 'station';
@@ -174,6 +259,8 @@ export function Settings({ tab: wanted }: { tab?: string }) {
           </>
         )}
       </Card>}
+
+      {tab === 'server' && <Machine />}
 
       {tab === 'server' && <Card className="stack">
         <h2>Access token</h2>

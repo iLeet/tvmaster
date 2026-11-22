@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.7.0
+
+- **The guide's commercial window: no more Commercial Break channel.** The commercials now play from a small, light stream of their own (480p, 15 frames a second) that the guide starts while it needs it. It is not a channel: no number, nothing listed in the guide, the playlist, the listing or the TV app, and nothing stored. It is much cheaper than a full channel. The old "Commercial Break" channel is removed when the server starts.
+- **New window mode: Channels and commercials.** The guide's video window takes turns: commercials, a channel, commercials, the next channel, for the number of seconds you choose for each.
+- **The card beside a commercial window says what you want.** Its heading (blank = "AD BREAK") and its lines, two at a time, turning over every few seconds: station promos, a sponsor, anything, with `{clock}` and `{date}` filled in. Leave them blank for the station's own words. (Web and Mac.)
+- **The guide lists itself,** by its own number and name, in its own guide (and the picture window skips it).
+- **Server page: the machine.** How it is doing (processor and memory meters, load average, a plain verdict, and a rough guess of how many more live channels fit, measured from what the encoders use), what TVMaster and its FFmpeg encoders use, the machine (system, processor, threads, memory, container or not, uptime) and disks (the data folder and each media library's drive, free space), refreshed every few seconds. Web admin and Mac app; `GET /api/v1/system/stats`.
+- **Classic has a real preview** on the Screens page: the screen as it airs now. Three designs that were copies of it (Right back, Welcome back, You're watching) are gone; two new ones take their places (a slide-in "Welcome back" bar and a number badge), and the Station card design is renamed to match what it is.
+
 ## 1.6.1
 
 - **Fixed:** the Samsung TV app could not read the station's theme when the server lets anyone watch without a token (it asked for the colours and was refused), so it kept its built-in themes. The colours of the themes are now readable by viewers, like the channel list.

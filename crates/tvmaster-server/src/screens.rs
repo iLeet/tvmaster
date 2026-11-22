@@ -148,7 +148,7 @@ fn presets() -> Vec<Preset> {
         // ---- stand-by
         p(
             "standby",
-            "classic",
+            "card",
             "Station card",
             "The channel number and name, with a gentle pulse.",
             design(
@@ -622,47 +622,6 @@ fn presets() -> Vec<Preset> {
         // ---- we'll be right back
         p(
             "brb",
-            "classic",
-            "Right back",
-            "Big words, and what comes after the break.",
-            design(
-                "Right back",
-                theme.clone(),
-                vec![
-                    text(
-                        "{channel}",
-                        36,
-                        90,
-                        110,
-                        json!({ "align": "left", "color": "accent_text", "anim": { "enter": "slide_down" } }),
-                    ),
-                    text(
-                        "We'll be",
-                        130,
-                        90,
-                        330,
-                        json!({ "align": "left", "anim": { "enter": "slide_up", "delay_ms": 100 } }),
-                    ),
-                    text(
-                        "right back",
-                        130,
-                        90,
-                        480,
-                        json!({ "align": "left", "anim": { "enter": "slide_up", "delay_ms": 250 } }),
-                    ),
-                    text(
-                        "After this: {show}",
-                        46,
-                        90,
-                        760,
-                        json!({ "align": "left", "bold": false, "color": "accent_text", "width": 820, "anim": { "enter": "fade", "delay_ms": 900 } }),
-                    ),
-                ],
-                300,
-            ),
-        ),
-        p(
-            "brb",
             "pulse",
             "Pulsing",
             "The words breathe gently while you wait.",
@@ -719,33 +678,33 @@ fn presets() -> Vec<Preset> {
         // ---- welcome back
         p(
             "back_to",
-            "welcome",
-            "Welcome back",
-            "The show's name, typed in.",
+            "bar",
+            "Slide-in bar",
+            "A bar slides in along the bottom: welcome back, and the show.",
             design(
-                "Welcome back",
+                "Slide-in bar",
                 theme.clone(),
                 vec![
-                    text(
-                        "{channel}",
-                        36,
-                        90,
-                        110,
-                        json!({ "align": "left", "color": "accent_text", "anim": { "enter": "slide_down" } }),
+                    shape(
+                        1000,
+                        230,
+                        0,
+                        800,
+                        json!({ "align": "left", "color": "accent", "color2": "primary", "anim": { "enter": "slide_right", "enter_ms": 700 } }),
                     ),
                     text(
-                        "Welcome back to",
-                        56,
-                        500,
-                        330,
-                        json!({ "bold": false, "color": "accent_text", "anim": { "enter": "fade" } }),
+                        "WELCOME BACK TO",
+                        30,
+                        60,
+                        740,
+                        json!({ "align": "left", "color": "on_accent", "anim": { "enter": "fade", "delay_ms": 500 } }),
                     ),
                     text(
                         "{show}",
-                        120,
-                        500,
-                        520,
-                        json!({ "lines": 2, "anim": { "enter": "type", "delay_ms": 400, "enter_ms": 1100 } }),
+                        74,
+                        60,
+                        820,
+                        json!({ "align": "left", "color": "on_accent", "width": 880, "lines": 1, "anim": { "enter": "slide_left", "delay_ms": 650 } }),
                     ),
                 ],
                 300,
@@ -782,40 +741,40 @@ fn presets() -> Vec<Preset> {
         // ---- station id
         p(
             "station_id",
-            "logo",
-            "You're watching",
-            "The channel's name, zooming in.",
+            "badge",
+            "Number badge",
+            "The channel number in a big round badge, with the name beside it.",
             design(
-                "You're watching",
+                "Number badge",
                 theme.clone(),
                 vec![
-                    text(
-                        "YOU'RE WATCHING",
-                        36,
-                        500,
-                        270,
-                        json!({ "color": "accent_text", "anim": { "enter": "fade" } }),
-                    ),
-                    text(
-                        "{channel}",
-                        140,
-                        500,
-                        480,
-                        json!({ "lines": 2, "anim": { "enter": "zoom", "delay_ms": 300, "enter_ms": 900 } }),
-                    ),
                     shape(
-                        360,
-                        12,
+                        300,
+                        530,
+                        330,
                         500,
-                        700,
-                        json!({ "anim": { "enter": "wipe", "delay_ms": 1000 } }),
+                        json!({ "circle": true, "color": "accent", "color2": "primary", "anim": { "enter": "zoom", "enter_ms": 800 } }),
                     ),
                     text(
                         "{number}",
-                        48,
+                        190,
+                        330,
                         500,
-                        780,
-                        json!({ "color": "accent_text", "anim": { "enter": "fade", "delay_ms": 1300 } }),
+                        json!({ "color": "on_accent", "anim": { "enter": "zoom", "delay_ms": 300, "enter_ms": 700 } }),
+                    ),
+                    text(
+                        "{channel}",
+                        96,
+                        530,
+                        440,
+                        json!({ "align": "left", "lines": 2, "width": 440, "anim": { "enter": "slide_left", "delay_ms": 500 } }),
+                    ),
+                    text(
+                        "YOU'RE WATCHING",
+                        30,
+                        530,
+                        600,
+                        json!({ "align": "left", "color": "accent_text", "anim": { "enter": "fade", "delay_ms": 900 } }),
                     ),
                 ],
                 300,
@@ -1081,7 +1040,9 @@ fn store(s: &AppState, kind: &str, channel: Option<&str>, entry: Option<Value>) 
 #[derive(Deserialize)]
 pub struct PreviewBody {
     kind: String,
-    design: Value,
+    /// The design to draw; `null` or absent = the classic screen (what is on air with no design).
+    #[serde(default)]
+    design: Option<Value>,
     #[serde(default)]
     t: f32,
     #[serde(default)]
@@ -1115,11 +1076,58 @@ fn sample(kind: &str, name: &str, number: u32) -> Vars {
     v
 }
 
+/// The classic screen for `kind`, as it airs with no design chosen.
+fn classic_png(
+    kind: &str,
+    name: &str,
+    number: u32,
+    theme: &tvmaster_render::Theme,
+    _modern: bool,
+    t: f32,
+    dur: f32,
+) -> Vec<u8> {
+    use tvmaster_render::Scene;
+    let name = name.to_string();
+    let show = "The Late Show".to_string();
+    let scene = match kind {
+        "standby" | "signoff" => {
+            return tvmaster_render::overlay::station_card(theme, number, &name, "").png;
+        }
+        "brb" => Scene::Brb { name, show },
+        "back_to" => Scene::BackTo { name, show },
+        "station_id" => Scene::StationId { name },
+        "later_today" => Scene::LaterToday {
+            name,
+            evening: false,
+            items: vec![
+                ("9:00 PM".into(), "The Late Show".into()),
+                ("9:30 PM".into(), "Cheers".into()),
+                ("10:00 PM".into(), "Taxi".into()),
+            ],
+        },
+        _ => Scene::UpNext {
+            name,
+            title: show,
+            time: "9:00 PM".into(),
+        },
+    };
+    let frame = tvmaster_render::render(&scene, theme, t.max(1.6), dur.max(6.0));
+    let mut rgba = Vec::with_capacity(frame.w * frame.h * 4);
+    for px in frame.px.as_chunks::<3>().0 {
+        rgba.extend_from_slice(px);
+        rgba.push(255);
+    }
+    tvmaster_render::png::rgba_png(frame.w as u32, frame.h as u32, &rgba)
+}
+
 /// `POST /api/v1/screens/preview`: one frame of a design (at second `t`) as a PNG. Nothing goes on air.
 pub async fn preview(State(s): State<AppState>, Json(b): Json<PreviewBody>) -> ApiResult<Response> {
     let k = kind_of(&b.kind)?;
-    let design = parse_design(&b.design)?;
-    let (name, number, theme) = {
+    let design = match b.design.as_ref().filter(|d| !d.is_null()) {
+        Some(d) => Some(parse_design(d)?),
+        None => None,
+    };
+    let (name, number, theme, choice_modern) = {
         let db = s.db();
         let ch = b
             .channel
@@ -1132,13 +1140,18 @@ pub async fn preview(State(s): State<AppState>, Json(b): Json<PreviewBody>) -> A
                     c.name.clone(),
                     c.number,
                     tvmaster_playout::card_theme(&choice, &c.id),
+                    choice.style == tvmaster_core::GraphicsStyle::Modern,
                 )
             }
-            None => (
-                "Retro TV".to_string(),
-                4,
-                tvmaster_playout::card_theme(&crate::theme::station(&db), "preview"),
-            ),
+            None => {
+                let choice = crate::theme::station(&db);
+                (
+                    "Retro TV".to_string(),
+                    4,
+                    tvmaster_playout::card_theme(&choice, "preview"),
+                    choice.style == tvmaster_core::GraphicsStyle::Modern,
+                )
+            }
         }
     };
     let ffmpeg = s.ffmpeg.as_ref().map(|f| f.ffmpeg.clone());
@@ -1146,6 +1159,9 @@ pub async fn preview(State(s): State<AppState>, Json(b): Json<PreviewBody>) -> A
     let dur = k.seconds as f32;
     let kind = b.kind.clone();
     let png = tokio::task::spawn_blocking(move || {
+        let Some(design) = design else {
+            return classic_png(&kind, &name, number, &theme, choice_modern, t, dur);
+        };
         let mut th = theme;
         th.modern = true;
         let images = ffmpeg
